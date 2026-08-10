@@ -14,4 +14,4 @@ Single-context layout — `CONTEXT.md` + `docs/adr/` at the repo root (created l
 
 ### Plan HTML look (issue #2 → #5)
 
-Morning Plan visual spec and prototype verdict: `prototype/plan-look/DECISIONS.md`. Throwaway code on branch `prototype/plan-look`.
+Morning Plan visual spec and prototype verdict: `prototype/plan-look/DECISIONS.md`. Throwaway code at `prototype/plan-look/` on `main`.

@@ -2,7 +2,7 @@
 
 **Status:** decided · **Winner:** `tl-accordion` (timeline rail + bottom Pack & prep accordion)
 
-Primary source for issue #5 (Jinja render). Prototype code on branch `prototype/plan-look`.
+Primary source for issue #5 (Jinja render). Prototype code at `prototype/plan-look/` on `main`.
 
 ## Verdict
 
