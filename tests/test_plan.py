@@ -1,11 +1,12 @@
-from datetime import date
+from datetime import date, time, timedelta
 
 from tomorrow.defaults import DayBounds
+from tomorrow.domain import Anchor
 from tomorrow.plan import (
     default_plan_date,
     format_plan_date,
     plan_filename,
-    render_stub_plan,
+    render_plan,
 )
 
 
@@ -21,8 +22,8 @@ def test_plan_filename_uses_iso_date() -> None:
     assert plan_filename(date(2026, 8, 11)) == "2026-08-11.html"
 
 
-def test_render_stub_plan_shows_date_and_day_bounds() -> None:
-    html = render_stub_plan(
+def test_render_plan_shows_date_and_day_bounds() -> None:
+    html = render_plan(
         plan_date=date(2026, 8, 11),
         bounds=DayBounds(wake="06:30", sleep="23:00"),
     )
@@ -33,8 +34,8 @@ def test_render_stub_plan_shows_date_and_day_bounds() -> None:
     assert "<!DOCTYPE html>" in html
 
 
-def test_render_stub_plan_uses_tl_accordion_chrome() -> None:
-    html = render_stub_plan(
+def test_render_plan_uses_tl_accordion_chrome() -> None:
+    html = render_plan(
         plan_date=date(2026, 8, 11),
         bounds=DayBounds(wake="06:30", sleep="23:00"),
     )
@@ -47,8 +48,8 @@ def test_render_stub_plan_uses_tl_accordion_chrome() -> None:
     assert "rail-wrap" in html
 
 
-def test_render_stub_plan_has_no_prototype_switcher() -> None:
-    html = render_stub_plan(
+def test_render_plan_has_no_prototype_switcher() -> None:
+    html = render_plan(
         plan_date=date(2026, 8, 11),
         bounds=DayBounds(wake="06:30", sleep="23:00"),
     )
@@ -57,3 +58,30 @@ def test_render_stub_plan_has_no_prototype_switcher() -> None:
     assert "proto-banner" not in html
     assert "v-tl-tabs" not in html
     assert "v-tl-cards" not in html
+
+
+def test_render_plan_shows_anchors_in_start_order() -> None:
+    breakfast = Anchor(name="Breakfast", start=time(8, 0), duration=timedelta(minutes=30))
+    standup = Anchor(name="Standup", start=time(7, 0), duration=timedelta(minutes=15))
+
+    html = render_plan(
+        plan_date=date(2026, 8, 11),
+        bounds=DayBounds(wake="06:30", sleep="23:00"),
+        anchors=[breakfast, standup],
+    )
+
+    assert html.index("Standup") < html.index("Breakfast")
+    assert "07:00" in html
+    assert "07:15" in html
+    assert "08:00" in html
+    assert "08:30" in html
+    assert 'class="block anchor"' in html
+
+
+def test_render_plan_with_no_anchors_has_no_anchor_blocks() -> None:
+    html = render_plan(
+        plan_date=date(2026, 8, 11),
+        bounds=DayBounds(wake="06:30", sleep="23:00"),
+    )
+
+    assert 'class="block anchor"' not in html

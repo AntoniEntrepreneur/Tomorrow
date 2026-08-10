@@ -221,7 +221,15 @@
         </div>
       </header>
       <div class="bounds-cap">↑ {{ wake }} wake</div>
-      <div class="rail-wrap"></div>
+      <div class="rail-wrap">
+        {% for anchor in anchors %}
+        <div class="block anchor">
+          <div class="time-tag">{{ anchor.start_label }}</div>
+          <div class="block-title">{{ anchor.name }}</div>
+          <div class="block-range">{{ anchor.start_label }}–{{ anchor.end_label }}</div>
+        </div>
+        {% endfor %}
+      </div>
       <div class="bounds-cap">{{ sleep }} sleep ↓</div>
       <section class="prep-section" aria-label="Pack and prep">
         <div class="prep-heading">Pack &amp; prep</div>
