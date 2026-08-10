@@ -9,9 +9,16 @@ from tomorrow.domain import (
     AnchorOverlapBlocker,
     Draft,
     DraftUnfinishedBlocker,
+    Flex,
+    FlexDoesNotFitBlocker,
+    FlexUnplacedBlocker,
+    Gap,
+    compute_gaps,
     finalize_plan,
     minutes_between,
     parse_clock,
+    snap_flex_to_gap_start,
+    validate_flex_placement,
 )
 
 BOUNDS = DayBounds(wake="06:30", sleep="23:00")
@@ -95,3 +102,102 @@ def test_anchor_touching_boundaries_does_not_overlap_or_go_out_of_bounds() -> No
     result = finalize_plan(bounds=BOUNDS, drafts=[], anchors=[wake_up, wind_down])
 
     assert result.ok
+
+
+def test_compute_gaps_shows_free_stretches_between_bounds_and_anchors() -> None:
+    standup = Anchor(name="Standup", start=time(7, 0), duration=timedelta(minutes=15))
+    lunch = Anchor(name="Lunch", start=time(12, 0), duration=timedelta(minutes=60))
+
+    gaps = compute_gaps(bounds=BOUNDS, anchors=[standup, lunch])
+
+    assert gaps == (
+        Gap(start=time(6, 30), end=time(7, 0)),
+        Gap(start=time(7, 15), end=time(12, 0)),
+        Gap(start=time(13, 0), end=time(23, 0)),
+    )
+
+
+def test_finalize_plan_blocks_on_unplaced_flex() -> None:
+    sauna = Flex(name="Sauna", duration=timedelta(minutes=30))
+
+    result = finalize_plan(bounds=BOUNDS, drafts=[], anchors=[], flexes=[sauna])
+
+    assert not result.ok
+    assert result.blockers == (FlexUnplacedBlocker(flex=sauna),)
+
+
+def test_finalize_plan_happy_path_with_placed_flex_in_gap() -> None:
+    standup = Anchor(name="Standup", start=time(7, 0), duration=timedelta(minutes=15))
+    sauna = Flex(
+        name="Sauna",
+        duration=timedelta(minutes=30),
+        start=time(7, 15),
+    )
+
+    result = finalize_plan(bounds=BOUNDS, drafts=[], anchors=[standup], flexes=[sauna])
+
+    assert result.ok
+    assert result.plan is not None
+    assert result.plan.anchors == (standup,)
+    assert result.plan.flexes == (sauna,)
+
+
+def test_finalize_plan_blocks_when_flex_overruns_gap_end() -> None:
+    standup = Anchor(name="Standup", start=time(7, 0), duration=timedelta(minutes=15))
+    lunch = Anchor(name="Lunch", start=time(12, 0), duration=timedelta(minutes=60))
+    too_long = Flex(
+        name="Deep work",
+        duration=timedelta(minutes=300),
+        start=time(7, 15),
+    )
+
+    result = finalize_plan(
+        bounds=BOUNDS,
+        drafts=[],
+        anchors=[standup, lunch],
+        flexes=[too_long],
+    )
+
+    assert not result.ok
+    assert result.blockers == (FlexDoesNotFitBlocker(flex=too_long),)
+
+
+def test_snap_to_gap_start_produces_a_valid_placement() -> None:
+    standup = Anchor(name="Standup", start=time(7, 0), duration=timedelta(minutes=15))
+    gaps = compute_gaps(bounds=BOUNDS, anchors=[standup])
+    sauna = Flex(name="Sauna", duration=timedelta(minutes=30))
+
+    placed = snap_flex_to_gap_start(sauna, gaps[1])
+    assert placed.start == time(7, 15)
+    assert validate_flex_placement(
+        placed, gaps=gaps, anchors=[standup], other_flexes=[]
+    )
+
+
+def test_shrink_then_placed_flex_fits() -> None:
+    standup = Anchor(name="Standup", start=time(7, 0), duration=timedelta(minutes=15))
+    lunch = Anchor(name="Lunch", start=time(12, 0), duration=timedelta(minutes=60))
+    shrunk = Flex(
+        name="Deep work",
+        duration=timedelta(minutes=60),
+        start=time(7, 15),
+    )
+
+    result = finalize_plan(
+        bounds=BOUNDS,
+        drafts=[],
+        anchors=[standup, lunch],
+        flexes=[shrunk],
+    )
+
+    assert result.ok
+
+
+def test_finalize_plan_with_no_flexes_is_trivially_finished() -> None:
+    standup = Anchor(name="Standup", start=time(7, 0), duration=timedelta(minutes=15))
+
+    result = finalize_plan(bounds=BOUNDS, drafts=[], anchors=[standup], flexes=[])
+
+    assert result.ok
+    assert result.plan is not None
+    assert result.plan.flexes == ()

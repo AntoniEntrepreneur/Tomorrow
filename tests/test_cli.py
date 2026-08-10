@@ -60,6 +60,7 @@ def test_wizard_promotes_draft_to_anchor_using_end_time(
             "",  # sleep default
             "Standup",  # capture a Draft
             "",  # finish capturing Drafts
+            "",  # Anchor (default)
             "07:00",  # Standup start
             "07:15",  # Standup end
         ]
@@ -88,6 +89,7 @@ def test_wizard_uses_library_default_duration_when_present(
             "",  # sleep default
             "Gym",  # capture a Draft
             "",  # finish capturing Drafts
+            "",  # Anchor (default)
             "07:00",  # Gym start
             "",  # Gym end blank -> duration
             "",  # duration blank -> fall through to library default
@@ -103,6 +105,98 @@ def test_wizard_uses_library_default_duration_when_present(
     assert "08:00" in content
 
 
+def test_wizard_places_flex_with_snap_and_writes_timeline(
+    tmp_path: Path, monkeypatch
+) -> None:
+    _write_defaults(tmp_path)
+
+    inputs = iter(
+        [
+            "",  # wake default
+            "",  # sleep default
+            "Sauna",  # capture a Draft
+            "",  # finish capturing Drafts
+            "f",  # promote to Flex
+            "30",  # duration
+            "p",  # place
+            "y",  # snap to gap start
+            "1",  # first gap (wake to sleep)
+        ]
+    )
+    monkeypatch.setattr("builtins.input", lambda _prompt: next(inputs))
+
+    path = run_wizard(repo_root=tmp_path, today=date(2026, 8, 10))
+    content = path.read_text(encoding="utf-8")
+
+    assert "Sauna" in content
+    assert 'class="block flex"' in content
+    assert "06:30" in content
+    assert "07:00" in content
+
+
+def test_wizard_shrinks_flex_then_places_it(
+    tmp_path: Path, monkeypatch
+) -> None:
+    _write_defaults(tmp_path)
+
+    inputs = iter(
+        [
+            "",  # wake default
+            "",  # sleep default
+            "Standup",  # capture a Draft
+            "Lunch",  # capture a Draft
+            "Deep work",  # capture a Draft
+            "",  # finish capturing Drafts
+            "",  # Standup -> Anchor
+            "07:00",
+            "07:15",
+            "",  # Lunch -> Anchor
+            "12:00",
+            "13:00",
+            "f",  # Deep work -> Flex
+            "300",  # too long for 07:15–12:00 gap
+            "s",  # shrink
+            "60",
+            "p",  # place
+            "y",  # snap
+            "2",  # gap after standup
+        ]
+    )
+    monkeypatch.setattr("builtins.input", lambda _prompt: next(inputs))
+
+    path = run_wizard(repo_root=tmp_path, today=date(2026, 8, 10))
+    content = path.read_text(encoding="utf-8")
+
+    assert "Deep work" in content
+    assert "07:15" in content
+    assert "08:15" in content
+
+
+def test_wizard_drops_flex_and_finishes_without_timeline_footprint(
+    tmp_path: Path, monkeypatch
+) -> None:
+    _write_defaults(tmp_path)
+
+    inputs = iter(
+        [
+            "",  # wake default
+            "",  # sleep default
+            "Maybe sauna",  # capture a Draft
+            "",  # finish capturing Drafts
+            "f",  # promote to Flex
+            "30",  # duration
+            "d",  # drop
+        ]
+    )
+    monkeypatch.setattr("builtins.input", lambda _prompt: next(inputs))
+
+    path = run_wizard(repo_root=tmp_path, today=date(2026, 8, 10))
+    content = path.read_text(encoding="utf-8")
+
+    assert "Maybe sauna" not in content
+    assert 'class="block flex"' not in content
+
+
 def test_wizard_raises_and_writes_nothing_when_finalize_is_blocked(
     tmp_path: Path, monkeypatch
 ) -> None:
@@ -116,6 +210,7 @@ def test_wizard_raises_and_writes_nothing_when_finalize_is_blocked(
             "",  # sleep default
             "Early flight",  # capture a Draft
             "",  # finish capturing Drafts
+            "",  # Anchor (default)
             "05:00",  # starts before wake -> out of bounds
             "05:30",  # end
         ]

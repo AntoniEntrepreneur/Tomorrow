@@ -1,7 +1,7 @@
 from datetime import date, time, timedelta
 
 from tomorrow.defaults import DayBounds
-from tomorrow.domain import Anchor
+from tomorrow.domain import Anchor, Flex
 from tomorrow.plan import (
     default_plan_date,
     format_plan_date,
@@ -78,10 +78,31 @@ def test_render_plan_shows_anchors_in_start_order() -> None:
     assert 'class="block anchor"' in html
 
 
-def test_render_plan_with_no_anchors_has_no_anchor_blocks() -> None:
+def test_render_plan_with_no_anchors_has_wake_to_sleep_gap() -> None:
     html = render_plan(
         plan_date=date(2026, 8, 11),
         bounds=DayBounds(wake="06:30", sleep="23:00"),
     )
 
     assert 'class="block anchor"' not in html
+    assert 'class="block flex"' not in html
+    assert "Gap · 16h 30m" in html
+
+
+def test_render_plan_shows_flex_gaps_and_complete_timeline() -> None:
+    standup = Anchor(name="Standup", start=time(7, 0), duration=timedelta(minutes=15))
+    sauna = Flex(name="Sauna", duration=timedelta(minutes=30), start=time(7, 15))
+
+    html = render_plan(
+        plan_date=date(2026, 8, 11),
+        bounds=DayBounds(wake="06:30", sleep="23:00"),
+        anchors=[standup],
+        flexes=[sauna],
+    )
+
+    assert html.index("Standup") < html.index("Sauna")
+    assert 'class="block anchor"' in html
+    assert 'class="block flex"' in html
+    assert "Gap · 30m" in html
+    assert "07:15" in html
+    assert "07:45" in html

@@ -222,12 +222,16 @@
       </header>
       <div class="bounds-cap">↑ {{ wake }} wake</div>
       <div class="rail-wrap">
-        {% for anchor in anchors %}
-        <div class="block anchor">
-          <div class="time-tag">{{ anchor.start_label }}</div>
-          <div class="block-title">{{ anchor.name }}</div>
-          <div class="block-range">{{ anchor.start_label }}–{{ anchor.end_label }}</div>
+        {% for entry in timeline %}
+        {% if entry.kind == "gap" %}
+        <div class="block gap-filler" style="min-height:{{ entry.min_height_px }}px">{{ entry.label }}</div>
+        {% else %}
+        <div class="block {{ entry.kind }}" style="min-height:{{ entry.min_height_px }}px">
+          <div class="time-tag">{{ entry.start_label }}</div>
+          <div class="block-title">{{ entry.name }}</div>
+          <div class="block-range">{{ entry.start_label }}–{{ entry.end_label }}</div>
         </div>
+        {% endif %}
         {% endfor %}
       </div>
       <div class="bounds-cap">{{ sleep }} sleep ↓</div>
