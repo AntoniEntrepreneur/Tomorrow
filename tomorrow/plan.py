@@ -1,9 +1,11 @@
 from datetime import date, time, timedelta
 from pathlib import Path
-from typing import Sequence
+import re
+from typing import Mapping, Sequence
 
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 
+from tomorrow.checklists import Checklist, load_checklist_library
 from tomorrow.defaults import DayBounds
 from tomorrow.domain import Anchor, FinalizedPlan, Flex, minutes_since_midnight, parse_clock
 
@@ -37,6 +39,45 @@ def _format_duration(minutes: int) -> str:
         remainder = minutes % 60
         return f"{hours}h {remainder}m"
     return f"{minutes}m"
+
+
+def _item_slug(name: str, index: int) -> str:
+    slug = re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-") or "item"
+    return f"{slug}-{index}"
+
+
+def _prep_bundles(
+    *,
+    anchors: Sequence[Anchor],
+    flexes: Sequence[Flex],
+    checklists: Mapping[str, Checklist],
+) -> list[dict[str, object]]:
+    attached: list[tuple[Anchor | Flex, time]] = []
+    for anchor in anchors:
+        if anchor.checklist:
+            attached.append((anchor, anchor.start))
+    for flex in flexes:
+        if flex.checklist and flex.start is not None:
+            attached.append((flex, flex.start))
+    attached.sort(key=lambda entry: minutes_since_midnight(entry[1]))
+
+    bundles: list[dict[str, object]] = []
+    for index, (item, _) in enumerate(attached):
+        checklist_id = item.checklist
+        assert checklist_id is not None
+        checklist = checklists.get(checklist_id)
+        if checklist is None:
+            continue
+        bundles.append(
+            {
+                "item_id": _item_slug(item.name, index),
+                "item_name": item.name,
+                "checklist_id": checklist_id,
+                "checklist_name": checklist.name,
+                "rows": [{"label": label} for label in checklist.items],
+            }
+        )
+    return bundles
 
 
 def _timeline_views(
@@ -100,7 +141,9 @@ def render_plan(
     bounds: DayBounds,
     anchors: Sequence[Anchor] = (),
     flexes: Sequence[Flex] = (),
+    checklists: Mapping[str, Checklist] | None = None,
 ) -> str:
+    library = dict(checklists or ())
     env = Environment(
         loader=FileSystemLoader(_TEMPLATES_DIR),
         autoescape=select_autoescape(["html"]),
@@ -108,9 +151,11 @@ def render_plan(
     template = env.get_template("plan.html.j2")
     return template.render(
         plan_date_label=format_plan_date(plan_date),
+        plan_date_key=plan_date.isoformat(),
         wake=bounds.wake,
         sleep=bounds.sleep,
         timeline=_timeline_views(bounds=bounds, anchors=anchors, flexes=flexes),
+        prep_bundles=_prep_bundles(anchors=anchors, flexes=flexes, checklists=library),
     )
 
 
@@ -121,12 +166,20 @@ def write_plan(
     bounds: DayBounds,
     anchors: Sequence[Anchor] = (),
     flexes: Sequence[Flex] = (),
+    checklists: Mapping[str, Checklist] | None = None,
 ) -> Path:
     plans_dir = repo_root / "plans"
     plans_dir.mkdir(parents=True, exist_ok=True)
     path = plans_dir / plan_filename(plan_date)
+    library = dict(checklists or load_checklist_library(repo_root / "data"))
     path.write_text(
-        render_plan(plan_date=plan_date, bounds=bounds, anchors=anchors, flexes=flexes),
+        render_plan(
+            plan_date=plan_date,
+            bounds=bounds,
+            anchors=anchors,
+            flexes=flexes,
+            checklists=library,
+        ),
         encoding="utf-8",
     )
     return path

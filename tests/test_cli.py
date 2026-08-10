@@ -35,6 +35,24 @@ checklist = "sauna-kit"
     )
 
 
+def _write_sauna_checklist(tmp_path: Path) -> None:
+    checklists_dir = tmp_path / "data" / "checklists"
+    checklists_dir.mkdir(parents=True)
+    (checklists_dir / "sauna-kit.toml").write_text(
+        'name = "Sauna kit"\nitems = ["Towel", "Flip-flops"]\n',
+        encoding="utf-8",
+    )
+
+
+def _write_gym_checklist(tmp_path: Path) -> None:
+    checklists_dir = tmp_path / "data" / "checklists"
+    checklists_dir.mkdir(parents=True)
+    (checklists_dir / "gym-bag.toml").write_text(
+        'name = "Gym bag"\nitems = ["Towel", "Lock"]\n',
+        encoding="utf-8",
+    )
+
+
 def test_wizard_accepts_defaults_and_writes_plan_with_no_drafts(
     tmp_path: Path, monkeypatch
 ) -> None:
@@ -293,3 +311,87 @@ def test_wizard_accepts_weekday_template_and_seeds_unplaced_flex(
     assert "Sauna" in content
     assert "07:15" in content
     assert "07:45" in content
+
+
+def test_wizard_suggests_and_attaches_checklist_when_name_resembles_library(
+    tmp_path: Path, monkeypatch
+) -> None:
+    _write_defaults(tmp_path)
+    _write_gym_checklist(tmp_path)
+
+    inputs = iter(
+        [
+            "",  # wake default
+            "",  # sleep default
+            "Gym",  # capture a Draft
+            "",  # finish capturing Drafts
+            "",  # Anchor (default)
+            "18:00",  # Gym start
+            "19:00",  # Gym end
+            "",  # accept suggested Checklist attach (default yes)
+        ]
+    )
+    monkeypatch.setattr("builtins.input", lambda _prompt: next(inputs))
+
+    path = run_wizard(repo_root=tmp_path, today=date(2026, 8, 10))
+    content = path.read_text(encoding="utf-8")
+
+    assert "Gym" in content
+    assert 'checklistId: "gym-bag"' in content
+    assert '"Gym bag"' in content
+    assert '"Towel"' in content
+
+
+def test_wizard_leaves_checklist_unattached_when_suggestion_is_declined(
+    tmp_path: Path, monkeypatch
+) -> None:
+    _write_defaults(tmp_path)
+    _write_gym_checklist(tmp_path)
+
+    inputs = iter(
+        [
+            "",  # wake default
+            "",  # sleep default
+            "Gym",  # capture a Draft
+            "",  # finish capturing Drafts
+            "",  # Anchor (default)
+            "18:00",  # Gym start
+            "19:00",  # Gym end
+            "n",  # decline suggested Checklist attach
+        ]
+    )
+    monkeypatch.setattr("builtins.input", lambda _prompt: next(inputs))
+
+    path = run_wizard(repo_root=tmp_path, today=date(2026, 8, 10))
+    content = path.read_text(encoding="utf-8")
+
+    assert "Gym" in content
+    assert 'checklistId: "gym-bag"' not in content
+
+
+def test_wizard_keeps_template_attached_checklist_without_reprompt(
+    tmp_path: Path, monkeypatch
+) -> None:
+    _write_defaults(tmp_path)
+    _write_tuesday_template(tmp_path)
+    _write_sauna_checklist(tmp_path)
+
+    inputs = iter(
+        [
+            "",  # wake default
+            "",  # sleep default
+            "",  # accept Tuesday template (default yes)
+            "",  # finish draft capture with no Drafts
+            "p",  # place seeded Sauna flex
+            "y",  # snap to gap start
+            "2",  # gap after standup
+        ]
+    )
+    monkeypatch.setattr("builtins.input", lambda _prompt: next(inputs))
+
+    path = run_wizard(repo_root=tmp_path, today=date(2026, 8, 10))
+    content = path.read_text(encoding="utf-8")
+
+    assert 'checklistId: "sauna-kit"' in content
+    assert '"Sauna kit"' in content
+    assert '"Flip-flops"' in content

@@ -237,18 +237,125 @@
       <div class="bounds-cap">{{ sleep }} sleep ↓</div>
       <section class="prep-section" aria-label="Pack and prep">
         <div class="prep-heading">Pack &amp; prep</div>
+        <div id="prep-active"></div>
+        <div id="prep-done"></div>
       </section>
     </div>
   </div>
   <script>
-    document.querySelectorAll(".v-tl-accordion .prep-bundle").forEach(el => {
-      el.addEventListener("toggle", () => {
-        if (!el.open) return;
-        document.querySelectorAll(".v-tl-accordion .prep-bundle").forEach(other => {
-          if (other !== el) other.open = false;
+    const PLAN = {
+      dateKey: {{ plan_date_key|tojson }},
+      bundles: [
+        {% for bundle in prep_bundles %}
+        {
+          itemId: {{ bundle.item_id|tojson }},
+          itemName: {{ bundle.item_name|tojson }},
+          checklistId: {{ bundle.checklist_id|tojson }},
+          checklistName: {{ bundle.checklist_name|tojson }},
+          rows: [
+            {% for row in bundle.rows %}
+            {{ row.label|tojson }}{% if not loop.last %},{% endif %}
+            {% endfor %}
+          ]
+        }{% if not loop.last %},{% endif %}
+        {% endfor %}
+      ]
+    };
+
+    const STORAGE_PREFIX = "tomorrow-plan-" + PLAN.dateKey + "-";
+
+    function storageKey(itemId, checklistId, rowIndex) {
+      return STORAGE_PREFIX + itemId + "-" + checklistId + "-" + rowIndex;
+    }
+
+    function isChecked(itemId, checklistId, rowIndex) {
+      return localStorage.getItem(storageKey(itemId, checklistId, rowIndex)) === "1";
+    }
+
+    function setChecked(itemId, checklistId, rowIndex, checked) {
+      const key = storageKey(itemId, checklistId, rowIndex);
+      if (checked) localStorage.setItem(key, "1");
+      else localStorage.removeItem(key);
+    }
+
+    function bundleProgress(bundle) {
+      let done = 0;
+      bundle.rows.forEach((_, index) => {
+        if (isChecked(bundle.itemId, bundle.checklistId, index)) done++;
+      });
+      return { done, total: bundle.rows.length, complete: done === bundle.rows.length };
+    }
+
+    function bundleLabel(bundle) {
+      return `${bundle.itemName}<span class="bundle-sub">· ${bundle.checklistName}</span>`;
+    }
+
+    function checklistRowsHtml(bundle, prefix) {
+      const rows = bundle.rows.map((label, index) => {
+        const inputId = prefix + bundle.itemId + "-" + index;
+        const checked = isChecked(bundle.itemId, bundle.checklistId, index) ? " checked" : "";
+        return `<li><input type="checkbox" id="${inputId}" data-item="${bundle.itemId}" data-cl="${bundle.checklistId}" data-idx="${index}"${checked}><label for="${inputId}">${label}</label></li>`;
+      }).join("");
+      return `<ul class="checklist" data-bundle="${bundle.itemId}">${rows}</ul>`;
+    }
+
+    function splitActiveDone(bundles) {
+      const active = [];
+      const done = [];
+      bundles.forEach(bundle => {
+        if (bundleProgress(bundle).complete) done.push(bundle);
+        else active.push(bundle);
+      });
+      return { active, done };
+    }
+
+    function renderPrep() {
+      const activeRoot = document.getElementById("prep-active");
+      const doneRoot = document.getElementById("prep-done");
+      const { active, done } = splitActiveDone(PLAN.bundles);
+
+      activeRoot.innerHTML = active.map(bundle => {
+        const progress = bundleProgress(bundle);
+        return `
+          <details class="prep-bundle" data-bundle="${bundle.itemId}">
+            <summary>
+              <span>${bundleLabel(bundle)}</span>
+              <span class="bundle-count">${progress.done}/${progress.total}</span>
+            </summary>
+            ${checklistRowsHtml(bundle, "acc-")}
+          </details>`;
+      }).join("");
+
+      doneRoot.innerHTML = done.length ? `
+        <details class="prep-done">
+          <summary>Done · ${done.length}</summary>
+          <div class="done-list">
+            ${done.map(bundle => `
+              <details class="prep-bundle" open>
+                <summary><span>${bundleLabel(bundle)}</span><span class="bundle-count">✓</span></summary>
+                ${checklistRowsHtml(bundle, "acc-done-")}
+              </details>`).join("")}
+          </div>
+        </details>` : "";
+
+      document.querySelectorAll(".v-tl-accordion .prep-bundle").forEach(el => {
+        el.addEventListener("toggle", () => {
+          if (!el.open) return;
+          document.querySelectorAll(".v-tl-accordion .prep-bundle").forEach(other => {
+            if (other !== el) other.open = false;
+          });
         });
       });
-    });
+
+      document.querySelectorAll('.checklist input[type="checkbox"]').forEach(cb => {
+        cb.addEventListener("change", () => {
+          setChecked(cb.dataset.item, cb.dataset.cl, Number(cb.dataset.idx), cb.checked);
+          renderPrep();
+        });
+      });
+    }
+
+    renderPrep();
   </script>
 </body>
 </html>

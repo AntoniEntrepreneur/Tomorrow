@@ -1,5 +1,6 @@
 from datetime import date, time, timedelta
 
+from tomorrow.checklists import Checklist
 from tomorrow.defaults import DayBounds
 from tomorrow.domain import Anchor, Flex
 from tomorrow.plan import (
@@ -106,3 +107,84 @@ def test_render_plan_shows_flex_gaps_and_complete_timeline() -> None:
     assert "Gap · 30m" in html
     assert "07:15" in html
     assert "07:45" in html
+
+
+def test_render_plan_shows_prep_accordion_for_attached_checklists() -> None:
+    gym = Anchor(
+        name="Gym",
+        start=time(18, 0),
+        duration=timedelta(minutes=90),
+        checklist="gym-bag",
+    )
+    checklists = {
+        "gym-bag": Checklist(
+            name="Gym bag",
+            items=("Water bottle", "Towel", "Lock"),
+        )
+    }
+
+    html = render_plan(
+        plan_date=date(2026, 8, 11),
+        bounds=DayBounds(wake="06:30", sleep="23:00"),
+        anchors=[gym],
+        checklists=checklists,
+    )
+
+    assert 'id="prep-active"' in html
+    assert 'itemId: "gym-0"' in html
+    assert 'checklistId: "gym-bag"' in html
+    assert '"Water bottle"' in html
+    assert '"Gym bag"' in html
+    assert "localStorage" in html
+    assert 'dateKey: "2026-08-11"' in html
+
+
+def test_render_plan_orders_prep_bundles_by_parent_start_time() -> None:
+    gym = Anchor(
+        name="Gym",
+        start=time(18, 0),
+        duration=timedelta(minutes=90),
+        checklist="gym-bag",
+    )
+    morning = Anchor(
+        name="Wake",
+        start=time(6, 30),
+        duration=timedelta(minutes=45),
+        checklist="morning-out",
+    )
+    checklists = {
+        "gym-bag": Checklist(name="Gym bag", items=("Towel",)),
+        "morning-out": Checklist(name="Before leaving", items=("Keys",)),
+    }
+
+    html = render_plan(
+        plan_date=date(2026, 8, 11),
+        bounds=DayBounds(wake="06:30", sleep="23:00"),
+        anchors=[gym, morning],
+        checklists=checklists,
+    )
+
+    assert html.index('"Wake"') < html.index('"Gym"')
+
+
+def test_render_plan_timeline_stays_schedule_only_without_inline_checklists() -> None:
+    gym = Anchor(
+        name="Gym",
+        start=time(18, 0),
+        duration=timedelta(minutes=90),
+        checklist="gym-bag",
+    )
+    checklists = {"gym-bag": Checklist(name="Gym bag", items=("Towel",))}
+
+    html = render_plan(
+        plan_date=date(2026, 8, 11),
+        bounds=DayBounds(wake="06:30", sleep="23:00"),
+        anchors=[gym],
+        checklists=checklists,
+    )
+
+    rail_start = html.index('class="rail-wrap"')
+    prep_start = html.index('class="prep-section"')
+    rail_html = html[rail_start:prep_start]
+    assert '"Towel"' not in rail_html
+    assert 'type="checkbox"' not in rail_html

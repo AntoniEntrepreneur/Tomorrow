@@ -1,6 +1,7 @@
 from datetime import date, timedelta
 from pathlib import Path
 
+from tomorrow.checklists import Checklist, load_checklist_library, suggest_checklist
 from tomorrow.defaults import DayBounds, load_anchor_default_minutes, load_defaults
 from tomorrow.domain import (
     Anchor,
@@ -100,16 +101,62 @@ def _promote_draft_to_flex(
     return Flex(name=draft.name, duration=timedelta(minutes=duration_minutes))
 
 
+def _attach_checklist(item: Anchor | Flex, checklist_id: str) -> Anchor | Flex:
+    if isinstance(item, Anchor):
+        return Anchor(
+            name=item.name,
+            start=item.start,
+            duration=item.duration,
+            checklist=checklist_id,
+        )
+    return Flex(
+        name=item.name,
+        duration=item.duration,
+        start=item.start,
+        checklist=checklist_id,
+    )
+
+
+def _maybe_attach_checklist(
+    item: Anchor | Flex,
+    *,
+    library: dict[str, Checklist],
+) -> Anchor | Flex:
+    if item.checklist is not None or not library:
+        return item
+
+    suggestion = suggest_checklist(item.name, library)
+    if suggestion is None:
+        return item
+
+    checklist = library[suggestion]
+    if _prompt_yes_no(
+        f"  Attach Checklist '{checklist.name}' ({suggestion})?",
+        default_yes=True,
+    ):
+        return _attach_checklist(item, suggestion)
+    return item
+
+
 def _promote_draft(
-    draft: Draft, *, default_minutes_by_name: dict[str, int]
+    draft: Draft,
+    *,
+    default_minutes_by_name: dict[str, int],
+    library: dict[str, Checklist],
 ) -> Anchor | Flex:
     print(f"\nPromote Draft '{draft.name}'")
     while True:
         kind = input("  Anchor or Flex? [A/f]: ").strip().lower()
         if kind in {"", "a", "anchor"}:
-            return _promote_draft_to_anchor(draft, default_minutes_by_name=default_minutes_by_name)
+            promoted = _promote_draft_to_anchor(
+                draft, default_minutes_by_name=default_minutes_by_name
+            )
+            return _maybe_attach_checklist(promoted, library=library)
         if kind in {"f", "flex"}:
-            return _promote_draft_to_flex(draft, default_minutes_by_name=default_minutes_by_name)
+            promoted = _promote_draft_to_flex(
+                draft, default_minutes_by_name=default_minutes_by_name
+            )
+            return _maybe_attach_checklist(promoted, library=library)
         print("  Enter A for Anchor or F for Flex.")
 
 
@@ -210,6 +257,7 @@ def run_wizard(*, repo_root: Path, today: date | None = None) -> Path:
     default_minutes_by_name = load_anchor_default_minutes(
         repo_root / "data" / "anchor_defaults.toml"
     )
+    checklist_library = load_checklist_library(repo_root / "data")
 
     plan_date = default_plan_date(today)
     print("Tomorrow — night-before planning\n")
@@ -222,7 +270,11 @@ def run_wizard(*, repo_root: Path, today: date | None = None) -> Path:
 
     drafts = _capture_drafts()
     for draft in drafts:
-        promoted = _promote_draft(draft, default_minutes_by_name=default_minutes_by_name)
+        promoted = _promote_draft(
+            draft,
+            default_minutes_by_name=default_minutes_by_name,
+            library=checklist_library,
+        )
         if isinstance(promoted, Anchor):
             anchors.append(promoted)
         else:
