@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Tuesday, 11 August 2026</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Mono:ital,wght@0,400;0,500;1,400&family=Instrument+Serif:ital@0;1&family=Outfit:wght@400;500;600&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    .plan-meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.5rem 1.25rem;
+      align-items: baseline;
+    }
+    .plan-date { font-weight: 600; }
+    .plan-bounds, .plan-weather { opacity: 0.72; font-size: 0.92em; }
+
+    .checklist { list-style: none; }
+    .checklist li {
+      display: flex;
+      align-items: flex-start;
+      gap: 0.5rem;
+      padding: 0.35rem 0;
+      font-size: 0.92em;
+    }
+    .checklist input[type="checkbox"] {
+      margin-top: 0.12rem;
+      width: 1.05rem;
+      height: 1.05rem;
+      accent-color: #3d5a45;
+      flex-shrink: 0;
+    }
+    .checklist label { cursor: pointer; }
+    .checklist input:checked + label { text-decoration: line-through; opacity: 0.5; }
+
+    .v-tl-base {
+      --bg: #f7f3ed;
+      --rail: #c4b5a0;
+      --ink: #2c2419;
+      --anchor: #3d5a45;
+      --anchor-bg: #e8f0ea;
+      --flex: #6b5344;
+      --flex-bg: #f0ebe4;
+      --prep-bg: #fff;
+      --prep-border: #ddd5c8;
+      background: var(--bg);
+      color: var(--ink);
+      font-family: "Outfit", system-ui, sans-serif;
+      min-height: 100dvh;
+    }
+    .v-tl-base .shell {
+      max-width: 32rem;
+      margin: 0 auto;
+      padding: 1.5rem 1.25rem 2.5rem;
+    }
+    @media (min-width: 768px) {
+      .v-tl-base .shell { max-width: 36rem; padding: 2rem 1.5rem 3rem; }
+    }
+    .v-tl-base .plan-header { margin-bottom: 1.75rem; font-size: 0.95rem; }
+    .v-tl-base .plan-date {
+      font-family: "Instrument Serif", Georgia, serif;
+      font-size: 1.65rem;
+      font-weight: 400;
+      width: 100%;
+    }
+    .v-tl-base .rail-wrap {
+      position: relative;
+      padding-left: 3.25rem;
+      margin-bottom: 2rem;
+    }
+    .v-tl-base .rail-wrap::before {
+      content: "";
+      position: absolute;
+      left: 1.1rem;
+      top: 0;
+      bottom: 0;
+      width: 2px;
+      background: linear-gradient(var(--rail), transparent 98%);
+    }
+    .v-tl-base .block {
+      position: relative;
+      margin-bottom: 0.35rem;
+      border-radius: 8px;
+      padding: 0.65rem 0.85rem;
+      border-left: 3px solid transparent;
+    }
+    .v-tl-base .block.anchor {
+      background: var(--anchor-bg);
+      border-left-color: var(--anchor);
+    }
+    .v-tl-base .block.flex {
+      background: var(--flex-bg);
+      border-left-color: var(--flex);
+      border-left-style: dashed;
+    }
+    .v-tl-base .block.gap-filler {
+      background: transparent;
+      border: none;
+      border-left: 1px dashed rgba(0,0,0,0.12);
+      font-size: 0.68rem;
+      padding: 0.25rem 0.85rem;
+      color: var(--rail);
+      display: flex;
+      align-items: center;
+      min-height: unset !important;
+    }
+    .v-tl-base .time-tag {
+      position: absolute;
+      left: -3.25rem;
+      width: 2.75rem;
+      text-align: right;
+      font-family: "DM Mono", monospace;
+      font-size: 0.72rem;
+      color: var(--rail);
+      top: 0.7rem;
+    }
+    .v-tl-base .block-title { font-weight: 600; font-size: 0.95rem; }
+    .v-tl-base .block-range {
+      font-family: "DM Mono", monospace;
+      font-size: 0.72rem;
+      opacity: 0.55;
+      margin-top: 0.15rem;
+    }
+    .v-tl-base .bounds-cap {
+      font-family: "DM Mono", monospace;
+      font-size: 0.72rem;
+      color: var(--rail);
+      padding: 0.5rem 0;
+      text-align: center;
+    }
+    .v-tl-base .prep-section {
+      border-top: 2px solid var(--prep-border);
+      padding-top: 1.25rem;
+    }
+    .v-tl-base .prep-heading {
+      font-size: 0.68rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      color: var(--rail);
+      margin-bottom: 0.85rem;
+    }
+    .v-tl-base .prep-done {
+      margin-top: 1rem;
+      border-top: 1px dashed var(--prep-border);
+      padding-top: 0.75rem;
+    }
+    .v-tl-base .prep-done summary {
+      font-size: 0.75rem;
+      color: var(--rail);
+      cursor: pointer;
+      list-style: none;
+      display: flex;
+      align-items: center;
+      gap: 0.35rem;
+    }
+    .v-tl-base .prep-done summary::-webkit-details-marker { display: none; }
+    .v-tl-base .prep-done summary::before { content: "▸"; font-size: 0.65rem; }
+    .v-tl-base .prep-done[open] summary::before { content: "▾"; }
+    .v-tl-base .done-list { margin-top: 0.65rem; opacity: 0.55; }
+
+    .v-tl-accordion .prep-bundle {
+      background: var(--prep-bg);
+      border: 1px solid var(--prep-border);
+      border-radius: 10px;
+      margin-bottom: 0.5rem;
+      overflow: hidden;
+    }
+    .v-tl-accordion .prep-bundle summary {
+      padding: 0.85rem 1rem;
+      cursor: pointer;
+      list-style: none;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-weight: 600;
+      font-size: 0.92rem;
+    }
+    .v-tl-accordion .prep-bundle summary::-webkit-details-marker { display: none; }
+    .v-tl-accordion .prep-bundle summary::after {
+      content: "+";
+      font-family: "DM Mono", monospace;
+      font-size: 0.85rem;
+      color: var(--rail);
+      font-weight: 400;
+    }
+    .v-tl-accordion .prep-bundle[open] summary::after { content: "−"; }
+    .v-tl-accordion .prep-bundle .checklist {
+      padding: 0 1rem 0.85rem;
+      border-top: 1px solid #f0ebe4;
+    }
+    .v-tl-accordion .bundle-sub {
+      font-weight: 400;
+      font-size: 0.78rem;
+      color: var(--rail);
+      margin-left: 0.35rem;
+    }
+    .v-tl-accordion .bundle-count {
+      font-family: "DM Mono", monospace;
+      font-size: 0.68rem;
+      font-weight: 400;
+      color: var(--rail);
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      * { transition: none !important; animation: none !important; }
+    }
+  </style>
+</head>
+<body>
+  <div class="v-tl-base v-tl-accordion">
+    <div class="shell">
+      <header class="plan-header">
+        <div class="plan-meta">
+          <div class="plan-date">Tuesday, 11 August 2026</div>
+          <div class="plan-bounds">Wake 06:30 · Sleep 23:00</div>
+        </div>
+      </header>
+      <div class="bounds-cap">↑ 06:30 wake</div>
+      <div class="rail-wrap">
+        
+        <div class="block anchor">
+          <div class="time-tag">07:00</div>
+          <div class="block-title">Gym</div>
+          <div class="block-range">07:00–08:00</div>
+        </div>
+        
+      </div>
+      <div class="bounds-cap">23:00 sleep ↓</div>
+      <section class="prep-section" aria-label="Pack and prep">
+        <div class="prep-heading">Pack &amp; prep</div>
+      </section>
+    </div>
+  </div>
+  <script>
+    document.querySelectorAll(".v-tl-accordion .prep-bundle").forEach(el => {
+      el.addEventListener("toggle", () => {
+        if (!el.open) return;
+        document.querySelectorAll(".v-tl-accordion .prep-bundle").forEach(other => {
+          if (other !== el) other.open = false;
+        });
+      });
+    });
+  </script>
+</body>
+</html>
