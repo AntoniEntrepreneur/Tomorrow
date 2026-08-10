@@ -1,0 +1,638 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>PROTOTYPE — Plan look</title>
+  <!--
+    PROTOTYPE — throwaway UI for issue #2.
+    Question: what should the morning Plan HTML look like?
+    Variants: timeline | agenda | checklist — switch via ?variant= or bottom bar.
+  -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Mono:ital,wght@0,400;0,500;1,400&family=Instrument+Serif:ital@0;1&family=Outfit:wght@400;500;600&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --proto-bar-bg: #1a1a1f;
+      --proto-bar-fg: #f4f4f6;
+      --proto-bar-muted: #8b8b96;
+    }
+
+    body {
+      min-height: 100dvh;
+      padding-bottom: 5rem;
+    }
+
+    /* ── Prototype banner ── */
+    .proto-banner {
+      position: sticky;
+      top: 0;
+      z-index: 100;
+      background: #fef3c7;
+      color: #92400e;
+      font: 600 0.7rem/1 "Outfit", system-ui, sans-serif;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      text-align: center;
+      padding: 0.45rem 1rem;
+      border-bottom: 1px solid #fcd34d;
+    }
+
+    /* ── Shared plan tokens ── */
+    .plan-meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.5rem 1.25rem;
+      align-items: baseline;
+    }
+    .plan-date { font-weight: 600; }
+    .plan-bounds, .plan-weather { opacity: 0.72; font-size: 0.92em; }
+    .badge-anchor, .badge-flex {
+      display: inline-block;
+      font-size: 0.62rem;
+      font-weight: 600;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      padding: 0.15rem 0.45rem;
+      border-radius: 3px;
+    }
+    .badge-anchor { background: rgba(0,0,0,0.08); }
+    .badge-flex { background: rgba(0,0,0,0.04); border: 1px dashed rgba(0,0,0,0.18); }
+
+    .checklist {
+      list-style: none;
+      margin-top: 0.6rem;
+    }
+    .checklist li {
+      display: flex;
+      align-items: flex-start;
+      gap: 0.5rem;
+      padding: 0.25rem 0;
+      font-size: 0.88em;
+    }
+    .checklist input[type="checkbox"] {
+      margin-top: 0.15rem;
+      width: 1rem;
+      height: 1rem;
+      accent-color: currentColor;
+      flex-shrink: 0;
+    }
+    .checklist label { cursor: pointer; }
+    .checklist input:checked + label { text-decoration: line-through; opacity: 0.55; }
+
+    /* ═══════════════════════════════════════
+       VARIANT A — timeline-first day strip
+       ═══════════════════════════════════════ */
+    .v-timeline {
+      --bg: #f7f3ed;
+      --rail: #c4b5a0;
+      --ink: #2c2419;
+      --anchor: #3d5a45;
+      --anchor-bg: #e8f0ea;
+      --flex: #6b5344;
+      --flex-bg: #f0ebe4;
+      background: var(--bg);
+      color: var(--ink);
+      font-family: "Outfit", system-ui, sans-serif;
+      min-height: calc(100dvh - 2rem);
+    }
+    .v-timeline .shell { max-width: 28rem; margin: 0 auto; padding: 1.5rem 1.25rem 2rem; }
+    .v-timeline .plan-meta { margin-bottom: 1.75rem; font-size: 0.95rem; }
+    .v-timeline .plan-date { font-family: "Instrument Serif", Georgia, serif; font-size: 1.65rem; font-weight: 400; width: 100%; }
+    .v-timeline .rail-wrap {
+      position: relative;
+      padding-left: 3.25rem;
+    }
+    .v-timeline .rail-wrap::before {
+      content: "";
+      position: absolute;
+      left: 1.1rem;
+      top: 0;
+      bottom: 0;
+      width: 2px;
+      background: linear-gradient(var(--rail), transparent 98%);
+    }
+    .v-timeline .block {
+      position: relative;
+      margin-bottom: 0.35rem;
+      border-radius: 8px;
+      padding: 0.65rem 0.85rem;
+      border-left: 3px solid transparent;
+    }
+    .v-timeline .block.anchor { background: var(--anchor-bg); border-left-color: var(--anchor); }
+    .v-timeline .block.flex { background: var(--flex-bg); border-left-color: var(--flex); border-style: dashed; }
+    .v-timeline .block.gap-filler {
+      background: transparent;
+      border: 1px dashed rgba(0,0,0,0.06);
+      opacity: 0.5;
+      font-size: 0.75rem;
+      padding: 0.35rem 0.85rem;
+      color: var(--rail);
+    }
+    .v-timeline .time-tag {
+      position: absolute;
+      left: -3.25rem;
+      width: 2.75rem;
+      text-align: right;
+      font-family: "DM Mono", monospace;
+      font-size: 0.72rem;
+      color: var(--rail);
+      top: 0.7rem;
+    }
+    .v-timeline .block-title { font-weight: 600; font-size: 0.95rem; }
+    .v-timeline .block-range {
+      font-family: "DM Mono", monospace;
+      font-size: 0.72rem;
+      opacity: 0.55;
+      margin-top: 0.15rem;
+    }
+    .v-timeline .checklist { color: var(--anchor); }
+    .v-timeline .bounds-cap {
+      font-family: "DM Mono", monospace;
+      font-size: 0.72rem;
+      color: var(--rail);
+      padding: 0.5rem 0;
+      text-align: center;
+    }
+
+    /* ═══════════════════════════════════════
+       VARIANT B — dense agenda sheet
+       ═══════════════════════════════════════ */
+    .v-agenda {
+      --bg: #fafafa;
+      --ink: #111;
+      --rule: #ddd;
+      --anchor-bar: #111;
+      --flex-bar: #888;
+      background: var(--bg);
+      color: var(--ink);
+      font-family: "DM Mono", ui-monospace, monospace;
+      min-height: calc(100dvh - 2rem);
+    }
+    .v-agenda .sheet {
+      max-width: 26rem;
+      margin: 0 auto;
+      padding: 1rem 0.85rem 2rem;
+      border-left: 1px solid var(--rule);
+      border-right: 1px solid var(--rule);
+      min-height: calc(100dvh - 2rem);
+      background: #fff;
+      box-shadow: 0 0 0 1px var(--rule);
+    }
+    .v-agenda header {
+      border-bottom: 2px solid var(--ink);
+      padding-bottom: 0.65rem;
+      margin-bottom: 0.5rem;
+    }
+    .v-agenda .plan-date {
+      font-size: 0.85rem;
+      font-weight: 500;
+      letter-spacing: -0.02em;
+    }
+    .v-agenda .plan-meta { font-size: 0.68rem; margin-top: 0.35rem; gap: 0.75rem; }
+    .v-agenda .bounds-row {
+      display: flex;
+      justify-content: space-between;
+      font-size: 0.62rem;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      padding: 0.4rem 0;
+      border-bottom: 1px solid var(--rule);
+      color: #666;
+    }
+    .v-agenda table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.72rem;
+    }
+    .v-agenda th {
+      text-align: left;
+      font-weight: 500;
+      font-size: 0.58rem;
+      text-transform: uppercase;
+      letter-spacing: 0.12em;
+      color: #666;
+      padding: 0.45rem 0.25rem;
+      border-bottom: 1px solid var(--rule);
+    }
+    .v-agenda td {
+      padding: 0.35rem 0.25rem;
+      vertical-align: top;
+      border-bottom: 1px solid #eee;
+    }
+    .v-agenda tr.anchor td:first-child { border-left: 3px solid var(--anchor-bar); padding-left: 0.4rem; }
+    .v-agenda tr.flex td:first-child { border-left: 3px solid var(--flex-bar); padding-left: 0.4rem; }
+    .v-agenda .col-time { width: 4.5rem; white-space: nowrap; color: #444; }
+    .v-agenda .col-dur { width: 2.5rem; text-align: right; color: #888; }
+    .v-agenda .col-kind { width: 3rem; font-size: 0.58rem; text-transform: uppercase; letter-spacing: 0.06em; color: #999; }
+    .v-agenda .item-name { font-weight: 500; }
+    .v-agenda .checklist {
+      margin-top: 0.35rem;
+      font-size: 0.65rem;
+      color: #555;
+    }
+    .v-agenda .checklist li { padding: 0.1rem 0; }
+    .v-agenda .checklist input[type="checkbox"] { width: 0.75rem; height: 0.75rem; }
+
+    /* ═══════════════════════════════════════
+       VARIANT C — checklist-led morning board
+       ═══════════════════════════════════════ */
+    .v-checklist {
+      --bg: #eef1f6;
+      --card: #fff;
+      --ink: #1e293b;
+      --accent: #2563eb;
+      --anchor-dot: #059669;
+      --flex-dot: #d97706;
+      background: var(--bg);
+      color: var(--ink);
+      font-family: "Outfit", system-ui, sans-serif;
+      min-height: calc(100dvh - 2rem);
+    }
+    .v-checklist .board { max-width: 30rem; margin: 0 auto; padding: 1.25rem 1rem 2rem; }
+    .v-checklist .hero {
+      background: var(--card);
+      border-radius: 16px;
+      padding: 1.25rem;
+      margin-bottom: 1rem;
+      box-shadow: 0 1px 3px rgba(15,23,42,0.06);
+    }
+    .v-checklist .plan-date { font-size: 1.35rem; font-weight: 600; }
+    .v-checklist .plan-meta { margin-top: 0.5rem; font-size: 0.88rem; color: #64748b; }
+    .v-checklist .mini-timeline {
+      display: flex;
+      align-items: center;
+      gap: 0.35rem;
+      margin-top: 1rem;
+      padding-top: 1rem;
+      border-top: 1px solid #e2e8f0;
+      overflow-x: auto;
+      -webkit-overflow-scrolling: touch;
+    }
+    .v-checklist .mini-seg {
+      flex-shrink: 0;
+      font-family: "DM Mono", monospace;
+      font-size: 0.62rem;
+      padding: 0.3rem 0.5rem;
+      border-radius: 6px;
+      background: #f1f5f9;
+      white-space: nowrap;
+    }
+    .v-checklist .mini-seg.anchor { border-left: 3px solid var(--anchor-dot); }
+    .v-checklist .mini-seg.flex { border-left: 3px solid var(--flex-dot); opacity: 0.85; }
+    .v-checklist .section-label {
+      font-size: 0.68rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      color: #64748b;
+      margin: 1.25rem 0 0.65rem;
+    }
+    .v-checklist .bundle {
+      background: var(--card);
+      border-radius: 14px;
+      padding: 1rem 1.1rem;
+      margin-bottom: 0.65rem;
+      box-shadow: 0 1px 3px rgba(15,23,42,0.05);
+    }
+    .v-checklist .bundle-head {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 0.75rem;
+      margin-bottom: 0.5rem;
+    }
+    .v-checklist .bundle-title { font-weight: 600; font-size: 1rem; }
+    .v-checklist .bundle-when {
+      font-family: "DM Mono", monospace;
+      font-size: 0.72rem;
+      color: #64748b;
+      white-space: nowrap;
+    }
+    .v-checklist .bundle.no-checklist .checklist { display: none; }
+    .v-checklist .checklist li {
+      background: #f8fafc;
+      border-radius: 8px;
+      padding: 0.55rem 0.65rem;
+      margin-bottom: 0.35rem;
+    }
+    .v-checklist .checklist input[type="checkbox"] {
+      width: 1.15rem;
+      height: 1.15rem;
+      accent-color: var(--accent);
+    }
+    .v-checklist .plain-row {
+      background: var(--card);
+      border-radius: 10px;
+      padding: 0.75rem 1rem;
+      margin-bottom: 0.45rem;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 0.92rem;
+      box-shadow: 0 1px 2px rgba(15,23,42,0.04);
+    }
+    .v-checklist .plain-row .when {
+      font-family: "DM Mono", monospace;
+      font-size: 0.72rem;
+      color: #94a3b8;
+    }
+
+    /* ── Prototype switcher ── */
+    .proto-switcher {
+      position: fixed;
+      bottom: 1rem;
+      left: 50%;
+      transform: translateX(-50%);
+      z-index: 200;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      background: var(--proto-bar-bg);
+      color: var(--proto-bar-fg);
+      border-radius: 999px;
+      padding: 0.45rem 0.65rem;
+      box-shadow: 0 8px 32px rgba(0,0,0,0.28);
+      font-family: "Outfit", system-ui, sans-serif;
+      font-size: 0.82rem;
+    }
+    .proto-switcher button {
+      background: rgba(255,255,255,0.12);
+      border: none;
+      color: inherit;
+      width: 2rem;
+      height: 2rem;
+      border-radius: 50%;
+      cursor: pointer;
+      font-size: 1rem;
+      line-height: 1;
+      display: grid;
+      place-items: center;
+    }
+    .proto-switcher button:hover { background: rgba(255,255,255,0.22); }
+    .proto-switcher button:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
+    .proto-switcher .label { min-width: 11rem; text-align: center; }
+    .proto-switcher .label strong { display: block; font-weight: 600; }
+    .proto-switcher .label span { font-size: 0.72rem; color: var(--proto-bar-muted); }
+
+    @media (prefers-reduced-motion: reduce) {
+      * { transition: none !important; animation: none !important; }
+    }
+  </style>
+</head>
+<body>
+  <div class="proto-banner">Prototype — not production · issue #2</div>
+  <main id="app"></main>
+
+  <nav class="proto-switcher" aria-label="Prototype variant switcher">
+    <button type="button" id="prev-variant" aria-label="Previous variant">←</button>
+    <div class="label" id="variant-label"></div>
+    <button type="button" id="next-variant" aria-label="Next variant">→</button>
+  </nav>
+
+  <script>
+    // ── Sample Plan (shared across variants) ──
+    const PLAN = {
+      date: "Thursday, 13 August 2026",
+      dayBounds: { wake: "06:30", sleep: "23:00" },
+      weather: "18° / 24° · partly cloudy",
+      items: [
+        { kind: "anchor", start: "06:30", end: "07:15", title: "Wake + breakfast", checklistId: "morning-out" },
+        { kind: "flex", start: "07:15", end: "08:00", title: "Deep work", durationMin: 45 },
+        { kind: "anchor", start: "09:00", end: "09:45", title: "Team standup" },
+        { kind: "flex", start: "09:45", end: "12:00", title: "Project block", durationMin: 135 },
+        { kind: "anchor", start: "12:30", end: "13:15", title: "Lunch" },
+        { kind: "flex", start: "13:30", end: "14:30", title: "Admin + email", durationMin: 60 },
+        { kind: "anchor", start: "18:00", end: "19:30", title: "Gym", checklistId: "gym-bag" },
+        { kind: "flex", start: "20:00", end: "20:30", title: "Sauna", durationMin: 30 },
+        { kind: "anchor", start: "22:30", end: "23:00", title: "Wind-down" },
+      ],
+      checklists: {
+        "morning-out": {
+          name: "Before leaving",
+          items: ["Keys", "Wallet", "Umbrella"],
+        },
+        "gym-bag": {
+          name: "Gym bag",
+          items: ["Water bottle", "Towel", "Lock", "Headphones"],
+        },
+      },
+    };
+
+    const VARIANTS = [
+      { key: "timeline", name: "Day strip", render: renderTimeline },
+      { key: "agenda", name: "Agenda sheet", render: renderAgenda },
+      { key: "checklist", name: "Morning board", render: renderChecklist },
+    ];
+
+    // ── Helpers ──
+    function parseTime(t) {
+      const [h, m] = t.split(":").map(Number);
+      return h * 60 + m;
+    }
+
+    function formatDuration(min) {
+      if (min < 60) return min + "m";
+      const h = Math.floor(min / 60);
+      const r = min % 60;
+      return r ? h + "h" + r : h + "h";
+    }
+
+    function checklistHtml(id, prefix = "") {
+      if (!id || !PLAN.checklists[id]) return "";
+      const cl = PLAN.checklists[id];
+      const rows = cl.items.map((item, i) => {
+        const cid = prefix + id + "-" + i;
+        return `<li><input type="checkbox" id="${cid}"><label for="${cid}">${item}</label></li>`;
+      }).join("");
+      return `<ul class="checklist" aria-label="${cl.name}">${rows}</ul>`;
+    }
+
+    function kindBadge(kind) {
+      return kind === "anchor"
+        ? '<span class="badge-anchor">Anchor</span>'
+        : '<span class="badge-flex">Flex</span>';
+    }
+
+    // ── Variant A: timeline-first day strip ──
+    function renderTimeline(root) {
+      const wake = parseTime(PLAN.dayBounds.wake);
+      const sleep = parseTime(PLAN.dayBounds.sleep);
+      const total = sleep - wake;
+
+      let blocks = "";
+      let cursor = wake;
+
+      for (const item of PLAN.items) {
+        const start = parseTime(item.start);
+        const end = parseTime(item.end);
+        if (start > cursor) {
+          const gapMin = start - cursor;
+          const h = Math.max(28, (gapMin / total) * 420);
+          blocks += `<div class="block gap-filler" style="min-height:${h}px">Gap · ${formatDuration(gapMin)}</div>`;
+        }
+        const dur = end - start;
+        const h = Math.max(52, (dur / total) * 420);
+        blocks += `
+          <div class="block ${item.kind}" style="min-height:${h}px">
+            <span class="time-tag">${item.start}</span>
+            <div class="block-title">${item.title}</div>
+            <div class="block-range">${item.start}–${item.end} · ${kindBadge(item.kind)}</div>
+            ${checklistHtml(item.checklistId, "tl-")}
+          </div>`;
+        cursor = end;
+      }
+
+      root.innerHTML = `
+        <div class="v-timeline">
+          <div class="shell">
+            <div class="plan-meta">
+              <div class="plan-date">${PLAN.date}</div>
+              <div class="plan-bounds">Wake ${PLAN.dayBounds.wake} · Sleep ${PLAN.dayBounds.sleep}</div>
+              <div class="plan-weather">${PLAN.weather}</div>
+            </div>
+            <div class="bounds-cap">↑ ${PLAN.dayBounds.wake} wake</div>
+            <div class="rail-wrap">${blocks}</div>
+            <div class="bounds-cap">${PLAN.dayBounds.sleep} sleep ↓</div>
+          </div>
+        </div>`;
+    }
+
+    // ── Variant B: dense agenda sheet ──
+    function renderAgenda(root) {
+      const rows = PLAN.items.map(item => {
+        const dur = item.durationMin ?? (parseTime(item.end) - parseTime(item.start));
+        return `
+          <tr class="${item.kind}">
+            <td class="col-time">${item.start}<br>${item.end}</td>
+            <td class="col-dur">${formatDuration(dur)}</td>
+            <td class="col-kind">${item.kind}</td>
+            <td>
+              <div class="item-name">${item.title}</div>
+              ${checklistHtml(item.checklistId, "ag-")}
+            </td>
+          </tr>`;
+      }).join("");
+
+      root.innerHTML = `
+        <div class="v-agenda">
+          <div class="sheet">
+            <header>
+              <div class="plan-date">${PLAN.date}</div>
+              <div class="plan-meta">
+                <span class="plan-weather">${PLAN.weather}</span>
+              </div>
+            </header>
+            <div class="bounds-row">
+              <span>Wake ${PLAN.dayBounds.wake}</span>
+              <span>Sleep ${PLAN.dayBounds.sleep}</span>
+            </div>
+            <table>
+              <thead>
+                <tr>
+                  <th>Time</th>
+                  <th>Dur</th>
+                  <th>Kind</th>
+                  <th>Item</th>
+                </tr>
+              </thead>
+              <tbody>${rows}</tbody>
+            </table>
+          </div>
+        </div>`;
+    }
+
+    // ── Variant C: checklist-led morning board ──
+    function renderChecklist(root) {
+      const withChecklists = PLAN.items.filter(i => i.checklistId);
+      const withoutChecklists = PLAN.items.filter(i => !i.checklistId);
+
+      const bundles = withChecklists.map(item => `
+        <article class="bundle">
+          <div class="bundle-head">
+            <div>
+              <div class="bundle-title">${item.title}</div>
+              <div style="margin-top:0.2rem">${kindBadge(item.kind)}</div>
+            </div>
+            <div class="bundle-when">${item.start}–${item.end}</div>
+          </div>
+          ${checklistHtml(item.checklistId, "cl-")}
+        </article>`).join("");
+
+      const plain = withoutChecklists.map(item => `
+        <div class="plain-row">
+          <span>${item.title} ${kindBadge(item.kind)}</span>
+          <span class="when">${item.start}–${item.end}</span>
+        </div>`).join("");
+
+      const mini = PLAN.items.map(item => `
+        <div class="mini-seg ${item.kind}">${item.start} ${item.title.split(" ")[0]}</div>`).join("");
+
+      root.innerHTML = `
+        <div class="v-checklist">
+          <div class="board">
+            <div class="hero">
+              <div class="plan-date">${PLAN.date}</div>
+              <div class="plan-meta">
+                <span>Wake ${PLAN.dayBounds.wake} · Sleep ${PLAN.dayBounds.sleep}</span>
+                <span>${PLAN.weather}</span>
+              </div>
+              <div class="mini-timeline" aria-label="Day overview">${mini}</div>
+            </div>
+            <div class="section-label">Pack &amp; prep</div>
+            ${bundles}
+            <div class="section-label">Rest of day</div>
+            ${plain}
+          </div>
+        </div>`;
+    }
+
+    // ── Switcher ──
+    function currentVariantKey() {
+      return new URLSearchParams(location.search).get("variant") || VARIANTS[0].key;
+    }
+
+    function variantIndex(key) {
+      const i = VARIANTS.findIndex(v => v.key === key);
+      return i >= 0 ? i : 0;
+    }
+
+    function setVariant(key) {
+      const url = new URL(location.href);
+      url.searchParams.set("variant", key);
+      history.replaceState(null, "", url);
+      render();
+    }
+
+    function cycleVariant(delta) {
+      const i = variantIndex(currentVariantKey());
+      const next = (i + delta + VARIANTS.length) % VARIANTS.length;
+      setVariant(VARIANTS[next].key);
+    }
+
+    function render() {
+      const key = currentVariantKey();
+      const v = VARIANTS.find(x => x.key === key) || VARIANTS[0];
+      document.getElementById("app").innerHTML = "";
+      v.render(document.getElementById("app"));
+      document.getElementById("variant-label").innerHTML =
+        `<strong>${v.key}</strong><span>${v.name}</span>`;
+      document.title = `PROTOTYPE — ${v.name}`;
+    }
+
+    document.getElementById("prev-variant").addEventListener("click", () => cycleVariant(-1));
+    document.getElementById("next-variant").addEventListener("click", () => cycleVariant(1));
+
+    document.addEventListener("keydown", e => {
+      if (e.target.closest("input, textarea, [contenteditable=true]")) return;
+      if (e.key === "ArrowLeft") { e.preventDefault(); cycleVariant(-1); }
+      if (e.key === "ArrowRight") { e.preventDefault(); cycleVariant(1); }
+    });
+
+    render();
+  </script>
+</body>
+</html>
