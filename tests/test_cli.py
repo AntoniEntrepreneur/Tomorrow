@@ -16,6 +16,25 @@ def _write_defaults(tmp_path: Path) -> None:
     (tmp_path / "plans").mkdir()
 
 
+def _write_tuesday_template(tmp_path: Path) -> None:
+    templates_dir = tmp_path / "data" / "templates"
+    templates_dir.mkdir(parents=True)
+    (templates_dir / "tuesday.toml").write_text(
+        """
+[[anchor]]
+name = "Standup"
+start = "07:00"
+duration = 15
+
+[[flex]]
+name = "Sauna"
+duration = 30
+checklist = "sauna-kit"
+""".strip(),
+        encoding="utf-8",
+    )
+
+
 def test_wizard_accepts_defaults_and_writes_plan_with_no_drafts(
     tmp_path: Path, monkeypatch
 ) -> None:
@@ -221,3 +240,56 @@ def test_wizard_raises_and_writes_nothing_when_finalize_is_blocked(
         run_wizard(repo_root=tmp_path, today=date(2026, 8, 10))
 
     assert list((tmp_path / "plans").iterdir()) == []
+
+
+def test_wizard_declining_weekday_template_leaves_empty_session(
+    tmp_path: Path, monkeypatch
+) -> None:
+    _write_defaults(tmp_path)
+    _write_tuesday_template(tmp_path)
+
+    inputs = iter(
+        [
+            "",  # wake default
+            "",  # sleep default
+            "n",  # decline Tuesday template
+            "",  # finish draft capture with no Drafts
+        ]
+    )
+    monkeypatch.setattr("builtins.input", lambda _prompt: next(inputs))
+
+    path = run_wizard(repo_root=tmp_path, today=date(2026, 8, 10))
+    content = path.read_text(encoding="utf-8")
+
+    assert "Standup" not in content
+    assert "Sauna" not in content
+
+
+def test_wizard_accepts_weekday_template_and_seeds_unplaced_flex(
+    tmp_path: Path, monkeypatch
+) -> None:
+    _write_defaults(tmp_path)
+    _write_tuesday_template(tmp_path)
+
+    inputs = iter(
+        [
+            "",  # wake default
+            "",  # sleep default
+            "",  # accept Tuesday template (default yes)
+            "",  # finish draft capture with no Drafts
+            "p",  # place seeded Sauna flex
+            "y",  # snap to gap start
+            "2",  # gap after standup
+        ]
+    )
+    monkeypatch.setattr("builtins.input", lambda _prompt: next(inputs))
+
+    path = run_wizard(repo_root=tmp_path, today=date(2026, 8, 10))
+    content = path.read_text(encoding="utf-8")
+
+    assert "Standup" in content
+    assert "07:00" in content
+    assert "07:15" in content
+    assert "Sauna" in content
+    assert "07:15" in content
+    assert "07:45" in content

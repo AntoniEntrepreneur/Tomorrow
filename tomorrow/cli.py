@@ -17,6 +17,7 @@ from tomorrow.domain import (
     validate_flex_placement,
 )
 from tomorrow.plan import default_plan_date, format_plan_date, write_finalized_plan
+from tomorrow.weekday_template import load_weekday_template, weekday_template_path
 
 
 def _prompt_with_default(label: str, default: str) -> str:
@@ -177,6 +178,32 @@ def _resolve_flexes(
     return placed
 
 
+def _seed_from_weekday_template(
+    *,
+    repo_root: Path,
+    plan_date: date,
+) -> tuple[list[Anchor], list[Flex]]:
+    template_path = weekday_template_path(repo_root / "data", plan_date)
+    template = load_weekday_template(template_path)
+    if template is None:
+        return [], []
+
+    weekday = plan_date.strftime("%A")
+    if not _prompt_yes_no(f"Use {weekday} Template?", default_yes=True):
+        return [], []
+
+    if template.anchors:
+        print("Seeded Anchors:")
+        for anchor in template.anchors:
+            print(f"  - {anchor.name} ({anchor.start:%H:%M}, {int(anchor.duration.total_seconds() // 60)} min)")
+    if template.flexes:
+        print("Seeded Flex (not yet placed):")
+        for flex in template.flexes:
+            print(f"  - {flex.name} ({int(flex.duration.total_seconds() // 60)} min)")
+
+    return list(template.anchors), list(template.flexes)
+
+
 def run_wizard(*, repo_root: Path, today: date | None = None) -> Path:
     defaults_path = repo_root / "data" / "defaults.toml"
     defaults = load_defaults(defaults_path)
@@ -191,9 +218,9 @@ def run_wizard(*, repo_root: Path, today: date | None = None) -> Path:
     sleep = _prompt_with_default("Sleep time", defaults.sleep)
     bounds = DayBounds(wake=wake, sleep=sleep)
 
+    anchors, flexes = _seed_from_weekday_template(repo_root=repo_root, plan_date=plan_date)
+
     drafts = _capture_drafts()
-    anchors: list[Anchor] = []
-    flexes: list[Flex] = []
     for draft in drafts:
         promoted = _promote_draft(draft, default_minutes_by_name=default_minutes_by_name)
         if isinstance(promoted, Anchor):

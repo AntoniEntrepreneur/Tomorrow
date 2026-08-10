@@ -29,6 +29,7 @@ class Anchor:
     name: str
     start: time
     duration: timedelta
+    checklist: str | None = None
 
     @property
     def end(self) -> time:
@@ -43,6 +44,7 @@ class Flex:
     name: str
     duration: timedelta
     start: time | None = None
+    checklist: str | None = None
 
     @property
     def end(self) -> time | None:
@@ -52,10 +54,20 @@ class Flex:
         return combined.time()
 
     def with_duration(self, duration: timedelta) -> Flex:
-        return Flex(name=self.name, duration=duration, start=self.start)
+        return Flex(
+            name=self.name,
+            duration=duration,
+            start=self.start,
+            checklist=self.checklist,
+        )
 
     def with_start(self, start: time) -> Flex:
-        return Flex(name=self.name, duration=self.duration, start=start)
+        return Flex(
+            name=self.name,
+            duration=self.duration,
+            start=start,
+            checklist=self.checklist,
+        )
 
 
 @dataclass(frozen=True)

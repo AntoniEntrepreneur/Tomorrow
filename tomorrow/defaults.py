@@ -17,8 +17,7 @@ def load_defaults(path: Path) -> DayBounds:
 def load_anchor_default_minutes(path: Path) -> dict[str, int]:
     """Optional library of default occupied-time minutes, keyed by lowercase name.
 
-    Missing file means no library exists yet (e.g. before Templates land in #8) —
-    that's not an error, promotion just falls through to the next source.
+    Missing file means no library exists yet — that's not an error, promotion just falls through to the next source.
     """
     if not path.exists():
         return {}
