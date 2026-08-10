@@ -142,6 +142,7 @@ def render_plan(
     anchors: Sequence[Anchor] = (),
     flexes: Sequence[Flex] = (),
     checklists: Mapping[str, Checklist] | None = None,
+    weather: str | None = None,
 ) -> str:
     library = dict(checklists or ())
     env = Environment(
@@ -154,6 +155,7 @@ def render_plan(
         plan_date_key=plan_date.isoformat(),
         wake=bounds.wake,
         sleep=bounds.sleep,
+        weather=weather,
         timeline=_timeline_views(bounds=bounds, anchors=anchors, flexes=flexes),
         prep_bundles=_prep_bundles(anchors=anchors, flexes=flexes, checklists=library),
     )
@@ -167,6 +169,7 @@ def write_plan(
     anchors: Sequence[Anchor] = (),
     flexes: Sequence[Flex] = (),
     checklists: Mapping[str, Checklist] | None = None,
+    weather: str | None = None,
 ) -> Path:
     plans_dir = repo_root / "plans"
     plans_dir.mkdir(parents=True, exist_ok=True)
@@ -179,17 +182,25 @@ def write_plan(
             anchors=anchors,
             flexes=flexes,
             checklists=library,
+            weather=weather,
         ),
         encoding="utf-8",
     )
     return path
 
 
-def write_finalized_plan(*, repo_root: Path, plan_date: date, plan: FinalizedPlan) -> Path:
+def write_finalized_plan(
+    *,
+    repo_root: Path,
+    plan_date: date,
+    plan: FinalizedPlan,
+    weather: str | None = None,
+) -> Path:
     return write_plan(
         repo_root=repo_root,
         plan_date=plan_date,
         bounds=plan.bounds,
         anchors=plan.anchors,
         flexes=plan.flexes,
+        weather=weather,
     )

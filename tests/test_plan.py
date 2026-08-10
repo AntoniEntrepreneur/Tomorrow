@@ -33,6 +33,17 @@ def test_render_plan_shows_date_and_day_bounds() -> None:
     assert "Wake 06:30" in html
     assert "Sleep 23:00" in html
     assert "<!DOCTYPE html>" in html
+    assert '<div class="plan-weather">' not in html
+
+
+def test_render_plan_shows_weather_one_liner_when_provided() -> None:
+    html = render_plan(
+        plan_date=date(2026, 8, 11),
+        bounds=DayBounds(wake="06:30", sleep="23:00"),
+        weather="18° / 24° · partly cloudy",
+    )
+
+    assert '<div class="plan-weather">18° / 24° · partly cloudy</div>' in html
 
 
 def test_render_plan_uses_tl_accordion_chrome() -> None:

@@ -218,6 +218,9 @@
         <div class="plan-meta">
           <div class="plan-date">{{ plan_date_label }}</div>
           <div class="plan-bounds">Wake {{ wake }} · Sleep {{ sleep }}</div>
+          {% if weather %}
+          <div class="plan-weather">{{ weather }}</div>
+          {% endif %}
         </div>
       </header>
       <div class="bounds-cap">↑ {{ wake }} wake</div>

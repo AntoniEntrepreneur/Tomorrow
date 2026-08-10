@@ -18,6 +18,7 @@ from tomorrow.domain import (
     validate_flex_placement,
 )
 from tomorrow.plan import default_plan_date, format_plan_date, write_finalized_plan
+from tomorrow.weather import try_fetch_weather
 from tomorrow.weekday_template import load_weekday_template, weekday_template_path
 
 
@@ -266,6 +267,10 @@ def run_wizard(*, repo_root: Path, today: date | None = None) -> Path:
     sleep = _prompt_with_default("Sleep time", defaults.sleep)
     bounds = DayBounds(wake=wake, sleep=sleep)
 
+    weather = try_fetch_weather(repo_root / "data", plan_date)
+    if weather:
+        print(f"Weather: {weather}\n")
+
     anchors, flexes = _seed_from_weekday_template(repo_root=repo_root, plan_date=plan_date)
 
     drafts = _capture_drafts()
@@ -290,7 +295,12 @@ def run_wizard(*, repo_root: Path, today: date | None = None) -> Path:
         raise PlanBlockedError(result.blockers)
 
     assert result.plan is not None
-    path = write_finalized_plan(repo_root=repo_root, plan_date=plan_date, plan=result.plan)
+    path = write_finalized_plan(
+        repo_root=repo_root,
+        plan_date=plan_date,
+        plan=result.plan,
+        weather=weather,
+    )
     print(f"\nPlan written to {path}")
     return path
 

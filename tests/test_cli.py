@@ -395,3 +395,56 @@ def test_wizard_keeps_template_attached_checklist_without_reprompt(
     assert 'checklistId: "sauna-kit"' in content
     assert '"Sauna kit"' in content
     assert '"Flip-flops"' in content
+
+
+def test_wizard_shows_weather_early_and_writes_one_liner_to_plan(
+    tmp_path: Path, monkeypatch, capsys
+) -> None:
+    _write_defaults(tmp_path)
+
+    def fake_weather(_data_dir, _plan_date, *, opener=None):
+        return "18° / 24° · partly cloudy"
+
+    monkeypatch.setattr("tomorrow.cli.try_fetch_weather", fake_weather)
+    inputs = iter(["", "", ""])
+    monkeypatch.setattr("builtins.input", lambda _prompt: next(inputs))
+
+    path = run_wizard(repo_root=tmp_path, today=date(2026, 8, 10))
+    content = path.read_text(encoding="utf-8")
+    output = capsys.readouterr().out
+
+    assert "Weather: 18° / 24° · partly cloudy" in output
+    assert '<div class="plan-weather">18° / 24° · partly cloudy</div>' in content
+
+
+def test_wizard_omits_weather_quietly_when_fetch_fails(
+    tmp_path: Path, monkeypatch, capsys
+) -> None:
+    _write_defaults(tmp_path)
+    monkeypatch.setattr("tomorrow.cli.try_fetch_weather", lambda *_args, **_kwargs: None)
+    inputs = iter(["", "", ""])
+    monkeypatch.setattr("builtins.input", lambda _prompt: next(inputs))
+
+    path = run_wizard(repo_root=tmp_path, today=date(2026, 8, 10))
+    content = path.read_text(encoding="utf-8")
+    output = capsys.readouterr().out
+
+    assert "Weather:" not in output
+    assert '<div class="plan-weather">' not in content
+    assert path.exists()
+
+
+def test_wizard_continues_when_weather_location_file_is_invalid(
+    tmp_path: Path, monkeypatch
+) -> None:
+    _write_defaults(tmp_path)
+    data_dir = tmp_path / "data"
+    (data_dir / "weather.toml").write_text("broken\n", encoding="utf-8")
+
+    inputs = iter(["", "", ""])
+    monkeypatch.setattr("builtins.input", lambda _prompt: next(inputs))
+
+    path = run_wizard(repo_root=tmp_path, today=date(2026, 8, 10))
+
+    assert path.exists()
+    assert '<div class="plan-weather">' not in path.read_text(encoding="utf-8")
