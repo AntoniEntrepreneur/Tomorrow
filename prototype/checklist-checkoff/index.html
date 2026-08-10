@@ -1,0 +1,681 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>PROTOTYPE — Checklist checkoff</title>
+  <!--
+    PROTOTYPE — throwaway UI for issue #3.
+    Built on the winning Plan look from issue #2 (timeline rail + full-page scroll).
+    Three structurally different Checklist checkoff treatments:
+      inline-expand | side-panel | packing-sheet
+  -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Mono:ital,wght@0,400;0,500;1,400&family=Instrument+Serif:ital@0;1&family=Outfit:wght@400;500;600&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --proto-bar-bg: #1a1a1f;
+      --proto-bar-fg: #f4f4f6;
+      --proto-bar-muted: #8b8b96;
+    }
+
+    body { min-height: 100dvh; padding-bottom: 5rem; }
+
+    .proto-banner {
+      background: #fef3c7;
+      color: #92400e;
+      font: 600 0.7rem/1 "Outfit", system-ui, sans-serif;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      text-align: center;
+      padding: 0.45rem 1rem;
+      border-bottom: 1px solid #fcd34d;
+    }
+
+    .checklist { list-style: none; }
+    .checklist li {
+      display: flex;
+      align-items: flex-start;
+      gap: 0.5rem;
+      padding: 0.35rem 0;
+      font-size: 0.92em;
+    }
+    .checklist input[type="checkbox"] {
+      margin-top: 0.12rem;
+      width: 1.05rem;
+      height: 1.05rem;
+      accent-color: #3d5a45;
+      flex-shrink: 0;
+    }
+    .checklist label { cursor: pointer; }
+    .checklist input:checked + label { text-decoration: line-through; opacity: 0.5; }
+
+    /* ── Shared base (timeline look from issue #2) ── */
+    .v-base {
+      --bg: #f7f3ed;
+      --rail: #c4b5a0;
+      --ink: #2c2419;
+      --anchor: #3d5a45;
+      --anchor-bg: #e8f0ea;
+      --flex: #6b5344;
+      --flex-bg: #f0ebe4;
+      --panel-bg: #fff;
+      --panel-border: #ddd5c8;
+      background: var(--bg);
+      color: var(--ink);
+      font-family: "Outfit", system-ui, sans-serif;
+      min-height: calc(100dvh - 2rem);
+    }
+    .v-base .shell {
+      max-width: 32rem;
+      margin: 0 auto;
+      padding: 1.5rem 1.25rem 2.5rem;
+    }
+    @media (min-width: 768px) {
+      .v-base .shell { max-width: 36rem; padding: 2rem 1.5rem 3rem; }
+    }
+    .v-base .plan-header { margin-bottom: 1rem; font-size: 0.95rem; }
+    .v-base .plan-meta { display: flex; flex-wrap: wrap; gap: 0.5rem 1.25rem; align-items: baseline; }
+    .v-base .plan-date {
+      font-family: "Instrument Serif", Georgia, serif;
+      font-size: 1.65rem;
+      font-weight: 400;
+      width: 100%;
+    }
+    .v-base .plan-bounds, .v-base .plan-weather { opacity: 0.72; font-size: 0.92em; }
+
+    .day-progress {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.35rem;
+      font-family: "DM Mono", monospace;
+      font-size: 0.72rem;
+      color: var(--anchor);
+      background: var(--anchor-bg);
+      border-radius: 999px;
+      padding: 0.25rem 0.65rem;
+      margin-bottom: 1rem;
+    }
+
+    .v-base .rail-wrap {
+      position: relative;
+      padding-left: 3.25rem;
+      margin-bottom: 2rem;
+    }
+    .v-base .rail-wrap::before {
+      content: "";
+      position: absolute;
+      left: 1.1rem;
+      top: 0;
+      bottom: 0;
+      width: 2px;
+      background: linear-gradient(var(--rail), transparent 98%);
+    }
+    .v-base .block {
+      position: relative;
+      display: block;
+      width: 100%;
+      margin-bottom: 0.35rem;
+      border-radius: 8px;
+      padding: 0.65rem 0.85rem;
+      border-left: 3px solid transparent;
+      background: none;
+      border: none;
+      border-left: 3px solid transparent;
+      text-align: left;
+      font: inherit;
+      color: inherit;
+    }
+    .v-base .block.anchor { background: var(--anchor-bg); border-left-color: var(--anchor); }
+    .v-base .block.flex { background: var(--flex-bg); border-left-color: var(--flex); border-left-style: dashed; }
+    .v-base .block.gap-filler {
+      background: transparent;
+      border: none;
+      border-left: 1px dashed rgba(0,0,0,0.12);
+      font-size: 0.68rem;
+      padding: 0.25rem 0.85rem;
+      color: var(--rail);
+      display: flex;
+      align-items: center;
+      min-height: unset !important;
+    }
+    .v-base .time-tag {
+      position: absolute;
+      left: -3.25rem;
+      width: 2.75rem;
+      text-align: right;
+      font-family: "DM Mono", monospace;
+      font-size: 0.72rem;
+      color: var(--rail);
+      top: 0.7rem;
+    }
+    .v-base .block-title { font-weight: 600; font-size: 0.95rem; }
+    .v-base .block-range {
+      font-family: "DM Mono", monospace;
+      font-size: 0.72rem;
+      opacity: 0.55;
+      margin-top: 0.15rem;
+    }
+    .v-base .bounds-cap {
+      font-family: "DM Mono", monospace;
+      font-size: 0.72rem;
+      color: var(--rail);
+      padding: 0.5rem 0;
+      text-align: center;
+    }
+    .v-base .bundle-sub { font-weight: 400; font-size: 0.78rem; color: var(--rail); margin-left: 0.35rem; }
+    .v-base .bundle-count { font-family: "DM Mono", monospace; font-size: 0.68rem; font-weight: 400; color: var(--rail); }
+
+    /* ── Treatment 1: inline-expand (checklist lives on the rail block itself) ── */
+    .v-inline-expand .block-item {
+      cursor: pointer;
+    }
+    .v-inline-expand .block-item summary {
+      list-style: none;
+      cursor: pointer;
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 0.5rem;
+    }
+    .v-inline-expand .block-item summary::-webkit-details-marker { display: none; }
+    .v-inline-expand .block-item .summary-main { flex: 1; }
+    .v-inline-expand .bag-badge {
+      display: flex;
+      align-items: center;
+      gap: 0.3rem;
+      font-family: "DM Mono", monospace;
+      font-size: 0.7rem;
+      color: var(--anchor);
+      white-space: nowrap;
+      padding-top: 0.1rem;
+    }
+    .v-inline-expand .bag-badge .chevron { font-size: 0.6rem; transition: transform 0.15s ease; }
+    .v-inline-expand .block-item[open] .bag-badge .chevron { transform: rotate(180deg); }
+    .v-inline-expand .block-item.is-complete .bag-badge { color: var(--rail); opacity: 0.7; }
+    .v-inline-expand .block-item .checklist {
+      margin-top: 0.65rem;
+      padding-top: 0.55rem;
+      border-top: 1px dashed rgba(0,0,0,0.12);
+    }
+    .v-inline-expand .block:not(.block-item) { cursor: default; }
+
+    /* ── Treatment 2: side-panel (checklists live beside the timeline) ── */
+    .v-side-panel .layout {
+      display: block;
+    }
+    @media (min-width: 900px) {
+      .v-side-panel .layout {
+        display: grid;
+        grid-template-columns: 1fr 19rem;
+        gap: 2rem;
+        align-items: start;
+      }
+      .v-side-panel .panel-col {
+        position: sticky;
+        top: 1.5rem;
+        max-height: calc(100dvh - 3rem);
+        overflow-y: auto;
+      }
+    }
+    .v-side-panel .block[data-linkable] { cursor: pointer; }
+    .v-side-panel .block[data-linkable]:hover { outline: 1px solid var(--anchor); outline-offset: 1px; }
+    .v-side-panel .panel-heading {
+      font-size: 0.68rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      color: var(--rail);
+      margin-bottom: 0.85rem;
+    }
+    .v-side-panel .panel-col { margin-top: 0; }
+    @media (max-width: 899.98px) {
+      .v-side-panel .panel-col { margin-top: 0.5rem; border-top: 2px solid var(--panel-border); padding-top: 1.25rem; }
+    }
+    .v-side-panel .panel-bundle {
+      background: var(--panel-bg);
+      border: 1px solid var(--panel-border);
+      border-radius: 10px;
+      padding: 0.85rem 1rem;
+      margin-bottom: 0.6rem;
+      transition: box-shadow 0.4s ease, border-color 0.4s ease;
+    }
+    .v-side-panel .panel-bundle.is-complete { opacity: 0.55; }
+    .v-side-panel .panel-bundle.is-highlighted {
+      border-color: var(--anchor);
+      box-shadow: 0 0 0 3px var(--anchor-bg);
+    }
+    .v-side-panel .panel-bundle-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      margin-bottom: 0.4rem;
+      font-weight: 600;
+      font-size: 0.92rem;
+    }
+
+    /* ── Treatment 3: packing-sheet (always-expanded flat sheet at the bottom) ── */
+    .v-packing-sheet .sheet-section {
+      border-top: 2px solid var(--panel-border);
+      padding-top: 1.25rem;
+    }
+    .v-packing-sheet .sheet-heading {
+      font-size: 0.68rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      color: var(--rail);
+      margin-bottom: 0.85rem;
+    }
+    .v-packing-sheet .sheet-bundle {
+      background: var(--panel-bg);
+      border: 1px solid var(--panel-border);
+      border-radius: 10px;
+      padding: 0.85rem 1rem;
+      margin-bottom: 0.55rem;
+    }
+    .v-packing-sheet .sheet-bundle.is-complete { opacity: 0.55; }
+    .v-packing-sheet .sheet-bundle-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      margin-bottom: 0.4rem;
+      font-weight: 600;
+      font-size: 0.92rem;
+    }
+
+    .proto-switcher {
+      position: fixed; bottom: 1rem; left: 50%; transform: translateX(-50%); z-index: 200;
+      display: flex; align-items: center; gap: 0.5rem;
+      background: var(--proto-bar-bg); color: var(--proto-bar-fg);
+      border-radius: 999px; padding: 0.45rem 0.65rem;
+      box-shadow: 0 8px 32px rgba(0,0,0,0.28);
+      font-family: "Outfit", system-ui, sans-serif; font-size: 0.82rem;
+    }
+    .proto-switcher button {
+      background: rgba(255,255,255,0.12); border: none; color: inherit;
+      width: 2rem; height: 2rem; border-radius: 50%; cursor: pointer;
+      font-size: 1rem; display: grid; place-items: center;
+    }
+    .proto-switcher button:hover { background: rgba(255,255,255,0.22); }
+    .proto-switcher .label { min-width: 12rem; text-align: center; }
+    .proto-switcher .label strong { display: block; font-weight: 600; font-size: 0.78rem; }
+    .proto-switcher .label span { font-size: 0.68rem; color: var(--proto-bar-muted); }
+
+    @media (prefers-reduced-motion: reduce) {
+      * { transition: none !important; animation: none !important; }
+    }
+  </style>
+</head>
+<body>
+  <div class="proto-banner">Prototype — checklist checkoff feel · issue #3</div>
+  <main id="app"></main>
+
+  <nav class="proto-switcher" aria-label="Prototype variant switcher">
+    <button type="button" id="prev-variant" aria-label="Previous variant">←</button>
+    <div class="label" id="variant-label"></div>
+    <button type="button" id="next-variant" aria-label="Next variant">→</button>
+  </nav>
+
+  <script>
+    const PLAN = {
+      date: "Thursday, 13 August 2026",
+      dayBounds: { wake: "06:30", sleep: "23:00" },
+      weather: "18° / 24° · partly cloudy",
+      items: [
+        { id: "wake", kind: "anchor", start: "06:30", end: "07:15", title: "Wake + breakfast", checklistId: "morning-out" },
+        { id: "deep", kind: "flex", start: "07:15", end: "08:00", title: "Deep work", durationMin: 45 },
+        { id: "standup", kind: "anchor", start: "09:00", end: "09:45", title: "Team standup" },
+        { id: "project", kind: "flex", start: "09:45", end: "12:00", title: "Project block", durationMin: 135 },
+        { id: "lunch", kind: "anchor", start: "12:30", end: "13:15", title: "Lunch" },
+        { id: "admin", kind: "flex", start: "13:30", end: "14:30", title: "Admin + email", durationMin: 60 },
+        { id: "gym", kind: "anchor", start: "18:00", end: "19:30", title: "Gym", checklistId: "gym-bag" },
+        { id: "sauna", kind: "flex", start: "20:00", end: "20:30", title: "Sauna", durationMin: 30 },
+        { id: "wind", kind: "anchor", start: "22:30", end: "23:00", title: "Wind-down", checklistId: "bedtime" },
+      ],
+      checklists: {
+        "morning-out": { name: "Before leaving", items: ["Keys", "Wallet", "Umbrella"] },
+        "gym-bag": { name: "Gym bag", items: ["Water bottle", "Towel", "Lock", "Headphones"] },
+        "bedtime": { name: "Wind-down kit", items: ["Phone on charger", "Book", "Earplugs"] },
+      },
+    };
+
+    const VARIANTS = [
+      { key: "inline-expand", name: "Inline expand on rail", render: renderInlineExpand },
+      { key: "side-panel", name: "Side panel", render: renderSidePanel },
+      { key: "packing-sheet", name: "Packing sheet", render: renderPackingSheet },
+    ];
+
+    const STORAGE_PREFIX = "checkoff-proto-" + PLAN.date.replace(/\s/g, "-") + "-";
+    const SEED_KEY = STORAGE_PREFIX + "seeded";
+
+    function seedInitialState() {
+      if (localStorage.getItem(SEED_KEY)) return;
+      // Mixed progress on first load so all three treatments are judgeable without clicking first:
+      // morning-out fully done, gym-bag partial, bedtime untouched.
+      setChecked("wake", "morning-out", 0, true);
+      setChecked("wake", "morning-out", 1, true);
+      setChecked("wake", "morning-out", 2, true);
+      setChecked("gym", "gym-bag", 0, true);
+      setChecked("gym", "gym-bag", 1, true);
+      localStorage.setItem(SEED_KEY, "1");
+    }
+
+    function parseTime(t) {
+      const [h, m] = t.split(":").map(Number);
+      return h * 60 + m;
+    }
+
+    function formatDuration(min) {
+      if (min < 60) return min + "m";
+      const h = Math.floor(min / 60);
+      const r = min % 60;
+      return r ? h + "h" + r : h + "h";
+    }
+
+    function storageKey(itemId, checklistId, rowIndex) {
+      return STORAGE_PREFIX + itemId + "-" + checklistId + "-" + rowIndex;
+    }
+
+    function isChecked(itemId, checklistId, rowIndex) {
+      return localStorage.getItem(storageKey(itemId, checklistId, rowIndex)) === "1";
+    }
+
+    function setChecked(itemId, checklistId, rowIndex, checked) {
+      const k = storageKey(itemId, checklistId, rowIndex);
+      if (checked) localStorage.setItem(k, "1");
+      else localStorage.removeItem(k);
+    }
+
+    function prepItems() {
+      return PLAN.items.filter(i => i.checklistId);
+    }
+
+    function bundleProgress(item) {
+      const cl = PLAN.checklists[item.checklistId];
+      if (!cl) return { done: 0, total: 0, complete: true };
+      let done = 0;
+      cl.items.forEach((_, i) => { if (isChecked(item.id, item.checklistId, i)) done++; });
+      return { done, total: cl.items.length, complete: done === cl.items.length };
+    }
+
+    function dayProgress() {
+      let done = 0, total = 0;
+      prepItems().forEach(item => {
+        const p = bundleProgress(item);
+        done += p.done;
+        total += p.total;
+      });
+      return { done, total };
+    }
+
+    function checklistRowsHtml(item, prefix) {
+      const cl = PLAN.checklists[item.checklistId];
+      if (!cl) return "";
+      const rows = cl.items.map((label, i) => {
+        const cid = prefix + item.id + "-" + i;
+        const checked = isChecked(item.id, item.checklistId, i) ? " checked" : "";
+        return `<li><input type="checkbox" id="${cid}" data-item="${item.id}" data-cl="${item.checklistId}" data-idx="${i}"${checked}><label for="${cid}">${label}</label></li>`;
+      }).join("");
+      return `<ul class="checklist" data-bundle="${item.id}">${rows}</ul>`;
+    }
+
+    function bundleLabel(item) {
+      const cl = PLAN.checklists[item.checklistId];
+      return `${item.title}<span class="bundle-sub">· ${cl.name}</span>`;
+    }
+
+    function planHeaderHtml() {
+      const dp = dayProgress();
+      return `
+        <header class="plan-header">
+          <div class="plan-meta">
+            <div class="plan-date">${PLAN.date}</div>
+            <div class="plan-bounds">Wake ${PLAN.dayBounds.wake} · Sleep ${PLAN.dayBounds.sleep}</div>
+            <div class="plan-weather">${PLAN.weather}</div>
+          </div>
+        </header>
+        <div class="day-progress" data-day-progress>🎒 ${dp.done}/${dp.total} packed</div>`;
+    }
+
+    /* ── Rerender-light progress refresh: recompute counts/complete state in place
+       so open <details>, scroll position, and drawer/panel state never get wiped
+       out by a full re-render on every checkbox click. ── */
+    function refreshProgressUI(root) {
+      root.querySelectorAll("[data-day-progress]").forEach(el => {
+        const dp = dayProgress();
+        el.textContent = `🎒 ${dp.done}/${dp.total} packed`;
+      });
+      prepItems().forEach(item => {
+        const p = bundleProgress(item);
+        root.querySelectorAll(`[data-count-for="${item.id}"]`).forEach(el => {
+          el.textContent = `${p.done}/${p.total}`;
+        });
+        root.querySelectorAll(`[data-bundle-el="${item.id}"]`).forEach(el => {
+          el.classList.toggle("is-complete", p.complete);
+        });
+      });
+    }
+
+    function wireCheckboxes(root) {
+      root.addEventListener("change", (e) => {
+        const cb = e.target;
+        if (cb.matches('.checklist input[type="checkbox"]')) {
+          setChecked(cb.dataset.item, cb.dataset.cl, Number(cb.dataset.idx), cb.checked);
+          refreshProgressUI(root);
+        }
+      });
+    }
+
+    function buildScheduleRail(linkable) {
+      const wake = parseTime(PLAN.dayBounds.wake);
+      const sleep = parseTime(PLAN.dayBounds.sleep);
+      const total = sleep - wake;
+      let blocks = "";
+      let cursor = wake;
+
+      for (const item of PLAN.items) {
+        const start = parseTime(item.start);
+        const end = parseTime(item.end);
+        if (start > cursor) {
+          const gapMin = start - cursor;
+          const h = Math.max(20, (gapMin / total) * 420);
+          blocks += `<div class="block gap-filler" style="min-height:${h}px">Gap · ${formatDuration(gapMin)}</div>`;
+        }
+        const dur = end - start;
+        const h = Math.max(52, (dur / total) * 420);
+        const linkAttr = linkable && item.checklistId ? ` data-linkable data-item-id="${item.id}"` : "";
+        blocks += `
+          <div class="block ${item.kind}" style="min-height:${h}px"${linkAttr}>
+            <span class="time-tag">${item.start}</span>
+            <div class="block-title">${item.title}</div>
+            <div class="block-range">${item.start}–${item.end}</div>
+          </div>`;
+        cursor = end;
+      }
+      return blocks;
+    }
+
+    /* ── Treatment 1: inline-expand ── */
+    function buildInlineRail() {
+      const wake = parseTime(PLAN.dayBounds.wake);
+      const sleep = parseTime(PLAN.dayBounds.sleep);
+      const total = sleep - wake;
+      let blocks = "";
+      let cursor = wake;
+
+      for (const item of PLAN.items) {
+        const start = parseTime(item.start);
+        const end = parseTime(item.end);
+        if (start > cursor) {
+          const gapMin = start - cursor;
+          const h = Math.max(20, (gapMin / total) * 420);
+          blocks += `<div class="block gap-filler" style="min-height:${h}px">Gap · ${formatDuration(gapMin)}</div>`;
+        }
+        const dur = end - start;
+        const h = Math.max(52, (dur / total) * 420);
+
+        if (item.checklistId) {
+          const p = bundleProgress(item);
+          blocks += `
+            <details class="block ${item.kind} block-item${p.complete ? " is-complete" : ""}" style="min-height:${h}px" data-bundle-el="${item.id}">
+              <summary>
+                <div class="summary-main">
+                  <span class="time-tag">${item.start}</span>
+                  <div class="block-title">${item.title}</div>
+                  <div class="block-range">${item.start}–${item.end}</div>
+                </div>
+                <span class="bag-badge">🎒 <span data-count-for="${item.id}">${p.done}/${p.total}</span> <span class="chevron">▾</span></span>
+              </summary>
+              ${checklistRowsHtml(item, "inl-")}
+            </details>`;
+        } else {
+          blocks += `
+            <div class="block ${item.kind}" style="min-height:${h}px">
+              <span class="time-tag">${item.start}</span>
+              <div class="block-title">${item.title}</div>
+              <div class="block-range">${item.start}–${item.end}</div>
+            </div>`;
+        }
+        cursor = end;
+      }
+      return blocks;
+    }
+
+    function renderInlineExpand(root) {
+      root.innerHTML = `
+        <div class="v-base v-inline-expand">
+          <div class="shell">
+            ${planHeaderHtml()}
+            <div class="bounds-cap">↑ ${PLAN.dayBounds.wake} wake</div>
+            <div class="rail-wrap">${buildInlineRail()}</div>
+            <div class="bounds-cap">${PLAN.dayBounds.sleep} sleep ↓</div>
+          </div>
+        </div>`;
+      wireCheckboxes(root);
+    }
+
+    /* ── Treatment 2: side-panel ── */
+    function renderSidePanel(root) {
+      const bundles = prepItems().map(item => {
+        const p = bundleProgress(item);
+        return `
+          <div class="panel-bundle${p.complete ? " is-complete" : ""}" data-bundle-el="${item.id}" data-panel-for="${item.id}">
+            <div class="panel-bundle-head">
+              <span>${bundleLabel(item)}</span>
+              <span class="bundle-count" data-count-for="${item.id}">${p.done}/${p.total}</span>
+            </div>
+            ${checklistRowsHtml(item, "side-")}
+          </div>`;
+      }).join("");
+
+      root.innerHTML = `
+        <div class="v-base v-side-panel">
+          <div class="shell">
+            ${planHeaderHtml()}
+            <div class="layout">
+              <div class="rail-col">
+                <div class="bounds-cap">↑ ${PLAN.dayBounds.wake} wake</div>
+                <div class="rail-wrap">${buildScheduleRail(true)}</div>
+                <div class="bounds-cap">${PLAN.dayBounds.sleep} sleep ↓</div>
+              </div>
+              <div class="panel-col">
+                <div class="panel-heading">Checklists</div>
+                ${bundles}
+              </div>
+            </div>
+          </div>
+        </div>`;
+
+      wireCheckboxes(root);
+
+      root.querySelectorAll(".block[data-linkable]").forEach(block => {
+        block.addEventListener("click", () => {
+          const id = block.dataset.itemId;
+          const target = root.querySelector(`[data-panel-for="${id}"]`);
+          if (!target) return;
+          target.scrollIntoView({ behavior: "smooth", block: "center" });
+          target.classList.add("is-highlighted");
+          setTimeout(() => target.classList.remove("is-highlighted"), 1200);
+        });
+      });
+    }
+
+    /* ── Treatment 3: packing-sheet ── */
+    function renderPackingSheet(root) {
+      const bundles = prepItems().map(item => {
+        const p = bundleProgress(item);
+        return `
+          <div class="sheet-bundle${p.complete ? " is-complete" : ""}" data-bundle-el="${item.id}">
+            <div class="sheet-bundle-head">
+              <span>${bundleLabel(item)}</span>
+              <span class="bundle-count" data-count-for="${item.id}">${p.done}/${p.total}</span>
+            </div>
+            ${checklistRowsHtml(item, "sheet-")}
+          </div>`;
+      }).join("");
+
+      root.innerHTML = `
+        <div class="v-base v-packing-sheet">
+          <div class="shell">
+            ${planHeaderHtml()}
+            <div class="bounds-cap">↑ ${PLAN.dayBounds.wake} wake</div>
+            <div class="rail-wrap">${buildScheduleRail(false)}</div>
+            <div class="bounds-cap">${PLAN.dayBounds.sleep} sleep ↓</div>
+            <section class="sheet-section" aria-label="Packing sheet">
+              <div class="sheet-heading">Packing sheet</div>
+              ${bundles}
+            </section>
+          </div>
+        </div>`;
+
+      wireCheckboxes(root);
+    }
+
+    function currentVariantKey() {
+      return new URLSearchParams(location.search).get("variant") || VARIANTS[0].key;
+    }
+
+    function variantIndex(key) {
+      const i = VARIANTS.findIndex(v => v.key === key);
+      return i >= 0 ? i : 0;
+    }
+
+    function setVariant(key) {
+      const url = new URL(location.href);
+      url.searchParams.set("variant", key);
+      history.replaceState(null, "", url);
+      render();
+    }
+
+    function cycleVariant(delta) {
+      const i = variantIndex(currentVariantKey());
+      setVariant(VARIANTS[(i + delta + VARIANTS.length) % VARIANTS.length].key);
+    }
+
+    function render() {
+      const v = VARIANTS.find(x => x.key === currentVariantKey()) || VARIANTS[0];
+      const app = document.getElementById("app");
+      app.innerHTML = "";
+      v.render(app);
+      document.getElementById("variant-label").innerHTML =
+        `<strong>${v.key}</strong><span>${v.name}</span>`;
+      document.title = `PROTOTYPE — ${v.name}`;
+    }
+
+    document.getElementById("prev-variant").addEventListener("click", () => cycleVariant(-1));
+    document.getElementById("next-variant").addEventListener("click", () => cycleVariant(1));
+    document.addEventListener("keydown", e => {
+      if (e.target.closest("input, textarea, [contenteditable=true]")) return;
+      if (e.key === "ArrowLeft") { e.preventDefault(); cycleVariant(-1); }
+      if (e.key === "ArrowRight") { e.preventDefault(); cycleVariant(1); }
+    });
+
+    seedInitialState();
+    render();
+  </script>
+</body>
+</html>
