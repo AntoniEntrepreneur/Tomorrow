@@ -31,3 +31,29 @@ def test_render_stub_plan_shows_date_and_day_bounds() -> None:
     assert "Wake 06:30" in html
     assert "Sleep 23:00" in html
     assert "<!DOCTYPE html>" in html
+
+
+def test_render_stub_plan_uses_tl_accordion_chrome() -> None:
+    html = render_stub_plan(
+        plan_date=date(2026, 8, 11),
+        bounds=DayBounds(wake="06:30", sleep="23:00"),
+    )
+
+    assert 'class="v-tl-base v-tl-accordion"' in html
+    assert "Instrument Serif" in html
+    assert "↑ 06:30 wake" in html
+    assert "23:00 sleep ↓" in html
+    assert "Pack &amp; prep" in html
+    assert "rail-wrap" in html
+
+
+def test_render_stub_plan_has_no_prototype_switcher() -> None:
+    html = render_stub_plan(
+        plan_date=date(2026, 8, 11),
+        bounds=DayBounds(wake="06:30", sleep="23:00"),
+    )
+
+    assert "proto-switcher" not in html
+    assert "proto-banner" not in html
+    assert "v-tl-tabs" not in html
+    assert "v-tl-cards" not in html
