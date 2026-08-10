@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{ plan_date_label }}</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: #f7f3ed;
+      color: #2c2419;
+      font-family: system-ui, sans-serif;
+      min-height: 100dvh;
+    }
+    .shell {
+      max-width: 32rem;
+      margin: 0 auto;
+      padding: 1.5rem 1.25rem 2.5rem;
+    }
+    .plan-date {
+      font-size: 1.65rem;
+      font-weight: 600;
+      margin-bottom: 0.75rem;
+    }
+    .plan-bounds {
+      font-size: 0.95rem;
+      opacity: 0.72;
+    }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <header>
+      <div class="plan-date">{{ plan_date_label }}</div>
+      <div class="plan-bounds">Wake {{ wake }} · Sleep {{ sleep }}</div>
+    </header>
+  </div>
+</body>
+</html>
