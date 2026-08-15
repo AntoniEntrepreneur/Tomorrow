@@ -11,7 +11,3 @@ Default label vocabulary: `needs-triage`, `needs-info`, `ready-for-agent`, `read
 ### Domain docs
 
 Single-context layout — `CONTEXT.md` + `docs/adr/` at the repo root (created lazily as decisions accumulate). See `docs/agents/domain.md`.
-
-### Plan HTML look (issue #2 → #5)
-
-Morning Plan visual spec and prototype verdict: `prototype/plan-look/DECISIONS.md`. Throwaway code at `prototype/plan-look/` on `main`.

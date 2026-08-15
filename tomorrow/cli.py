@@ -1,4 +1,4 @@
-from datetime import date, timedelta
+from datetime import date, time, timedelta
 from pathlib import Path
 
 from tomorrow.checklists import Checklist, load_checklist_library, suggest_checklist
@@ -22,9 +22,27 @@ from tomorrow.weather import try_fetch_weather
 from tomorrow.weekday_template import load_weekday_template, weekday_template_path
 
 
-def _prompt_with_default(label: str, default: str) -> str:
-    value = input(f"{label} [{default}]: ").strip()
-    return value or default
+def _prompt_clock(label: str, *, default: str | None = None) -> time:
+    while True:
+        if default is not None:
+            raw = input(f"{label} [{default}]: ").strip() or default
+        else:
+            raw = input(f"{label}: ").strip()
+        try:
+            return parse_clock(raw)
+        except ValueError:
+            print("Enter a clock time as HH:MM, e.g. 07:15.")
+
+
+def _prompt_optional_clock(label: str) -> time | None:
+    while True:
+        raw = input(f"{label}: ").strip()
+        if not raw:
+            return None
+        try:
+            return parse_clock(raw)
+        except ValueError:
+            print("Enter a clock time as HH:MM, e.g. 07:15.")
 
 
 def _capture_drafts() -> list[Draft]:
@@ -61,11 +79,11 @@ def _promote_draft_to_anchor(
     draft: Draft, *, default_minutes_by_name: dict[str, int]
 ) -> Anchor:
     print(f"\nPromote Draft '{draft.name}' to an Anchor")
-    start = parse_clock(input("  Start time (HH:MM): ").strip())
+    start = _prompt_clock("  Start time (HH:MM)")
 
-    end_raw = input("  End time (blank to give a duration instead): ").strip()
-    if end_raw:
-        duration_minutes = minutes_between(start, parse_clock(end_raw))
+    end = _prompt_optional_clock("  End time (blank to give a duration instead)")
+    if end is not None:
+        duration_minutes = minutes_between(start, end)
     else:
         duration_raw = input("  Duration in minutes (blank to use default): ").strip()
         if duration_raw:
@@ -209,7 +227,7 @@ def _resolve_flexes(
                     break
                 print("  Enter a Gap number from the list.")
         else:
-            candidate = flex.with_start(parse_clock(input("  Start time (HH:MM): ").strip()))
+            candidate = flex.with_start(_prompt_clock("  Start time (HH:MM)"))
 
         if validate_flex_placement(
             candidate,
@@ -263,9 +281,9 @@ def run_wizard(*, repo_root: Path, today: date | None = None) -> Path:
     plan_date = default_plan_date(today)
     print("Tomorrow — night-before planning\n")
     print(f"Plan date: {format_plan_date(plan_date)}\n")
-    wake = _prompt_with_default("Wake time", defaults.wake)
-    sleep = _prompt_with_default("Sleep time", defaults.sleep)
-    bounds = DayBounds(wake=wake, sleep=sleep)
+    wake = _prompt_clock("Wake time", default=defaults.wake)
+    sleep = _prompt_clock("Sleep time", default=defaults.sleep)
+    bounds = DayBounds(wake=f"{wake:%H:%M}", sleep=f"{sleep:%H:%M}")
 
     weather = try_fetch_weather(repo_root / "data", plan_date)
     if weather:
