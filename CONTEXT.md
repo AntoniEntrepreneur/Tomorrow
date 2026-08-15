@@ -5,6 +5,17 @@ Personal next-day planner: the night before, produce a believable wake-to-sleep 
 ## Language
 
 **Plan**:
+The schedule for one calendar day, produced the night before, spanning wake to sleep. A one-shot artifact — generate it, use it; mid-day reshuffling is out of scope. A Plan is what a Session becomes at Submit, not the Session itself.
+_Avoid_: Schedule, agenda, timeline (as the name of the object)
+
+**Session**:
+The mutable night-before construction of a Plan: day bounds, Drafts, Anchors, and Flex, editable until Submit. Distinct from the finished Plan.
+_Avoid_: Wizard, editor, draft (as the name of the whole)
+
+**Submit**:
+The act of finishing a Session into a Plan. Allowed only when no Draft remains, every Flex is placed, and no finalization blocker remains.
+_Avoid_: Save, export, publish, write
+
 The schedule for one calendar day, produced the night before from a Session, spanning wake to sleep. A one-shot artifact for that day — generate it, use it; mid-day reshuffling is out of scope. Distinct from the Session. A Plan whose date is before today is discarded so Plans do not accumulate.
 _Avoid_: Schedule, agenda, timeline (as the name of the object)
 

@@ -86,6 +86,22 @@ def test_wizard_custom_wake_and_sleep_are_written(tmp_path: Path, monkeypatch) -
     assert "Sleep 22:00" in content
 
 
+def test_wizard_rejects_invalid_clock_and_writes_retried_wake(
+    tmp_path: Path, monkeypatch, capsys
+) -> None:
+    _write_defaults(tmp_path)
+
+    inputs = iter(["25:30", "07:15", "", ""])
+    monkeypatch.setattr("builtins.input", lambda _prompt: next(inputs))
+
+    path = run_wizard(repo_root=tmp_path, today=date(2026, 8, 10))
+    content = path.read_text(encoding="utf-8")
+    output = capsys.readouterr().out
+
+    assert "Wake 07:15" in content
+    assert "HH:MM" in output
+
+
 def test_wizard_promotes_draft_to_anchor_using_end_time(
     tmp_path: Path, monkeypatch
 ) -> None:
@@ -110,6 +126,35 @@ def test_wizard_promotes_draft_to_anchor_using_end_time(
     assert "Standup" in content
     assert "07:00" in content
     assert "07:15" in content
+
+
+def test_wizard_rejects_invalid_anchor_start_and_writes_retried_clock(
+    tmp_path: Path, monkeypatch, capsys
+) -> None:
+    _write_defaults(tmp_path)
+
+    inputs = iter(
+        [
+            "",  # wake default
+            "",  # sleep default
+            "Standup",  # capture a Draft
+            "",  # finish capturing Drafts
+            "",  # Anchor (default)
+            "25:30",  # invalid start
+            "07:00",  # retried start
+            "07:15",  # end
+        ]
+    )
+    monkeypatch.setattr("builtins.input", lambda _prompt: next(inputs))
+
+    path = run_wizard(repo_root=tmp_path, today=date(2026, 8, 10))
+    content = path.read_text(encoding="utf-8")
+    output = capsys.readouterr().out
+
+    assert "Standup" in content
+    assert "07:00" in content
+    assert "07:15" in content
+    assert "HH:MM" in output
 
 
 def test_wizard_uses_library_default_duration_when_present(
