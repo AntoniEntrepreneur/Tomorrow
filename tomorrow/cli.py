@@ -305,8 +305,27 @@ def run_wizard(*, repo_root: Path, today: date | None = None) -> Path:
     return path
 
 
+def discover_repo_root(*starts: Path) -> Path:
+    """Locate the clone that holds data/ and plans/, independent of cwd."""
+    if not starts:
+        starts = (Path(__file__).resolve().parent, Path.cwd())
+    seen: set[Path] = set()
+    for start in starts:
+        resolved = start.resolve()
+        for candidate in (resolved, *resolved.parents):
+            if candidate in seen:
+                continue
+            seen.add(candidate)
+            if (candidate / "data" / "defaults.toml").is_file():
+                return candidate
+    raise FileNotFoundError(
+        "Could not find Tomorrow's data/defaults.toml. "
+        "This tool expects the git clone that holds data/ next to the package."
+    )
+
+
 def main() -> None:
-    repo_root = Path.cwd()
+    repo_root = discover_repo_root()
     try:
         run_wizard(repo_root=repo_root)
     except PlanBlockedError:

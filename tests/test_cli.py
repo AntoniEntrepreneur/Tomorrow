@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from tomorrow.cli import run_wizard
+from tomorrow.cli import main, run_wizard
 from tomorrow.domain import PlanBlockedError
 
 
@@ -448,3 +448,19 @@ def test_wizard_continues_when_weather_location_file_is_invalid(
 
     assert path.exists()
     assert '<div class="plan-weather">' not in path.read_text(encoding="utf-8")
+
+
+def test_main_finds_clone_data_when_cwd_is_elsewhere(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    seen: dict[str, Path] = {}
+
+    def fake_run_wizard(*, repo_root: Path, today=None) -> Path:
+        seen["repo_root"] = repo_root
+        return repo_root / "plans" / "unused.html"
+
+    monkeypatch.setattr("tomorrow.cli.run_wizard", fake_run_wizard)
+    main()
+
+    assert (seen["repo_root"] / "data" / "defaults.toml").is_file()
