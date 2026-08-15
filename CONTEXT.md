@@ -33,8 +33,8 @@ A Plan item with a known duration but no fixed start; it must be placed into a f
 _Avoid_: Soft task, duration task, floating block
 
 **Day bounds**:
-The wake time and sleep time that define the Plan's temporal envelope for that day. Confirmed each Session, pre-filled from personal Defaults.
-_Avoid_: Availability, working hours
+The wake time and sleep time that define the Plan's temporal envelope for that day. Pre-filled from Defaults when a Session starts; editable on the Session. Changing them does not rewrite Defaults.
+_Avoid_: Availability, working hours, confirmed bounds
 
 **Gap**:
 A contiguous stretch of free time on the Plan between day bounds and Anchors, into which Flex can be placed.
