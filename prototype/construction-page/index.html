@@ -1,0 +1,1267 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>PROTOTYPE — Construction page</title>
+  <!--
+    PROTOTYPE — throwaway UI for issue #13.
+    Three variants of a running Plan you add to and edit:
+      rail | desk | log
+    Switchable via ?variant= and the floating bar.
+  -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:ital,wght@0,400;0,700;1,400&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;1,400&family=Literata:ital,opsz,wght@0,7..72,400;0,7..72,600;1,7..72,400&family=Sora:wght@400;500;600;700&family=Syne:wght@500;700;800&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --proto-bar-bg: #1a1a1f;
+      --proto-bar-fg: #f4f4f6;
+      --proto-bar-muted: #8b8b96;
+    }
+
+    body { min-height: 100dvh; padding-bottom: 5.5rem; }
+
+    .proto-banner {
+      background: #fef3c7;
+      color: #92400e;
+      font: 600 0.7rem/1.35 "IBM Plex Sans", system-ui, sans-serif;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      text-align: center;
+      padding: 0.45rem 1rem;
+      border-bottom: 1px solid #fcd34d;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.4rem 1rem;
+      justify-content: center;
+      align-items: center;
+    }
+    .proto-banner button {
+      font: 600 0.7rem/1 "IBM Plex Sans", system-ui, sans-serif;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      border: 1px solid #d97706;
+      background: #fffbeb;
+      color: #92400e;
+      padding: 0.2rem 0.5rem;
+      border-radius: 999px;
+      cursor: pointer;
+    }
+
+    .status-strip {
+      font: 500 0.78rem/1.4 "IBM Plex Sans", system-ui, sans-serif;
+      letter-spacing: 0;
+      text-transform: none;
+      color: #78350f;
+      width: 100%;
+    }
+    .status-strip .blockers { color: #9a3412; }
+
+    /* ── Shared sheet ── */
+    .sheet-backdrop {
+      display: none;
+      position: fixed; inset: 0; z-index: 250;
+      background: rgba(10, 12, 16, 0.55);
+      align-items: flex-end;
+      justify-content: center;
+    }
+    .sheet-backdrop.open { display: flex; }
+    .sheet {
+      width: min(28rem, 100%);
+      max-height: 85dvh;
+      overflow: auto;
+      background: #f7f4ee;
+      color: #1c1914;
+      border-radius: 16px 16px 0 0;
+      padding: 1.1rem 1.15rem 2.25rem;
+      font-family: "IBM Plex Sans", system-ui, sans-serif;
+    }
+    .sheet h2 { font-size: 1.05rem; font-weight: 600; margin-bottom: 0.85rem; }
+    .sheet label { display: block; font-size: 0.75rem; font-weight: 600; margin: 0.65rem 0 0.25rem; }
+    .sheet input, .sheet select {
+      width: 100%;
+      font: 400 1rem/1.3 "IBM Plex Sans", system-ui, sans-serif;
+      padding: 0.5rem 0.6rem;
+      border: 1px solid #c9c0b2;
+      border-radius: 8px;
+      background: #fff;
+    }
+    .sheet .row { display: grid; grid-template-columns: 1fr 1fr; gap: 0.6rem; }
+    .sheet .actions { display: flex; gap: 0.5rem; margin-top: 1rem; flex-wrap: wrap; }
+    .sheet button {
+      font: 600 0.88rem/1 "IBM Plex Sans", system-ui, sans-serif;
+      padding: 0.55rem 0.85rem;
+      border-radius: 8px;
+      border: none;
+      cursor: pointer;
+    }
+    .sheet .primary { background: #1c1914; color: #f7f4ee; }
+    .sheet .ghost { background: transparent; border: 1px solid #c9c0b2; color: #1c1914; }
+    .sheet .danger { background: #9a3412; color: #fff; margin-left: auto; }
+    .sheet .hint { font-size: 0.78rem; color: #6b6256; margin-bottom: 0.5rem; }
+    .sheet .choice-row { display: flex; gap: 0.4rem; flex-wrap: wrap; margin: 0.4rem 0 0.8rem; }
+    .sheet .choice-row button { background: #ebe4d6; color: #1c1914; }
+
+    .state-dump {
+      margin: 1.25rem auto 0;
+      max-width: 40rem;
+      padding: 0.75rem 1rem 1.25rem;
+      font-family: "IBM Plex Mono", ui-monospace, monospace;
+      font-size: 0.72rem;
+      line-height: 1.45;
+      color: #57534e;
+    }
+    .state-dump summary { cursor: pointer; font-family: "IBM Plex Sans", system-ui, sans-serif; font-size: 0.78rem; }
+    .state-dump pre { white-space: pre-wrap; margin-top: 0.5rem; }
+
+    /* ═══════════════ RAIL ═══════════════ */
+    .v-rail {
+      --bg: #12161f;
+      --paper: #1a2030;
+      --ink: #e6e1d4;
+      --muted: #8b93a7;
+      --wick: #e0a84a;
+      --anchor: #6fbfa3;
+      --anchor-bg: #1a2e2a;
+      --flex: #e0b896;
+      --flex-bg: #2c241c;
+      --draft: #8ea0c8;
+      --danger: #e07a6a;
+      background: var(--bg);
+      color: var(--ink);
+      font-family: "IBM Plex Sans", system-ui, sans-serif;
+      min-height: calc(100dvh - 2rem);
+    }
+    .v-rail .shell { max-width: 28rem; margin: 0 auto; padding: 1.25rem 1.1rem 7.5rem; }
+    .v-rail .kicker {
+      font-family: "Syne", sans-serif;
+      font-weight: 800;
+      font-size: 0.68rem;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      color: var(--wick);
+    }
+    .v-rail h1 {
+      font-family: "Syne", sans-serif;
+      font-weight: 800;
+      font-size: 1.85rem;
+      letter-spacing: -0.03em;
+      margin: 0.2rem 0 0.15rem;
+    }
+    .v-rail .bounds { font-family: "IBM Plex Mono", monospace; font-size: 0.78rem; color: var(--muted); }
+    .v-rail .add-row { display: flex; gap: 0.4rem; margin: 1rem 0 1.25rem; }
+    .v-rail .add-row button {
+      flex: 1;
+      background: var(--paper);
+      color: var(--ink);
+      border: 1px solid rgba(224,168,74,0.28);
+      border-radius: 999px;
+      padding: 0.45rem 0.4rem;
+      font: 600 0.72rem/1 "IBM Plex Sans", system-ui, sans-serif;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      cursor: pointer;
+    }
+    .v-rail .add-row button:hover { border-color: var(--wick); }
+    .v-rail .drafts { display: flex; flex-wrap: wrap; gap: 0.35rem; margin-bottom: 1rem; }
+    .v-rail .draft-chip {
+      display: flex; align-items: center; gap: 0.35rem;
+      background: rgba(142,160,200,0.14);
+      border: 1px dashed var(--draft);
+      color: var(--draft);
+      border-radius: 999px;
+      padding: 0.25rem 0.35rem 0.25rem 0.65rem;
+      font-size: 0.78rem;
+    }
+    .v-rail .draft-chip button {
+      background: transparent; border: none; color: inherit; cursor: pointer;
+      font-size: 0.68rem; padding: 0.15rem 0.35rem;
+    }
+    .v-rail .rail-wrap { position: relative; padding-left: 3.4rem; }
+    .v-rail .rail-wrap::before {
+      content: "";
+      position: absolute;
+      left: 1.15rem; top: 0; bottom: 0; width: 3px;
+      background: linear-gradient(var(--wick), transparent 96%);
+      border-radius: 2px;
+      box-shadow: 0 0 12px rgba(224,168,74,0.35);
+    }
+    .v-rail .cap {
+      font-family: "IBM Plex Mono", monospace;
+      font-size: 0.7rem;
+      color: var(--muted);
+      padding: 0.35rem 0 0.5rem;
+    }
+    .v-rail .block {
+      position: relative;
+      margin-bottom: 0.3rem;
+      border-radius: 10px;
+      padding: 0.6rem 0.8rem;
+      cursor: pointer;
+    }
+    .v-rail .block.anchor { background: var(--anchor-bg); border-left: 3px solid var(--anchor); }
+    .v-rail .block.flex { background: var(--flex-bg); border-left: 3px dashed var(--flex); }
+    .v-rail .block .time-tag {
+      position: absolute; left: -3.4rem; width: 3rem; text-align: right;
+      font-family: "IBM Plex Mono", monospace; font-size: 0.68rem; color: var(--muted); top: 0.65rem;
+    }
+    .v-rail .block-title { font-weight: 600; font-size: 0.95rem; }
+    .v-rail .block-range { font-family: "IBM Plex Mono", monospace; font-size: 0.7rem; opacity: 0.6; margin-top: 0.12rem; }
+    .v-rail .gap {
+      position: relative;
+      margin-bottom: 0.3rem;
+      border: 1px dashed rgba(224,168,74,0.45);
+      border-radius: 10px;
+      background: rgba(224,168,74,0.06);
+      color: var(--wick);
+      cursor: pointer;
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 0.45rem 0.75rem;
+      font-size: 0.75rem;
+    }
+    .v-rail .gap .time-tag {
+      position: absolute; left: -3.4rem; width: 3rem; text-align: right;
+      font-family: "IBM Plex Mono", monospace; font-size: 0.68rem; color: var(--muted);
+    }
+    .v-rail .gap:hover, .v-rail .gap.armed {
+      background: rgba(224,168,74,0.16);
+      border-style: solid;
+    }
+    .v-rail .gap .cta { font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; font-size: 0.65rem; }
+    .v-rail .tray {
+      position: fixed; left: 0; right: 0; bottom: 4.4rem; z-index: 80;
+      background: #0e121a;
+      border-top: 1px solid rgba(224,168,74,0.25);
+      padding: 0.55rem 1rem 0.7rem;
+    }
+    .v-rail .tray-label {
+      font-size: 0.65rem; letter-spacing: 0.12em; text-transform: uppercase;
+      color: var(--muted); margin-bottom: 0.35rem;
+    }
+    .v-rail .tray-chips { display: flex; gap: 0.4rem; overflow-x: auto; }
+    .v-rail .flex-chip {
+      flex: 0 0 auto;
+      background: var(--flex-bg);
+      color: var(--flex);
+      border: 1px solid rgba(224,184,150,0.55);
+      border-radius: 10px;
+      padding: 0.45rem 0.65rem;
+      font-size: 0.8rem;
+      cursor: pointer;
+      min-width: 9.5rem;
+    }
+    .v-rail .flex-chip.armed { outline: 2px solid var(--wick); }
+    .v-rail .flex-chip .name { font-weight: 600; display: block; }
+    .v-rail .flex-chip .meta { font-family: "IBM Plex Mono", monospace; font-size: 0.65rem; opacity: 0.75; }
+    .v-rail .flex-chip .ops { display: flex; gap: 0.25rem; margin-top: 0.25rem; }
+    .v-rail .flex-chip .ops button {
+      background: transparent; border: 1px solid rgba(224,184,150,0.35);
+      color: inherit; border-radius: 999px; font-size: 0.62rem; padding: 0.1rem 0.4rem; cursor: pointer;
+    }
+    .v-rail .tray.empty { color: var(--muted); font-size: 0.78rem; }
+
+    /* ═══════════════ DESK ═══════════════ */
+    .v-desk {
+      --mat: #3a463c;
+      --paper: #f3ead8;
+      --ink: #241c14;
+      --muted: #6b6256;
+      --anchor: #2f5d4a;
+      --flex: #8a5a2b;
+      --draft: #4a5d7a;
+      --brass: #c4a35a;
+      background: var(--mat);
+      color: var(--ink);
+      font-family: "Atkinson Hyperlegible", system-ui, sans-serif;
+      min-height: calc(100dvh - 2rem);
+    }
+    .v-desk .board {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 0.85rem;
+      padding: 0.85rem 0.85rem 1.5rem;
+      max-width: 64rem;
+      margin: 0 auto;
+    }
+    @media (min-width: 860px) {
+      .v-desk .board { grid-template-columns: 1.15fr 0.85fr; align-items: start; padding: 1.25rem; }
+      .v-desk .tools { position: sticky; top: 0.75rem; }
+    }
+    .v-desk .paper, .v-desk .tools {
+      background: var(--paper);
+      border-radius: 4px;
+      box-shadow: 0 10px 28px rgba(0,0,0,0.18), 0 0 0 1px rgba(0,0,0,0.06);
+    }
+    .v-desk .paper { padding: 1.1rem 1.15rem 1.4rem; }
+    .v-desk .tools { padding: 1rem 1.05rem 1.25rem; }
+    .v-desk .eyebrow {
+      font-size: 0.68rem; letter-spacing: 0.14em; text-transform: uppercase;
+      color: var(--muted); font-weight: 700;
+    }
+    .v-desk h1 {
+      font-family: "Literata", Georgia, serif;
+      font-size: 1.7rem;
+      font-weight: 600;
+      margin: 0.15rem 0 0.2rem;
+    }
+    .v-desk .bounds { font-size: 0.85rem; color: var(--muted); }
+    .v-desk .pin {
+      display: grid;
+      grid-template-columns: 4.2rem 1fr auto;
+      gap: 0.55rem;
+      align-items: start;
+      padding: 0.55rem 0;
+      border-bottom: 1px solid rgba(36,28,20,0.1);
+      cursor: pointer;
+    }
+    .v-desk .pin.selected { background: rgba(196,163,90,0.16); margin: 0 -0.5rem; padding-left: 0.5rem; padding-right: 0.5rem; border-radius: 4px; }
+    .v-desk .pin .when { font-family: "IBM Plex Mono", monospace; font-size: 0.72rem; color: var(--muted); }
+    .v-desk .pin .title { font-weight: 700; }
+    .v-desk .pin .kind {
+      font-size: 0.62rem; letter-spacing: 0.08em; text-transform: uppercase;
+      font-weight: 700; padding-top: 0.15rem;
+    }
+    .v-desk .pin.anchor .kind { color: var(--anchor); }
+    .v-desk .pin.flex .kind { color: var(--flex); }
+    .v-desk .gap-pin {
+      font-size: 0.75rem; color: var(--muted);
+      padding: 0.35rem 0 0.35rem 4.75rem;
+      border-bottom: 1px dashed rgba(36,28,20,0.18);
+    }
+    .v-desk .stamps { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 0.4rem; margin: 0.75rem 0 1rem; }
+    .v-desk .stamp {
+      border: 2px solid currentColor;
+      background: transparent;
+      border-radius: 3px;
+      padding: 0.7rem 0.3rem 0.55rem;
+      cursor: pointer;
+      font-family: "Atkinson Hyperlegible", system-ui, sans-serif;
+      font-weight: 700;
+      font-size: 0.72rem;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+    }
+    .v-desk .stamp.anchor { color: var(--anchor); }
+    .v-desk .stamp.flex { color: var(--flex); }
+    .v-desk .stamp.draft { color: var(--draft); }
+    .v-desk .stamp span { display: block; font-size: 1.35rem; line-height: 1; margin-bottom: 0.2rem; font-weight: 400; }
+    .v-desk .inspector h2 { font-size: 1rem; margin-bottom: 0.5rem; }
+    .v-desk .inspector.empty { color: var(--muted); font-size: 0.9rem; }
+    .v-desk .inspector label { display: block; font-size: 0.75rem; font-weight: 700; margin: 0.55rem 0 0.2rem; }
+    .v-desk .inspector input {
+      width: 100%; padding: 0.45rem 0.5rem; border: 1px solid #c9bfae; border-radius: 4px;
+      font: 400 1rem/1.3 "Atkinson Hyperlegible", system-ui, sans-serif; background: #fffdf8;
+    }
+    .v-desk .inspector .row { display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem; }
+    .v-desk .inspector .actions { display: flex; flex-wrap: wrap; gap: 0.4rem; margin-top: 0.85rem; }
+    .v-desk .inspector button {
+      font: 700 0.8rem/1 "Atkinson Hyperlegible", system-ui, sans-serif;
+      padding: 0.5rem 0.7rem; border-radius: 4px; border: 1px solid var(--ink); background: var(--ink); color: var(--paper); cursor: pointer;
+    }
+    .v-desk .inspector button.ghost { background: transparent; color: var(--ink); }
+    .v-desk .inspector button.danger { background: transparent; border-color: #9a3412; color: #9a3412; }
+    .v-desk .unplaced { margin-top: 1.1rem; padding-top: 0.85rem; border-top: 1px solid rgba(36,28,20,0.12); }
+    .v-desk .unplaced h3 { font-size: 0.75rem; letter-spacing: 0.1em; text-transform: uppercase; margin-bottom: 0.45rem; }
+    .v-desk .u-row {
+      display: flex; justify-content: space-between; gap: 0.5rem; align-items: center;
+      padding: 0.4rem 0; border-bottom: 1px solid rgba(36,28,20,0.08); font-size: 0.9rem;
+    }
+    .v-desk .u-row .ops { display: flex; gap: 0.25rem; }
+    .v-desk .u-row .ops button {
+      font-size: 0.68rem; padding: 0.25rem 0.4rem; border: 1px solid #c9bfae;
+      background: #fffdf8; color: var(--ink); border-radius: 3px; cursor: pointer;
+    }
+    .v-desk .draft-list { margin-top: 0.85rem; }
+    .v-desk .draft-list li { display: flex; justify-content: space-between; gap: 0.4rem; padding: 0.3rem 0; font-size: 0.9rem; }
+    .v-desk .draft-list button { font-size: 0.68rem; cursor: pointer; border: 1px solid #c9bfae; background: #fffdf8; padding: 0.2rem 0.4rem; border-radius: 3px; }
+
+    /* ═══════════════ LOG ═══════════════ */
+    .v-log {
+      --fog: #e7edf2;
+      --ink: #243040;
+      --paper: #f7f9fb;
+      --rule: #b7c3ce;
+      --accent: #3d6b8a;
+      --insert: #2a6f6a;
+      --anchor: #245c4a;
+      --flex: #7a4e28;
+      background: var(--fog);
+      color: var(--ink);
+      font-family: "Sora", system-ui, sans-serif;
+      min-height: calc(100dvh - 2rem);
+    }
+    .v-log .page { max-width: 34rem; margin: 0 auto; padding: 0 0 2rem; }
+    .v-log .composer {
+      position: sticky; top: 0; z-index: 40;
+      background: var(--paper);
+      border-bottom: 1px solid var(--rule);
+      padding: 0.85rem 1rem 0.95rem;
+      box-shadow: 0 8px 20px rgba(36,48,64,0.06);
+    }
+    .v-log .composer label.lead { display: block; font-size: 0.68rem; letter-spacing: 0.12em; text-transform: uppercase; color: var(--accent); font-weight: 600; margin-bottom: 0.35rem; }
+    .v-log .composer input[name="name"] {
+      width: 100%; border: none; border-bottom: 2px solid var(--ink);
+      background: transparent; font: 500 1.15rem/1.3 "Sora", system-ui, sans-serif;
+      padding: 0.25rem 0 0.4rem; color: var(--ink);
+    }
+    .v-log .composer input[name="name"]:focus { outline: none; border-bottom-color: var(--accent); }
+    .v-log .kinds { display: flex; gap: 0.35rem; margin: 0.65rem 0 0.5rem; }
+    .v-log .kinds label {
+      flex: 1; text-align: center; font-size: 0.72rem; font-weight: 600;
+      letter-spacing: 0.04em; text-transform: uppercase;
+      border: 1px solid var(--rule); border-radius: 999px; padding: 0.35rem;
+      cursor: pointer;
+    }
+    .v-log .kinds input { display: none; }
+    .v-log .kinds input:checked + span { }
+    .v-log .kinds label:has(input:checked) { background: var(--ink); color: var(--paper); border-color: var(--ink); }
+    .v-log .composer .fields { display: none; grid-template-columns: 1fr 1fr; gap: 0.5rem; margin-bottom: 0.55rem; }
+    .v-log .composer .fields.on { display: grid; }
+    .v-log .composer .fields label { font-size: 0.68rem; font-weight: 600; }
+    .v-log .composer .fields input {
+      width: 100%; margin-top: 0.15rem; padding: 0.35rem 0.45rem;
+      border: 1px solid var(--rule); border-radius: 6px; font: 400 0.9rem "Sora", system-ui, sans-serif;
+    }
+    .v-log .composer button[type="submit"] {
+      width: 100%; background: var(--accent); color: #fff; border: none;
+      border-radius: 8px; padding: 0.55rem; font: 600 0.88rem "Sora", system-ui, sans-serif; cursor: pointer;
+    }
+    .v-log .day-head { padding: 1.1rem 1.15rem 0.4rem; }
+    .v-log .day-head h1 { font-size: 1.35rem; font-weight: 600; }
+    .v-log .day-head .bounds { font-family: "IBM Plex Mono", monospace; font-size: 0.75rem; color: #5b6b7a; margin-top: 0.2rem; }
+    .v-log .insert {
+      display: flex; align-items: center; gap: 0.5rem;
+      padding: 0.1rem 1.15rem;
+      color: var(--insert);
+      font-size: 0.68rem; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase;
+      cursor: pointer; background: none; border: none; width: 100%;
+    }
+    .v-log .insert::before, .v-log .insert::after {
+      content: ""; flex: 1; height: 1px; background: rgba(42,111,106,0.35);
+    }
+    .v-log .item {
+      margin: 0 1rem;
+      background: var(--paper);
+      border-radius: 10px;
+      padding: 0.7rem 0.85rem;
+      display: grid;
+      grid-template-columns: 4.4rem 1fr auto;
+      gap: 0.55rem;
+      align-items: center;
+      cursor: pointer;
+      box-shadow: 0 1px 0 rgba(36,48,64,0.06);
+    }
+    .v-log .item .when { font-family: "IBM Plex Mono", monospace; font-size: 0.72rem; color: #5b6b7a; }
+    .v-log .item .title { font-weight: 600; font-size: 0.95rem; }
+    .v-log .item .sub { font-size: 0.72rem; color: #5b6b7a; margin-top: 0.1rem; }
+    .v-log .item .drop {
+      border: none; background: transparent; color: #9a3412;
+      font-size: 0.68rem; font-weight: 600; cursor: pointer; letter-spacing: 0.04em; text-transform: uppercase;
+    }
+    .v-log .still {
+      margin: 1rem 1rem 0;
+      padding: 0.75rem 0.85rem;
+      border: 1px dashed var(--rule);
+      border-radius: 10px;
+      background: rgba(255,255,255,0.5);
+    }
+    .v-log .still h2 { font-size: 0.72rem; letter-spacing: 0.1em; text-transform: uppercase; margin-bottom: 0.45rem; color: #5b6b7a; }
+    .v-log .still-row { display: flex; justify-content: space-between; align-items: center; gap: 0.4rem; padding: 0.3rem 0; font-size: 0.88rem; }
+    .v-log .still-row .ops { display: flex; gap: 0.25rem; }
+    .v-log .still-row button {
+      font: 600 0.65rem/1 "Sora", system-ui, sans-serif;
+      letter-spacing: 0.04em; text-transform: uppercase;
+      border: 1px solid var(--rule); background: var(--paper); padding: 0.28rem 0.4rem; border-radius: 999px; cursor: pointer;
+    }
+    .v-log .drafts { margin: 0.75rem 1rem 0; }
+    .v-log .drafts h2 { font-size: 0.72rem; letter-spacing: 0.1em; text-transform: uppercase; margin-bottom: 0.35rem; color: #5b6b7a; }
+    .v-log .draft-row { display: flex; justify-content: space-between; align-items: center; padding: 0.35rem 0; font-size: 0.9rem; }
+    .v-log .draft-row button {
+      font-size: 0.65rem; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase;
+      border: 1px solid var(--rule); background: var(--paper); padding: 0.25rem 0.4rem; border-radius: 999px; cursor: pointer;
+    }
+
+    /* ── Switcher ── */
+    .proto-switcher {
+      position: fixed; bottom: 1rem; left: 50%; transform: translateX(-50%); z-index: 200;
+      display: flex; align-items: center; gap: 0.5rem;
+      background: var(--proto-bar-bg); color: var(--proto-bar-fg);
+      border-radius: 999px; padding: 0.45rem 0.65rem;
+      box-shadow: 0 8px 32px rgba(0,0,0,0.28);
+      font-family: "IBM Plex Sans", system-ui, sans-serif; font-size: 0.82rem;
+    }
+    .proto-switcher button {
+      background: rgba(255,255,255,0.12); border: none; color: inherit;
+      width: 2rem; height: 2rem; border-radius: 50%; cursor: pointer;
+      font-size: 1rem; display: grid; place-items: center;
+    }
+    .proto-switcher button:hover { background: rgba(255,255,255,0.22); }
+    .proto-switcher .label { min-width: 12rem; text-align: center; }
+    .proto-switcher .label strong { display: block; font-weight: 600; font-size: 0.78rem; }
+    .proto-switcher .label span { font-size: 0.68rem; color: var(--proto-bar-muted); }
+
+    @media (prefers-reduced-motion: reduce) {
+      * { transition: none !important; animation: none !important; }
+    }
+  </style>
+</head>
+<body>
+  <div class="proto-banner">
+    <span>Prototype — construction page · issue #13</span>
+    <button type="button" id="reset-seed">Reset seed</button>
+    <div class="status-strip" id="status-strip"></div>
+  </div>
+  <main id="app"></main>
+  <div class="sheet-backdrop" id="sheet-backdrop" hidden>
+    <div class="sheet" id="sheet" role="dialog" aria-modal="true"></div>
+  </div>
+
+  <nav class="proto-switcher" aria-label="Prototype variant switcher">
+    <button type="button" id="prev-variant" aria-label="Previous variant">←</button>
+    <div class="label" id="variant-label"></div>
+    <button type="button" id="next-variant" aria-label="Next variant">→</button>
+  </nav>
+
+  <script>
+    /* Three variants of the construction page, switchable via ?variant=, on a throwaway local page. */
+
+    function seedSession() {
+      return {
+        dateLabel: "Sunday, 16 August 2026",
+        bounds: { wake: "06:30", sleep: "23:00" },
+        drafts: [{ id: "d1", name: "Call dentist" }],
+        anchors: [
+          { id: "a1", name: "Wake + breakfast", start: "06:30", durationMin: 45 },
+          { id: "a2", name: "Gym", start: "18:00", durationMin: 90 },
+        ],
+        flexes: [
+          { id: "f1", name: "Deep work", durationMin: 90, start: "07:15" },
+          { id: "f2", name: "Groceries", durationMin: 45, start: null },
+          { id: "f3", name: "Walk", durationMin: 30, start: null },
+        ],
+      };
+    }
+
+    let session = seedSession();
+    let lastAction = "Seeded mid-Session. Try adding a forgotten item.";
+    let armedFlexId = null;
+    let selected = null;
+    let nextId = 10;
+
+    function nid(prefix) { nextId += 1; return prefix + nextId; }
+    function esc(s) {
+      return String(s).replace(/[&<>"']/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;" }[c]));
+    }
+    function toMin(hhmm) {
+      const [h, m] = hhmm.split(":").map(Number);
+      return h * 60 + m;
+    }
+    function toClock(min) {
+      const h = Math.floor(min / 60);
+      const m = min % 60;
+      return String(h).padStart(2, "0") + ":" + String(m).padStart(2, "0");
+    }
+    function endClock(start, durationMin) { return toClock(toMin(start) + durationMin); }
+    function fmtDur(min) {
+      if (min >= 60 && min % 60 === 0) return (min / 60) + "h";
+      if (min >= 60) return Math.floor(min / 60) + "h " + (min % 60) + "m";
+      return min + "m";
+    }
+
+    function timeline() {
+      const wake = toMin(session.bounds.wake);
+      const sleep = toMin(session.bounds.sleep);
+      const total = Math.max(1, sleep - wake);
+      const items = [
+        ...session.anchors.map(a => ({ kind: "anchor", id: a.id, name: a.name, start: a.start, end: endClock(a.start, a.durationMin), durationMin: a.durationMin })),
+        ...session.flexes.filter(f => f.start).map(f => ({ kind: "flex", id: f.id, name: f.name, start: f.start, end: endClock(f.start, f.durationMin), durationMin: f.durationMin })),
+      ].sort((a, b) => toMin(a.start) - toMin(b.start));
+
+      const rows = [];
+      let cursor = wake;
+      for (const item of items) {
+        const start = toMin(item.start);
+        if (start > cursor) {
+          rows.push({ kind: "gap", start: toClock(cursor), end: toClock(start), durationMin: start - cursor });
+        }
+        rows.push(item);
+        cursor = Math.max(cursor, toMin(item.end));
+      }
+      if (sleep > cursor) {
+        rows.push({ kind: "gap", start: toClock(cursor), end: toClock(sleep), durationMin: sleep - cursor });
+      }
+      return { rows, total };
+    }
+
+    function blockers() {
+      const list = [];
+      for (const d of session.drafts) list.push("Draft ‘" + d.name + "’ is not yet an Anchor or Flex.");
+      const wake = toMin(session.bounds.wake);
+      const sleep = toMin(session.bounds.sleep);
+      const ordered = [...session.anchors].sort((a, b) => toMin(a.start) - toMin(b.start));
+      for (const a of ordered) {
+        const s = toMin(a.start);
+        const e = s + a.durationMin;
+        if (s < wake || e > sleep) list.push("Anchor ‘" + a.name + "’ sits outside day bounds.");
+      }
+      for (let i = 0; i < ordered.length - 1; i++) {
+        const a = ordered[i], b = ordered[i + 1];
+        if (toMin(b.start) < toMin(a.start) + a.durationMin) {
+          list.push("Anchor ‘" + a.name + "’ overlaps ‘" + b.name + "’.");
+        }
+      }
+      for (const f of session.flexes) {
+        if (!f.start) list.push("Flex ‘" + f.name + "’ is not yet placed in a Gap.");
+      }
+      return list;
+    }
+
+    function unplaced() { return session.flexes.filter(f => !f.start); }
+    function findItem(kind, id) {
+      if (kind === "anchor") return session.anchors.find(x => x.id === id);
+      if (kind === "flex") return session.flexes.find(x => x.id === id);
+      return session.drafts.find(x => x.id === id);
+    }
+
+    function afterChange(msg) {
+      lastAction = msg;
+      render();
+    }
+
+    function addAnchor({ name, start, durationMin }) {
+      session.anchors.push({ id: nid("a"), name, start, durationMin: Number(durationMin) });
+      afterChange("Added Anchor ‘" + name + "’ at " + start + ".");
+    }
+    function addFlex({ name, durationMin, start }) {
+      session.flexes.push({ id: nid("f"), name, durationMin: Number(durationMin), start: start || null });
+      afterChange(start ? "Added Flex ‘" + name + "’ placed at " + start + "." : "Added Flex ‘" + name + "’ (unplaced).");
+    }
+    function addDraft({ name }) {
+      session.drafts.push({ id: nid("d"), name });
+      afterChange("Added Draft ‘" + name + "’.");
+    }
+    function dropItem(kind, id) {
+      const item = findItem(kind, id);
+      const label = item ? item.name : id;
+      if (kind === "anchor") session.anchors = session.anchors.filter(x => x.id !== id);
+      else if (kind === "flex") session.flexes = session.flexes.filter(x => x.id !== id);
+      else session.drafts = session.drafts.filter(x => x.id !== id);
+      if (selected && selected.id === id) selected = null;
+      if (armedFlexId === id) armedFlexId = null;
+      afterChange("Dropped " + kind + " ‘" + label + "’.");
+    }
+    function saveItem(kind, id, fields) {
+      const item = findItem(kind, id);
+      if (!item) return;
+      if (fields.name) item.name = fields.name;
+      if (kind === "anchor") {
+        if (fields.start) item.start = fields.start;
+        if (fields.durationMin) item.durationMin = Number(fields.durationMin);
+      }
+      if (kind === "flex") {
+        if (fields.durationMin) item.durationMin = Number(fields.durationMin);
+        if ("start" in fields) item.start = fields.start || null;
+      }
+      afterChange("Edited " + kind + " ‘" + item.name + "’.");
+    }
+    function placeFlex(id, start) {
+      const f = findItem("flex", id);
+      if (!f) return;
+      f.start = start;
+      armedFlexId = null;
+      afterChange("Placed Flex ‘" + f.name + "’ at " + start + ".");
+    }
+    function shrinkFlex(id, durationMin) {
+      const f = findItem("flex", id);
+      if (!f) return;
+      f.durationMin = Number(durationMin);
+      afterChange("Shrunk Flex ‘" + f.name + "’ to " + fmtDur(f.durationMin) + ".");
+    }
+    function promoteDraft(id, as, fields) {
+      const d = findItem("draft", id);
+      if (!d) return;
+      session.drafts = session.drafts.filter(x => x.id !== id);
+      if (as === "anchor") {
+        session.anchors.push({ id: nid("a"), name: fields.name || d.name, start: fields.start, durationMin: Number(fields.durationMin) });
+        afterChange("Promoted Draft ‘" + d.name + "’ to Anchor.");
+      } else {
+        session.flexes.push({ id: nid("f"), name: fields.name || d.name, durationMin: Number(fields.durationMin), start: fields.start || null });
+        afterChange("Promoted Draft ‘" + d.name + "’ to Flex.");
+      }
+    }
+
+    function heightPx(durationMin, total, floor) {
+      return Math.max(floor, Math.round((durationMin / total) * 520));
+    }
+
+    /* ── Sheet ── */
+    function openSheet(html) {
+      const backdrop = document.getElementById("sheet-backdrop");
+      const sheet = document.getElementById("sheet");
+      sheet.innerHTML = html;
+      backdrop.hidden = false;
+      backdrop.classList.add("open");
+      const first = sheet.querySelector("input, select, button");
+      if (first) first.focus();
+    }
+    function closeSheet() {
+      const backdrop = document.getElementById("sheet-backdrop");
+      backdrop.classList.remove("open");
+      backdrop.hidden = true;
+      document.getElementById("sheet").innerHTML = "";
+    }
+
+    function formFields({ name, start, durationMin, showStart, showDuration, startRequired }) {
+      return `
+        <label>Name <input name="name" required value="${esc(name || "")}"></label>
+        <div class="row">
+          ${showStart ? `<label>Start <input name="start" type="time"${startRequired ? " required" : ""} value="${esc(start || "")}"></label>` : ""}
+          ${showDuration ? `<label>Duration (min) <input name="durationMin" type="number" min="1" required value="${esc(durationMin || "")}"></label>` : ""}
+        </div>`;
+    }
+
+    function sheetAdd(kind, preset) {
+      const gapHint = preset && preset.start && preset.end
+        ? `<p class="hint">Into Gap ${esc(preset.start)}–${esc(preset.end)} (${esc(fmtDur(preset.durationMin))})</p>`
+        : "";
+      if (!kind) {
+        const unp = unplaced().map(f =>
+          `<button type="button" data-act="place-at" data-id="${f.id}" data-start="${esc(preset.start)}">${esc(f.name)} · ${fmtDur(f.durationMin)}</button>`
+        ).join("");
+        openSheet(`
+          <h2>Add into this Gap</h2>
+          ${gapHint}
+          <div class="choice-row">
+            <button type="button" data-act="sheet-add" data-kind="anchor" data-start="${esc(preset.start || "")}">Anchor</button>
+            <button type="button" data-act="sheet-add" data-kind="flex" data-start="${esc(preset.start || "")}">Flex</button>
+            <button type="button" data-act="sheet-add" data-kind="draft">Draft</button>
+          </div>
+          ${unp ? `<p class="hint">Or Place unplaced Flex at ${esc(preset.start)}</p><div class="choice-row">${unp}</div>` : ""}
+          <div class="actions"><button type="button" class="ghost" data-act="close-sheet">Cancel</button></div>`);
+        return;
+      }
+      if (kind === "draft") {
+        openSheet(`<h2>Add Draft</h2>
+          <form data-form="add-draft">
+            <label>Name <input name="name" required placeholder="Something you captured"></label>
+            <div class="actions"><button class="primary" type="submit">Add Draft</button>
+            <button type="button" class="ghost" data-act="close-sheet">Cancel</button></div>
+          </form>`);
+        return;
+      }
+      if (kind === "anchor") {
+        openSheet(`<h2>Add Anchor</h2>
+          <form data-form="add-anchor">
+            ${formFields({ name: "", start: preset && preset.start || "", durationMin: 60, showStart: true, showDuration: true, startRequired: true })}
+            <div class="actions"><button class="primary" type="submit">Add Anchor</button>
+            <button type="button" class="ghost" data-act="close-sheet">Cancel</button></div>
+          </form>`);
+        return;
+      }
+      openSheet(`<h2>Add Flex</h2>
+        <p class="hint">Leave start blank to keep it unplaced — Place it later from the tray.</p>
+        <form data-form="add-flex">
+          ${formFields({ name: "", start: preset && preset.start || "", durationMin: 45, showStart: true, showDuration: true, startRequired: false })}
+          <div class="actions"><button class="primary" type="submit">Add Flex</button>
+          <button type="button" class="ghost" data-act="close-sheet">Cancel</button></div>
+        </form>`);
+    }
+
+    function sheetEdit(kind, id) {
+      const item = findItem(kind, id);
+      if (!item) return;
+      if (kind === "draft") {
+        openSheet(`<h2>Draft · ${esc(item.name)}</h2>
+          <form data-form="promote" data-id="${item.id}">
+            <label>Name <input name="name" required value="${esc(item.name)}"></label>
+            <label>Promote to
+              <select name="as">
+                <option value="anchor">Anchor</option>
+                <option value="flex">Flex</option>
+              </select>
+            </label>
+            <div class="row">
+              <label>Start <input name="start" type="time" value="09:00"></label>
+              <label>Duration (min) <input name="durationMin" type="number" min="1" value="30"></label>
+            </div>
+            <p class="hint">For Flex, start may be left as-is then cleared after — or Place from the tray.</p>
+            <div class="actions">
+              <button class="primary" type="submit">Promote</button>
+              <button type="button" class="ghost" data-act="close-sheet">Cancel</button>
+              <button type="button" class="danger" data-act="drop" data-kind="draft" data-id="${item.id}">Drop</button>
+            </div>
+          </form>`);
+        return;
+      }
+      const startVal = item.start || "";
+      openSheet(`<h2>Edit ${kind}</h2>
+        <form data-form="save" data-kind="${kind}" data-id="${item.id}">
+          ${formFields({ name: item.name, start: startVal, durationMin: item.durationMin, showStart: true, showDuration: true, startRequired: kind === "anchor" })}
+          <div class="actions">
+            <button class="primary" type="submit">Save</button>
+            <button type="button" class="ghost" data-act="close-sheet">Cancel</button>
+            <button type="button" class="danger" data-act="drop" data-kind="${kind}" data-id="${item.id}">Drop</button>
+          </div>
+        </form>`);
+    }
+
+    function sheetShrink(id) {
+      const f = findItem("flex", id);
+      if (!f) return;
+      openSheet(`<h2>Shrink Flex · ${esc(f.name)}</h2>
+        <form data-form="shrink" data-id="${f.id}">
+          <label>New duration (min) <input name="durationMin" type="number" min="1" required value="${f.durationMin}"></label>
+          <div class="actions"><button class="primary" type="submit">Shrink</button>
+          <button type="button" class="ghost" data-act="close-sheet">Cancel</button></div>
+        </form>`);
+    }
+
+    function sheetPlace(id) {
+      const f = findItem("flex", id);
+      if (!f) return;
+      const gaps = timeline().rows.filter(r => r.kind === "gap");
+      const opts = gaps.map(g =>
+        `<button type="button" data-act="place-at" data-id="${f.id}" data-start="${g.start}">${g.start}–${g.end} · ${fmtDur(g.durationMin)}</button>`
+      ).join("");
+      openSheet(`<h2>Place Flex · ${esc(f.name)} (${fmtDur(f.durationMin)})</h2>
+        <p class="hint">Snap to a Gap start, or type a clock time.</p>
+        <div class="choice-row">${opts || "<span>No Gaps.</span>"}</div>
+        <form data-form="place" data-id="${f.id}">
+          <label>Start <input name="start" type="time" required></label>
+          <div class="actions"><button class="primary" type="submit">Place</button>
+          <button type="button" class="ghost" data-act="close-sheet">Cancel</button></div>
+        </form>`);
+    }
+
+    function stateDumpHtml() {
+      const lines = [
+        "Last: " + lastAction,
+        "Day bounds: " + session.bounds.wake + "–" + session.bounds.sleep,
+        "Anchors: " + session.anchors.map(a => a.name + " " + a.start + "–" + endClock(a.start, a.durationMin)).join("; ") || "(none)",
+        "Flex placed: " + session.flexes.filter(f => f.start).map(f => f.name + " " + f.start).join("; ") || "(none)",
+        "Flex unplaced: " + unplaced().map(f => f.name + " " + fmtDur(f.durationMin)).join("; ") || "(none)",
+        "Drafts: " + session.drafts.map(d => d.name).join("; ") || "(none)",
+        "Gaps: " + timeline().rows.filter(r => r.kind === "gap").map(g => g.start + "–" + g.end).join("; ") || "(none)",
+        "Blockers: " + (blockers().join(" | ") || "(none)"),
+      ];
+      return `<details class="state-dump"><summary>Session state</summary><pre>${esc(lines.join("\n"))}</pre></details>`;
+    }
+
+    function updateStatus() {
+      const b = blockers();
+      document.getElementById("status-strip").innerHTML =
+        `<strong>${esc(lastAction)}</strong>` +
+        (b.length ? ` <span class="blockers">· ${b.length} blocker${b.length === 1 ? "" : "s"}</span>` : " · clean enough to Submit");
+    }
+
+    /* ── Rail ── */
+    function renderRail(root) {
+      const { rows, total } = timeline();
+      const draftHtml = session.drafts.length
+        ? `<div class="drafts">${session.drafts.map(d => `
+            <div class="draft-chip">
+              ${esc(d.name)}
+              <button type="button" data-act="edit" data-kind="draft" data-id="${d.id}">edit</button>
+              <button type="button" data-act="drop" data-kind="draft" data-id="${d.id}">Drop</button>
+            </div>`).join("")}</div>`
+        : "";
+      const blocks = rows.map(row => {
+        if (row.kind === "gap") {
+          const armed = armedFlexId ? " armed" : "";
+          const cta = armedFlexId ? "Place here" : "Add into Gap";
+          return `<div class="gap${armed}" style="min-height:${heightPx(row.durationMin, total, 40)}px"
+              data-act="gap" data-start="${row.start}" data-end="${row.end}" data-dur="${row.durationMin}">
+              <span class="time-tag">${row.start}</span>
+              <span>Gap · ${fmtDur(row.durationMin)}</span>
+              <span class="cta">${cta}</span>
+            </div>`;
+        }
+        return `<div class="block ${row.kind}" style="min-height:${heightPx(row.durationMin, total, 52)}px"
+            data-act="edit" data-kind="${row.kind}" data-id="${row.id}">
+            <span class="time-tag">${row.start}</span>
+            <div class="block-title">${esc(row.name)}</div>
+            <div class="block-range">${row.start}–${row.end} · ${fmtDur(row.durationMin)}</div>
+          </div>`;
+      }).join("");
+      const chips = unplaced().map(f => `
+        <div class="flex-chip${armedFlexId === f.id ? " armed" : ""}" data-act="arm-flex" data-id="${f.id}">
+          <span class="name">${esc(f.name)}</span>
+          <span class="meta">${fmtDur(f.durationMin)} · unplaced</span>
+          <div class="ops">
+            <button type="button" data-act="place" data-id="${f.id}">Place</button>
+            <button type="button" data-act="shrink" data-id="${f.id}">Shrink</button>
+            <button type="button" data-act="drop" data-kind="flex" data-id="${f.id}">Drop</button>
+          </div>
+        </div>`).join("");
+      root.innerHTML = `
+        <div class="v-rail"><div class="shell">
+          <div class="kicker">Tonight’s Session</div>
+          <h1>${esc(session.dateLabel)}</h1>
+          <div class="bounds">Wake ${session.bounds.wake} · Sleep ${session.bounds.sleep}</div>
+          <div class="add-row">
+            <button type="button" data-act="sheet-add" data-kind="anchor">+ Anchor</button>
+            <button type="button" data-act="sheet-add" data-kind="flex">+ Flex</button>
+            <button type="button" data-act="sheet-add" data-kind="draft">+ Draft</button>
+          </div>
+          ${draftHtml}
+          <div class="cap">↑ ${session.bounds.wake} wake</div>
+          <div class="rail-wrap">${blocks}</div>
+          <div class="cap">${session.bounds.sleep} sleep ↓</div>
+          ${stateDumpHtml()}
+        </div>
+        <div class="tray${unplaced().length ? "" : " empty"}">
+          <div class="tray-label">Unplaced Flex — Place / Shrink / Drop any time</div>
+          <div class="tray-chips">${chips || "None. Every Flex is on the Plan."}</div>
+        </div>
+        </div>`;
+    }
+
+    /* ── Desk ── */
+    function inspectorHtml() {
+      if (!selected) {
+        return `<div class="inspector empty">Stamp an item to add it, or pin one on the Plan to edit. Forgotten something? Stamp it now — the Plan already has items on it.</div>`;
+      }
+      const item = findItem(selected.kind, selected.id);
+      if (!item) return `<div class="inspector empty">That item is gone.</div>`;
+      if (selected.kind === "draft") {
+        return `<div class="inspector">
+          <h2>Draft</h2>
+          <form data-form="promote" data-id="${item.id}">
+            <label>Name <input name="name" required value="${esc(item.name)}"></label>
+            <label>Promote to
+              <select name="as"><option value="anchor">Anchor</option><option value="flex">Flex</option></select>
+            </label>
+            <div class="row">
+              <label>Start <input name="start" type="time" value="09:00"></label>
+              <label>Duration (min) <input name="durationMin" type="number" min="1" value="30"></label>
+            </div>
+            <div class="actions">
+              <button type="submit">Promote</button>
+              <button type="button" class="danger" data-act="drop" data-kind="draft" data-id="${item.id}">Drop</button>
+            </div>
+          </form>
+        </div>`;
+      }
+      return `<div class="inspector">
+        <h2>${selected.kind === "anchor" ? "Anchor" : "Flex"}</h2>
+        <form data-form="save" data-kind="${selected.kind}" data-id="${item.id}">
+          <label>Name <input name="name" required value="${esc(item.name)}"></label>
+          <div class="row">
+            <label>Start <input name="start" type="time" value="${esc(item.start || "")}"></label>
+            <label>Duration (min) <input name="durationMin" type="number" min="1" required value="${item.durationMin}"></label>
+          </div>
+          <div class="actions">
+            <button type="submit">Save</button>
+            ${selected.kind === "flex" ? `<button type="button" class="ghost" data-act="place" data-id="${item.id}">Place</button>
+              <button type="button" class="ghost" data-act="shrink" data-id="${item.id}">Shrink</button>` : ""}
+            <button type="button" class="danger" data-act="drop" data-kind="${selected.kind}" data-id="${item.id}">Drop</button>
+          </div>
+        </form>
+      </div>`;
+    }
+
+    function renderDesk(root) {
+      const { rows } = timeline();
+      const pins = rows.map(row => {
+        if (row.kind === "gap") {
+          return `<div class="gap-pin" data-act="gap" data-start="${row.start}" data-end="${row.end}" data-dur="${row.durationMin}">Gap ${row.start}–${row.end} · ${fmtDur(row.durationMin)} — add here</div>`;
+        }
+        const sel = selected && selected.id === row.id ? " selected" : "";
+        return `<div class="pin ${row.kind}${sel}" data-act="select" data-kind="${row.kind}" data-id="${row.id}">
+          <div class="when">${row.start}<br>${row.end}</div>
+          <div><div class="title">${esc(row.name)}</div></div>
+          <div class="kind">${row.kind}</div>
+        </div>`;
+      }).join("");
+      const urows = unplaced().map(f => `
+        <div class="u-row">
+          <div><strong>${esc(f.name)}</strong> · ${fmtDur(f.durationMin)}</div>
+          <div class="ops">
+            <button type="button" data-act="place" data-id="${f.id}">Place</button>
+            <button type="button" data-act="shrink" data-id="${f.id}">Shrink</button>
+            <button type="button" data-act="drop" data-kind="flex" data-id="${f.id}">Drop</button>
+          </div>
+        </div>`).join("");
+      const drafts = session.drafts.map(d => `
+        <li>${esc(d.name)}
+          <span>
+            <button type="button" data-act="select" data-kind="draft" data-id="${d.id}">edit</button>
+            <button type="button" data-act="drop" data-kind="draft" data-id="${d.id}">Drop</button>
+          </span>
+        </li>`).join("");
+      root.innerHTML = `
+        <div class="v-desk"><div class="board">
+          <section class="paper">
+            <div class="eyebrow">Running Plan</div>
+            <h1>${esc(session.dateLabel)}</h1>
+            <div class="bounds">Wake ${session.bounds.wake} · Sleep ${session.bounds.sleep}</div>
+            <div style="margin-top:0.85rem">
+              <div class="pin" style="cursor:default;border-bottom-style:dashed"><div class="when">${session.bounds.wake}</div><div class="title">Wake</div><div></div></div>
+              ${pins}
+              <div class="pin" style="cursor:default;border-bottom:none"><div class="when">${session.bounds.sleep}</div><div class="title">Sleep</div><div></div></div>
+            </div>
+          </section>
+          <aside class="tools">
+            <div class="eyebrow">Construction desk</div>
+            <div class="stamps">
+              <button type="button" class="stamp anchor" data-act="sheet-add" data-kind="anchor"><span>A</span>Anchor</button>
+              <button type="button" class="stamp flex" data-act="sheet-add" data-kind="flex"><span>F</span>Flex</button>
+              <button type="button" class="stamp draft" data-act="sheet-add" data-kind="draft"><span>D</span>Draft</button>
+            </div>
+            ${inspectorHtml()}
+            <div class="unplaced">
+              <h3>Unplaced Flex</h3>
+              ${urows || "<p>None.</p>"}
+            </div>
+            <div class="draft-list">
+              <h3 class="eyebrow">Drafts</h3>
+              <ul>${drafts || "<li>None.</li>"}</ul>
+            </div>
+          </aside>
+        </div>
+        ${stateDumpHtml()}
+        </div>`;
+    }
+
+    /* ── Log ── */
+    function renderLog(root) {
+      const { rows } = timeline();
+      const body = [];
+      body.push(`<button type="button" class="insert" data-act="gap" data-start="${session.bounds.wake}" data-end="${rows[0] ? rows[0].start || session.bounds.sleep : session.bounds.sleep}" data-dur="0">add here</button>`);
+      for (const row of rows) {
+        if (row.kind === "gap") {
+          body.push(`<button type="button" class="insert" data-act="gap" data-start="${row.start}" data-end="${row.end}" data-dur="${row.durationMin}">add here · Gap ${fmtDur(row.durationMin)}</button>`);
+        } else {
+          body.push(`<div class="item" data-act="edit" data-kind="${row.kind}" data-id="${row.id}">
+            <div class="when">${row.start}<br>${row.end}</div>
+            <div><div class="title">${esc(row.name)}</div><div class="sub">${row.kind} · ${fmtDur(row.durationMin)}</div></div>
+            <button type="button" class="drop" data-act="drop" data-kind="${row.kind}" data-id="${row.id}">Drop</button>
+          </div>`);
+        }
+      }
+      const urows = unplaced().map(f => `
+        <div class="still-row">
+          <div><strong>${esc(f.name)}</strong> · ${fmtDur(f.durationMin)}</div>
+          <div class="ops">
+            <button type="button" data-act="place" data-id="${f.id}">Place</button>
+            <button type="button" data-act="shrink" data-id="${f.id}">Shrink</button>
+            <button type="button" data-act="drop" data-kind="flex" data-id="${f.id}">Drop</button>
+          </div>
+        </div>`).join("");
+      const drafts = session.drafts.map(d => `
+        <div class="draft-row">
+          ${esc(d.name)}
+          <span>
+            <button type="button" data-act="edit" data-kind="draft" data-id="${d.id}">promote</button>
+            <button type="button" data-act="drop" data-kind="draft" data-id="${d.id}">Drop</button>
+          </span>
+        </div>`).join("");
+      root.innerHTML = `
+        <div class="v-log"><div class="page">
+          <form class="composer" data-form="composer">
+            <label class="lead">Forgotten something?</label>
+            <input name="name" required placeholder="Name of the item" autocomplete="off">
+            <div class="kinds">
+              <label><input type="radio" name="kind" value="anchor" checked><span>Anchor</span></label>
+              <label><input type="radio" name="kind" value="flex"><span>Flex</span></label>
+              <label><input type="radio" name="kind" value="draft"><span>Draft</span></label>
+            </div>
+            <div class="fields on" data-extra>
+              <label>Start <input name="start" type="time" value=""></label>
+              <label>Duration (min) <input name="durationMin" type="number" min="1" value="30"></label>
+            </div>
+            <button type="submit">Add to the Plan</button>
+          </form>
+          <header class="day-head">
+            <h1>${esc(session.dateLabel)}</h1>
+            <div class="bounds">Wake ${session.bounds.wake} · Sleep ${session.bounds.sleep}</div>
+          </header>
+          ${body.join("")}
+          <section class="still">
+            <h2>Still to place</h2>
+            ${urows || "<p>Every Flex is on the Plan.</p>"}
+          </section>
+          <section class="drafts">
+            <h2>Drafts</h2>
+            ${drafts || "<p>None.</p>"}
+          </section>
+          ${stateDumpHtml()}
+        </div></div>`;
+    }
+
+    const VARIANTS = [
+      { key: "rail", name: "Night rail", render: renderRail },
+      { key: "desk", name: "Workbench desk", render: renderDesk },
+      { key: "log", name: "Composer log", render: renderLog },
+    ];
+
+    function currentVariantKey() {
+      return new URLSearchParams(location.search).get("variant") || VARIANTS[0].key;
+    }
+    function variantIndex(key) {
+      const i = VARIANTS.findIndex(v => v.key === key);
+      return i >= 0 ? i : 0;
+    }
+    function setVariant(key) {
+      const url = new URL(location.href);
+      url.searchParams.set("variant", key);
+      history.replaceState(null, "", url);
+      render();
+    }
+    function cycleVariant(delta) {
+      const i = variantIndex(currentVariantKey());
+      setVariant(VARIANTS[(i + delta + VARIANTS.length) % VARIANTS.length].key);
+    }
+
+    function render() {
+      const v = VARIANTS.find(x => x.key === currentVariantKey()) || VARIANTS[0];
+      const app = document.getElementById("app");
+      app.innerHTML = "";
+      v.render(app);
+      document.getElementById("variant-label").innerHTML =
+        `<strong>${v.key}</strong><span>${v.name}</span>`;
+      document.title = `PROTOTYPE — ${v.name}`;
+      updateStatus();
+    }
+
+    function handleAct(act, ds, el) {
+      if (act === "close-sheet") { closeSheet(); return; }
+      if (act === "sheet-add") { sheetAdd(ds.kind, { start: ds.start, end: ds.end, durationMin: Number(ds.dur || 0) }); return; }
+      if (act === "edit") { sheetEdit(ds.kind, ds.id); return; }
+      if (act === "select") { selected = { kind: ds.kind, id: ds.id }; render(); return; }
+      if (act === "drop") { closeSheet(); dropItem(ds.kind, ds.id); return; }
+      if (act === "place") { sheetPlace(ds.id); return; }
+      if (act === "place-at") { closeSheet(); placeFlex(ds.id, ds.start); return; }
+      if (act === "shrink") { sheetShrink(ds.id); return; }
+      if (act === "arm-flex") {
+        armedFlexId = armedFlexId === ds.id ? null : ds.id;
+        lastAction = armedFlexId ? "Armed Flex ‘" + findItem("flex", ds.id).name + "’. Tap a Gap to Place it." : "Disarmed Flex.";
+        render();
+        return;
+      }
+      if (act === "gap") {
+        if (armedFlexId) { placeFlex(armedFlexId, ds.start); return; }
+        sheetAdd(null, { start: ds.start, end: ds.end, durationMin: Number(ds.dur || 0) });
+      }
+    }
+
+    function handleForm(form) {
+      const fd = new FormData(form);
+      const kind = form.getAttribute("data-form");
+      if (kind === "add-anchor") {
+        closeSheet();
+        addAnchor({ name: fd.get("name").trim(), start: fd.get("start"), durationMin: fd.get("durationMin") });
+        return;
+      }
+      if (kind === "add-flex") {
+        closeSheet();
+        const start = (fd.get("start") || "").trim();
+        addFlex({ name: fd.get("name").trim(), durationMin: fd.get("durationMin"), start: start || null });
+        return;
+      }
+      if (kind === "add-draft") {
+        closeSheet();
+        addDraft({ name: fd.get("name").trim() });
+        return;
+      }
+      if (kind === "save") {
+        closeSheet();
+        const itemKind = form.getAttribute("data-kind");
+        const start = (fd.get("start") || "").trim();
+        saveItem(itemKind, form.getAttribute("data-id"), {
+          name: fd.get("name").trim(),
+          start: start,
+          durationMin: fd.get("durationMin"),
+        });
+        return;
+      }
+      if (kind === "shrink") {
+        closeSheet();
+        shrinkFlex(form.getAttribute("data-id"), fd.get("durationMin"));
+        return;
+      }
+      if (kind === "place") {
+        closeSheet();
+        placeFlex(form.getAttribute("data-id"), fd.get("start"));
+        return;
+      }
+      if (kind === "promote") {
+        closeSheet();
+        const as = fd.get("as");
+        promoteDraft(form.getAttribute("data-id"), as, {
+          name: fd.get("name").trim(),
+          start: as === "flex" ? (fd.get("start") || null) : fd.get("start"),
+          durationMin: fd.get("durationMin"),
+        });
+        return;
+      }
+      if (kind === "composer") {
+        const name = fd.get("name").trim();
+        const itemKind = fd.get("kind");
+        const start = (fd.get("start") || "").trim();
+        const durationMin = fd.get("durationMin") || 30;
+        if (itemKind === "draft") addDraft({ name });
+        else if (itemKind === "anchor") {
+          if (!start) { sheetAdd("anchor", {}); return; }
+          addAnchor({ name, start, durationMin });
+        } else {
+          addFlex({ name, durationMin, start: start || null });
+        }
+        form.reset();
+      }
+    }
+
+    document.getElementById("app").addEventListener("change", e => {
+      if (e.target.name !== "kind") return;
+      const form = e.target.closest("[data-form=composer]");
+      if (!form) return;
+      const extra = form.querySelector("[data-extra]");
+      if (extra) extra.classList.toggle("on", e.target.value !== "draft");
+    });
+    document.getElementById("app").addEventListener("click", e => {
+      const btn = e.target.closest("[data-act]");
+      if (!btn || !document.getElementById("app").contains(btn)) return;
+      if (btn.closest("form") && btn.type === "submit") return;
+      e.preventDefault();
+      e.stopPropagation();
+      handleAct(btn.getAttribute("data-act"), btn.dataset, btn);
+    });
+    document.getElementById("sheet-backdrop").addEventListener("click", e => {
+      if (e.target.id === "sheet-backdrop") closeSheet();
+      const btn = e.target.closest("[data-act]");
+      if (btn) {
+        e.preventDefault();
+        handleAct(btn.getAttribute("data-act"), btn.dataset, btn);
+      }
+    });
+    document.addEventListener("submit", e => {
+      const form = e.target.closest("[data-form]");
+      if (!form) return;
+      e.preventDefault();
+      handleForm(form);
+    });
+    document.getElementById("reset-seed").addEventListener("click", () => {
+      session = seedSession();
+      armedFlexId = null;
+      selected = null;
+      nextId = 10;
+      lastAction = "Reset to mid-Session seed.";
+      closeSheet();
+      render();
+    });
+    document.getElementById("prev-variant").addEventListener("click", () => cycleVariant(-1));
+    document.getElementById("next-variant").addEventListener("click", () => cycleVariant(1));
+    document.addEventListener("keydown", e => {
+      if (e.target.closest("input, textarea, select, [contenteditable=true]")) return;
+      if (e.key === "Escape") closeSheet();
+      if (e.key === "ArrowLeft") { e.preventDefault(); cycleVariant(-1); }
+      if (e.key === "ArrowRight") { e.preventDefault(); cycleVariant(1); }
+    });
+
+    render();
+  </script>
+</body>
+</html>
