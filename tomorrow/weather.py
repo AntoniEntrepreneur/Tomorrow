@@ -19,17 +19,36 @@ class WeatherLocation:
 _OPEN_METEO_FORECAST = "https://api.open-meteo.com/v1/forecast"
 
 
-def load_weather_location(data_dir: Path) -> WeatherLocation | None:
+def _load_weather_toml(data_dir: Path) -> dict | None:
     path = data_dir / "weather.toml"
     if not path.exists():
         return None
     try:
-        data = tomllib.loads(path.read_text(encoding="utf-8"))
+        return tomllib.loads(path.read_text(encoding="utf-8"))
+    except tomllib.TOMLDecodeError:
+        return None
+
+
+def load_weather_name(data_dir: Path) -> str | None:
+    data = _load_weather_toml(data_dir)
+    if data is None:
+        return None
+    name = data.get("name")
+    if not name:
+        return None
+    return str(name)
+
+
+def load_weather_location(data_dir: Path) -> WeatherLocation | None:
+    data = _load_weather_toml(data_dir)
+    if data is None:
+        return None
+    try:
         return WeatherLocation(
             latitude=float(data["latitude"]),
             longitude=float(data["longitude"]),
         )
-    except (KeyError, TypeError, ValueError, tomllib.TOMLDecodeError):
+    except (KeyError, TypeError, ValueError):
         return None
 
 
@@ -82,7 +101,7 @@ def fetch_weather_one_liner(
         low_c = float(daily["temperature_2m_min"][0])
         high_c = float(daily["temperature_2m_max"][0])
         weather_code = int(daily["weathercode"][0])
-    except (URLError, HTTPError, KeyError, IndexError, TypeError, ValueError):
+    except (URLError, HTTPError, TimeoutError, KeyError, IndexError, TypeError, ValueError):
         return None
     return format_weather_one_liner(low_c=low_c, high_c=high_c, weather_code=weather_code)
 

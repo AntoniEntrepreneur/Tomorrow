@@ -9,6 +9,7 @@ from tomorrow.weather import (
     fetch_weather_one_liner,
     format_weather_one_liner,
     load_weather_location,
+    load_weather_name,
     try_fetch_weather,
 )
 
@@ -76,6 +77,18 @@ def test_fetch_weather_one_liner_returns_none_on_network_error() -> None:
     )
 
 
+def test_fetch_weather_one_liner_returns_none_on_timeout() -> None:
+    def timed_out_opener(_request):
+        raise TimeoutError("slow")
+
+    location = WeatherLocation(latitude=52.23, longitude=21.01)
+
+    assert (
+        fetch_weather_one_liner(location, date(2026, 8, 11), opener=timed_out_opener)
+        is None
+    )
+
+
 def test_try_fetch_weather_skips_network_when_location_missing(tmp_path: Path) -> None:
     called = False
 
@@ -109,3 +122,14 @@ def test_try_fetch_weather_loads_location_and_fetches(tmp_path: Path) -> None:
     one_liner = try_fetch_weather(data_dir, date(2026, 8, 11), opener=fake_opener)
 
     assert one_liner == "16° / 22° · rain"
+
+
+def test_load_weather_name_reads_optional_display_name(tmp_path: Path) -> None:
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
+    (data_dir / "weather.toml").write_text(
+        'name = "Warsaw"\nlatitude = 52.23\nlongitude = 21.01\n',
+        encoding="utf-8",
+    )
+
+    assert load_weather_name(data_dir) == "Warsaw"

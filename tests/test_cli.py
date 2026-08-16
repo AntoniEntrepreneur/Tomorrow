@@ -1,10 +1,15 @@
 from datetime import datetime
+from http.client import HTTPConnection
 from pathlib import Path
+import json
+import socket
+import threading
+import time
 
 import pytest
 
-from tomorrow.cli import main, run_wizard
-from tomorrow.domain import PlanBlockedError
+from tomorrow.cli import main
+from tomorrow.session import SESSION_HOST, SESSION_PORT, bind_session_server, run_session
 
 
 def _write_defaults(tmp_path: Path) -> None:
@@ -16,509 +21,235 @@ def _write_defaults(tmp_path: Path) -> None:
     (tmp_path / "plans").mkdir()
 
 
-def _write_tuesday_template(tmp_path: Path) -> None:
-    templates_dir = tmp_path / "data" / "templates"
-    templates_dir.mkdir(parents=True)
-    (templates_dir / "tuesday.toml").write_text(
-        """
-[[anchor]]
-name = "Standup"
-start = "07:00"
-duration = 15
-
-[[flex]]
-name = "Sauna"
-duration = 30
-checklist = "sauna-kit"
-""".strip(),
-        encoding="utf-8",
-    )
-
-
-def _write_sauna_checklist(tmp_path: Path) -> None:
-    checklists_dir = tmp_path / "data" / "checklists"
-    checklists_dir.mkdir(parents=True)
-    (checklists_dir / "sauna-kit.toml").write_text(
-        'name = "Sauna kit"\nitems = ["Towel", "Flip-flops"]\n',
-        encoding="utf-8",
-    )
-
-
-def _write_gym_checklist(tmp_path: Path) -> None:
-    checklists_dir = tmp_path / "data" / "checklists"
-    checklists_dir.mkdir(parents=True)
-    (checklists_dir / "gym-bag.toml").write_text(
-        'name = "Gym bag"\nitems = ["Towel", "Lock"]\n',
-        encoding="utf-8",
-    )
-
-
-def test_wizard_accepts_defaults_and_writes_plan_with_no_drafts(
-    tmp_path: Path, monkeypatch
-) -> None:
-    _write_defaults(tmp_path)
-    plans_dir = tmp_path / "plans"
-
-    # wake, sleep, draft capture (blank finishes with no Drafts)
-    inputs = iter(["", "", ""])
-    monkeypatch.setattr("builtins.input", lambda _prompt: next(inputs))
-
-    path = run_wizard(repo_root=tmp_path, now=datetime(2026, 8, 10, 22, 0))
-
-    assert path == plans_dir / "2026-08-11.html"
-    assert path.exists()
-    content = path.read_text(encoding="utf-8")
-    assert "Tuesday, 11 August 2026" in content
-    assert "Wake 06:30" in content
-    assert "Sleep 23:00" in content
-
-
-def test_wizard_pre_wake_writes_today_plan(tmp_path: Path, monkeypatch) -> None:
-    _write_defaults(tmp_path)
-    plans_dir = tmp_path / "plans"
-
-    inputs = iter(["", "", ""])
-    monkeypatch.setattr("builtins.input", lambda _prompt: next(inputs))
-
-    path = run_wizard(repo_root=tmp_path, now=datetime(2026, 8, 12, 0, 30))
-
-    assert path == plans_dir / "2026-08-12.html"
-    assert "Wednesday, 12 August 2026" in path.read_text(encoding="utf-8")
-
-
-def test_wizard_custom_wake_and_sleep_are_written(tmp_path: Path, monkeypatch) -> None:
-    _write_defaults(tmp_path)
-
-    inputs = iter(["07:15", "22:00", ""])
-    monkeypatch.setattr("builtins.input", lambda _prompt: next(inputs))
-
-    path = run_wizard(repo_root=tmp_path, now=datetime(2026, 8, 10, 22, 0))
-    content = path.read_text(encoding="utf-8")
-
-    assert "Wake 07:15" in content
-    assert "Sleep 22:00" in content
-
-
-def test_wizard_rejects_invalid_clock_and_writes_retried_wake(
-    tmp_path: Path, monkeypatch, capsys
-) -> None:
-    _write_defaults(tmp_path)
-
-    inputs = iter(["25:30", "07:15", "", ""])
-    monkeypatch.setattr("builtins.input", lambda _prompt: next(inputs))
-
-    path = run_wizard(repo_root=tmp_path, now=datetime(2026, 8, 10, 22, 0))
-    content = path.read_text(encoding="utf-8")
-    output = capsys.readouterr().out
-
-    assert "Wake 07:15" in content
-    assert "HH:MM" in output
-
-
-def test_wizard_promotes_draft_to_anchor_using_end_time(
-    tmp_path: Path, monkeypatch
-) -> None:
-    _write_defaults(tmp_path)
-
-    inputs = iter(
-        [
-            "",  # wake default
-            "",  # sleep default
-            "Standup",  # capture a Draft
-            "",  # finish capturing Drafts
-            "",  # Anchor (default)
-            "07:00",  # Standup start
-            "07:15",  # Standup end
-        ]
-    )
-    monkeypatch.setattr("builtins.input", lambda _prompt: next(inputs))
-
-    path = run_wizard(repo_root=tmp_path, now=datetime(2026, 8, 10, 22, 0))
-    content = path.read_text(encoding="utf-8")
-
-    assert "Standup" in content
-    assert "07:00" in content
-    assert "07:15" in content
-
-
-def test_wizard_rejects_invalid_anchor_start_and_writes_retried_clock(
-    tmp_path: Path, monkeypatch, capsys
-) -> None:
-    _write_defaults(tmp_path)
-
-    inputs = iter(
-        [
-            "",  # wake default
-            "",  # sleep default
-            "Standup",  # capture a Draft
-            "",  # finish capturing Drafts
-            "",  # Anchor (default)
-            "25:30",  # invalid start
-            "07:00",  # retried start
-            "07:15",  # end
-        ]
-    )
-    monkeypatch.setattr("builtins.input", lambda _prompt: next(inputs))
-
-    path = run_wizard(repo_root=tmp_path, now=datetime(2026, 8, 10, 22, 0))
-    content = path.read_text(encoding="utf-8")
-    output = capsys.readouterr().out
-
-    assert "Standup" in content
-    assert "07:00" in content
-    assert "07:15" in content
-    assert "HH:MM" in output
-
-
-def test_wizard_uses_library_default_duration_when_present(
-    tmp_path: Path, monkeypatch
-) -> None:
-    _write_defaults(tmp_path)
-    (tmp_path / "data" / "anchor_defaults.toml").write_text(
-        "gym = 60\n", encoding="utf-8"
-    )
-
-    inputs = iter(
-        [
-            "",  # wake default
-            "",  # sleep default
-            "Gym",  # capture a Draft
-            "",  # finish capturing Drafts
-            "",  # Anchor (default)
-            "07:00",  # Gym start
-            "",  # Gym end blank -> duration
-            "",  # duration blank -> fall through to library default
-        ]
-    )
-    monkeypatch.setattr("builtins.input", lambda _prompt: next(inputs))
-
-    path = run_wizard(repo_root=tmp_path, now=datetime(2026, 8, 10, 22, 0))
-    content = path.read_text(encoding="utf-8")
-
-    assert "Gym" in content
-    assert "07:00" in content
-    assert "08:00" in content
-
-
-def test_wizard_places_flex_with_snap_and_writes_timeline(
-    tmp_path: Path, monkeypatch
-) -> None:
-    _write_defaults(tmp_path)
-
-    inputs = iter(
-        [
-            "",  # wake default
-            "",  # sleep default
-            "Sauna",  # capture a Draft
-            "",  # finish capturing Drafts
-            "f",  # promote to Flex
-            "30",  # duration
-            "p",  # place
-            "y",  # snap to gap start
-            "1",  # first gap (wake to sleep)
-        ]
-    )
-    monkeypatch.setattr("builtins.input", lambda _prompt: next(inputs))
-
-    path = run_wizard(repo_root=tmp_path, now=datetime(2026, 8, 10, 22, 0))
-    content = path.read_text(encoding="utf-8")
-
-    assert "Sauna" in content
-    assert 'class="block flex"' in content
-    assert "06:30" in content
-    assert "07:00" in content
-
-
-def test_wizard_shrinks_flex_then_places_it(
-    tmp_path: Path, monkeypatch
-) -> None:
-    _write_defaults(tmp_path)
-
-    inputs = iter(
-        [
-            "",  # wake default
-            "",  # sleep default
-            "Standup",  # capture a Draft
-            "Lunch",  # capture a Draft
-            "Deep work",  # capture a Draft
-            "",  # finish capturing Drafts
-            "",  # Standup -> Anchor
-            "07:00",
-            "07:15",
-            "",  # Lunch -> Anchor
-            "12:00",
-            "13:00",
-            "f",  # Deep work -> Flex
-            "300",  # too long for 07:15–12:00 gap
-            "s",  # shrink
-            "60",
-            "p",  # place
-            "y",  # snap
-            "2",  # gap after standup
-        ]
-    )
-    monkeypatch.setattr("builtins.input", lambda _prompt: next(inputs))
-
-    path = run_wizard(repo_root=tmp_path, now=datetime(2026, 8, 10, 22, 0))
-    content = path.read_text(encoding="utf-8")
-
-    assert "Deep work" in content
-    assert "07:15" in content
-    assert "08:15" in content
-
-
-def test_wizard_drops_flex_and_finishes_without_timeline_footprint(
-    tmp_path: Path, monkeypatch
-) -> None:
-    _write_defaults(tmp_path)
-
-    inputs = iter(
-        [
-            "",  # wake default
-            "",  # sleep default
-            "Maybe sauna",  # capture a Draft
-            "",  # finish capturing Drafts
-            "f",  # promote to Flex
-            "30",  # duration
-            "d",  # drop
-        ]
-    )
-    monkeypatch.setattr("builtins.input", lambda _prompt: next(inputs))
-
-    path = run_wizard(repo_root=tmp_path, now=datetime(2026, 8, 10, 22, 0))
-    content = path.read_text(encoding="utf-8")
-
-    assert "Maybe sauna" not in content
-    assert 'class="block flex"' not in content
-
-
-def test_wizard_raises_and_writes_nothing_when_finalize_is_blocked(
-    tmp_path: Path, monkeypatch
-) -> None:
-    # Smoke-checks the adapter wiring to finalize_plan; finalization rules
-    # themselves (overlap, out-of-bounds, etc.) are covered in test_domain.py.
-    _write_defaults(tmp_path)
-
-    inputs = iter(
-        [
-            "",  # wake default
-            "",  # sleep default
-            "Early flight",  # capture a Draft
-            "",  # finish capturing Drafts
-            "",  # Anchor (default)
-            "05:00",  # starts before wake -> out of bounds
-            "05:30",  # end
-        ]
-    )
-    monkeypatch.setattr("builtins.input", lambda _prompt: next(inputs))
-
-    with pytest.raises(PlanBlockedError):
-        run_wizard(repo_root=tmp_path, now=datetime(2026, 8, 10, 22, 0))
-
-    assert list((tmp_path / "plans").iterdir()) == []
-
-
-def test_wizard_declining_weekday_template_leaves_empty_session(
-    tmp_path: Path, monkeypatch
-) -> None:
-    _write_defaults(tmp_path)
-    _write_tuesday_template(tmp_path)
-
-    inputs = iter(
-        [
-            "",  # wake default
-            "",  # sleep default
-            "n",  # decline Tuesday template
-            "",  # finish draft capture with no Drafts
-        ]
-    )
-    monkeypatch.setattr("builtins.input", lambda _prompt: next(inputs))
-
-    path = run_wizard(repo_root=tmp_path, now=datetime(2026, 8, 10, 22, 0))
-    content = path.read_text(encoding="utf-8")
-
-    assert "Standup" not in content
-    assert "Sauna" not in content
-
-
-def test_wizard_accepts_weekday_template_and_seeds_unplaced_flex(
-    tmp_path: Path, monkeypatch
-) -> None:
-    _write_defaults(tmp_path)
-    _write_tuesday_template(tmp_path)
-
-    inputs = iter(
-        [
-            "",  # wake default
-            "",  # sleep default
-            "",  # accept Tuesday template (default yes)
-            "",  # finish draft capture with no Drafts
-            "p",  # place seeded Sauna flex
-            "y",  # snap to gap start
-            "2",  # gap after standup
-        ]
-    )
-    monkeypatch.setattr("builtins.input", lambda _prompt: next(inputs))
-
-    path = run_wizard(repo_root=tmp_path, now=datetime(2026, 8, 10, 22, 0))
-    content = path.read_text(encoding="utf-8")
-
-    assert "Standup" in content
-    assert "07:00" in content
-    assert "07:15" in content
-    assert "Sauna" in content
-    assert "07:15" in content
-    assert "07:45" in content
-
-
-def test_wizard_suggests_and_attaches_checklist_when_name_resembles_library(
-    tmp_path: Path, monkeypatch
-) -> None:
-    _write_defaults(tmp_path)
-    _write_gym_checklist(tmp_path)
-
-    inputs = iter(
-        [
-            "",  # wake default
-            "",  # sleep default
-            "Gym",  # capture a Draft
-            "",  # finish capturing Drafts
-            "",  # Anchor (default)
-            "18:00",  # Gym start
-            "19:00",  # Gym end
-            "",  # accept suggested Checklist attach (default yes)
-        ]
-    )
-    monkeypatch.setattr("builtins.input", lambda _prompt: next(inputs))
-
-    path = run_wizard(repo_root=tmp_path, now=datetime(2026, 8, 10, 22, 0))
-    content = path.read_text(encoding="utf-8")
-
-    assert "Gym" in content
-    assert 'checklistId: "gym-bag"' in content
-    assert '"Gym bag"' in content
-    assert '"Towel"' in content
-
-
-def test_wizard_leaves_checklist_unattached_when_suggestion_is_declined(
-    tmp_path: Path, monkeypatch
-) -> None:
-    _write_defaults(tmp_path)
-    _write_gym_checklist(tmp_path)
-
-    inputs = iter(
-        [
-            "",  # wake default
-            "",  # sleep default
-            "Gym",  # capture a Draft
-            "",  # finish capturing Drafts
-            "",  # Anchor (default)
-            "18:00",  # Gym start
-            "19:00",  # Gym end
-            "n",  # decline suggested Checklist attach
-        ]
-    )
-    monkeypatch.setattr("builtins.input", lambda _prompt: next(inputs))
-
-    path = run_wizard(repo_root=tmp_path, now=datetime(2026, 8, 10, 22, 0))
-    content = path.read_text(encoding="utf-8")
-
-    assert "Gym" in content
-    assert 'checklistId: "gym-bag"' not in content
-
-
-def test_wizard_keeps_template_attached_checklist_without_reprompt(
-    tmp_path: Path, monkeypatch
-) -> None:
-    _write_defaults(tmp_path)
-    _write_tuesday_template(tmp_path)
-    _write_sauna_checklist(tmp_path)
-
-    inputs = iter(
-        [
-            "",  # wake default
-            "",  # sleep default
-            "",  # accept Tuesday template (default yes)
-            "",  # finish draft capture with no Drafts
-            "p",  # place seeded Sauna flex
-            "y",  # snap to gap start
-            "2",  # gap after standup
-        ]
-    )
-    monkeypatch.setattr("builtins.input", lambda _prompt: next(inputs))
-
-    path = run_wizard(repo_root=tmp_path, now=datetime(2026, 8, 10, 22, 0))
-    content = path.read_text(encoding="utf-8")
-
-    assert 'checklistId: "sauna-kit"' in content
-    assert '"Sauna kit"' in content
-    assert '"Flip-flops"' in content
-
-
-def test_wizard_shows_weather_early_and_writes_one_liner_to_plan(
-    tmp_path: Path, monkeypatch, capsys
-) -> None:
-    _write_defaults(tmp_path)
-
-    def fake_weather(_data_dir, _plan_date, *, opener=None):
-        return "18° / 24° · partly cloudy"
-
-    monkeypatch.setattr("tomorrow.cli.try_fetch_weather", fake_weather)
-    inputs = iter(["", "", ""])
-    monkeypatch.setattr("builtins.input", lambda _prompt: next(inputs))
-
-    path = run_wizard(repo_root=tmp_path, now=datetime(2026, 8, 10, 22, 0))
-    content = path.read_text(encoding="utf-8")
-    output = capsys.readouterr().out
-
-    assert "Weather: 18° / 24° · partly cloudy" in output
-    assert '<div class="plan-weather">18° / 24° · partly cloudy</div>' in content
-
-
-def test_wizard_omits_weather_quietly_when_fetch_fails(
-    tmp_path: Path, monkeypatch, capsys
-) -> None:
-    _write_defaults(tmp_path)
-    monkeypatch.setattr("tomorrow.cli.try_fetch_weather", lambda *_args, **_kwargs: None)
-    inputs = iter(["", "", ""])
-    monkeypatch.setattr("builtins.input", lambda _prompt: next(inputs))
-
-    path = run_wizard(repo_root=tmp_path, now=datetime(2026, 8, 10, 22, 0))
-    content = path.read_text(encoding="utf-8")
-    output = capsys.readouterr().out
-
-    assert "Weather:" not in output
-    assert '<div class="plan-weather">' not in content
-    assert path.exists()
-
-
-def test_wizard_continues_when_weather_location_file_is_invalid(
-    tmp_path: Path, monkeypatch
-) -> None:
-    _write_defaults(tmp_path)
-    data_dir = tmp_path / "data"
-    (data_dir / "weather.toml").write_text("broken\n", encoding="utf-8")
-
-    inputs = iter(["", "", ""])
-    monkeypatch.setattr("builtins.input", lambda _prompt: next(inputs))
-
-    path = run_wizard(repo_root=tmp_path, now=datetime(2026, 8, 10, 22, 0))
-
-    assert path.exists()
-    assert '<div class="plan-weather">' not in path.read_text(encoding="utf-8")
-
-
 def test_main_finds_clone_data_when_cwd_is_elsewhere(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.chdir(tmp_path)
     seen: dict[str, Path] = {}
 
-    def fake_run_wizard(*, repo_root: Path, now=None) -> Path:
+    def fake_run_session(repo_root: Path, *, now=None) -> None:
         seen["repo_root"] = repo_root
-        return repo_root / "plans" / "unused.html"
 
-    monkeypatch.setattr("tomorrow.cli.run_wizard", fake_run_wizard)
+    monkeypatch.setattr("tomorrow.cli.run_session", fake_run_session)
     main()
 
     assert (seen["repo_root"] / "data" / "defaults.toml").is_file()
+
+
+def test_run_session_prints_plan_date_url_and_instruction(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _write_defaults(tmp_path)
+    opened: list[str] = []
+    monkeypatch.setattr(
+        "tomorrow.session.webbrowser.open", lambda url: opened.append(url)
+    )
+
+    class FakeServer:
+        submitted_path = None
+
+        def serve_forever(self) -> None:
+            return
+
+        def server_close(self) -> None:
+            return
+
+    monkeypatch.setattr(
+        "tomorrow.session.bind_session_server", lambda *_args, **_kwargs: FakeServer()
+    )
+
+    run_session(tmp_path, now=datetime(2026, 8, 10, 22, 0))
+    output = capsys.readouterr().out
+
+    assert "Tuesday, 11 August 2026" in output
+    assert "http://127.0.0.1:8765" in output
+    assert "Submit in the browser, or Ctrl+C to leave." in output
+    assert opened == ["http://127.0.0.1:8765"]
+
+
+def test_busy_port_prints_and_exits_without_hunting(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _write_defaults(tmp_path)
+    opened: list[str] = []
+    monkeypatch.setattr(
+        "tomorrow.session.webbrowser.open", lambda url: opened.append(url)
+    )
+    occupant = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    occupant.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    occupant.bind((SESSION_HOST, SESSION_PORT))
+    occupant.listen(1)
+    try:
+        run_session(tmp_path, now=datetime(2026, 8, 10, 22, 0))
+    finally:
+        occupant.close()
+
+    output = capsys.readouterr().out
+    assert "8765" in output
+    assert "already in use" in output.lower() or "in use" in output
+    assert opened == []
+    assert list((tmp_path / "plans").iterdir()) == []
+
+
+def _start_server(tmp_path: Path, *, now: datetime | None = None):
+    server = bind_session_server(tmp_path, now=now or datetime(2026, 8, 10, 22, 0))
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    deadline = time.monotonic() + 2
+    while time.monotonic() < deadline:
+        probe = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        try:
+            probe.connect((SESSION_HOST, SESSION_PORT))
+            probe.close()
+            return server, thread
+        except OSError:
+            probe.close()
+            time.sleep(0.02)
+    server.shutdown()
+    server.server_close()
+    raise RuntimeError("Session server did not start")
+
+
+def _stop_server(server, thread) -> None:
+    server.shutdown()
+    server.server_close()
+    thread.join(timeout=2)
+
+
+def _http(method: str, path: str, *, timeout: float = 2) -> tuple[int, bytes]:
+    conn = HTTPConnection(SESSION_HOST, SESSION_PORT, timeout=timeout)
+    try:
+        conn.request(method, path)
+        response = conn.getresponse()
+        return response.status, response.read()
+    finally:
+        conn.close()
+
+
+def test_construction_page_is_blank_canvas_with_domain_jargon(tmp_path: Path) -> None:
+    _write_defaults(tmp_path)
+    server, thread = _start_server(tmp_path)
+    try:
+        status, body = _http("GET", "/")
+    finally:
+        _stop_server(server, thread)
+
+    html = body.decode("utf-8")
+    assert status == 200
+    assert "Anchor" in html
+    assert "Flex" in html
+    assert "Draft" in html
+    assert "Gap" in html
+    assert "Drop" in html
+    assert "Submit" in html
+    assert "Unplaced Flex" in html
+    assert 'type="date"' not in html
+    assert "latitude" not in html
+    assert "longitude" not in html
+
+
+def test_session_json_omits_undo_stacks(tmp_path: Path) -> None:
+    _write_defaults(tmp_path)
+    server, thread = _start_server(tmp_path)
+    try:
+        status, body = _http("GET", "/api/session")
+    finally:
+        _stop_server(server, thread)
+
+    payload = json.loads(body)
+    assert status == 200
+    assert "undo" not in payload
+    assert payload["can_undo"] is False
+    assert payload["can_redo"] is False
+    assert payload["plan_date"] == "2026-08-11"
+    assert payload["template_offer"] == "pending"
+
+
+def test_submit_writes_plan_opens_file_and_exits(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _write_defaults(tmp_path)
+    opened: list[str] = []
+    monkeypatch.setattr(
+        "tomorrow.session.webbrowser.open", lambda url: opened.append(url)
+    )
+
+    def bind_then_submit(repo_root: Path, **kwargs):
+        server = bind_session_server(repo_root, **kwargs)
+
+        def post_submit() -> None:
+            deadline = time.monotonic() + 2
+            while time.monotonic() < deadline:
+                try:
+                    status, _body = _http("POST", "/api/submit")
+                    assert status == 200
+                    return
+                except OSError:
+                    time.sleep(0.02)
+            raise RuntimeError("Submit never reached the server")
+
+        threading.Thread(target=post_submit, daemon=True).start()
+        return server
+
+    monkeypatch.setattr("tomorrow.session.bind_session_server", bind_then_submit)
+    run_session(tmp_path, now=datetime(2026, 8, 10, 22, 0))
+
+    plan_path = tmp_path / "plans" / "2026-08-11.html"
+    output = capsys.readouterr().out
+    assert plan_path.exists()
+    assert str(plan_path) in output
+    assert opened[0] == "http://127.0.0.1:8765"
+    assert opened[1] == plan_path.as_uri()
+    assert opened[1].startswith("file:")
+    assert "http://" not in opened[1]
+
+
+def test_submit_refuses_blocked_session_over_http(tmp_path: Path) -> None:
+    _write_defaults(tmp_path)
+    (tmp_path / "data" / "session.json").write_text(
+        json.dumps(
+            {
+                "plan_date": "2026-08-11",
+                "bounds": {"wake": "06:30", "sleep": "23:00"},
+                "template_offer": "pending",
+                "drafts": [{"id": "d1", "name": "Call dentist"}],
+                "anchors": [],
+                "flexes": [],
+                "undo": {"past": [], "future": []},
+            }
+        ),
+        encoding="utf-8",
+    )
+    server, thread = _start_server(tmp_path)
+    try:
+        status, body = _http("POST", "/api/submit")
+    finally:
+        _stop_server(server, thread)
+
+    payload = json.loads(body)
+    assert status == 409
+    assert payload["blockers"]
+    assert list((tmp_path / "plans").iterdir()) == []
+
+
+def test_ctrl_c_stops_without_writing_a_plan(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _write_defaults(tmp_path)
+    monkeypatch.setattr("tomorrow.session.webbrowser.open", lambda _url: None)
+
+    class FakeServer:
+        submitted_path = None
+
+        def serve_forever(self) -> None:
+            raise KeyboardInterrupt
+
+        def server_close(self) -> None:
+            return
+
+    monkeypatch.setattr(
+        "tomorrow.session.bind_session_server", lambda *_args, **_kwargs: FakeServer()
+    )
+    run_session(tmp_path, now=datetime(2026, 8, 10, 22, 0))
+
+    assert list((tmp_path / "plans").iterdir()) == []

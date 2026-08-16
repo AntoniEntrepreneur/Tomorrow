@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Session</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;1,400&family=Syne:wght@500;700;800&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg: #12161f;
+      --paper: #1a2030;
+      --ink: #e6e1d4;
+      --muted: #8b93a7;
+      --wick: #e0a84a;
+      --anchor: #6fbfa3;
+      --flex: #e0b896;
+      --draft: #8ea0c8;
+      --danger: #e07a6a;
+    }
+
+    body {
+      min-height: 100dvh;
+      background: var(--bg);
+      color: var(--ink);
+      font-family: "IBM Plex Sans", system-ui, sans-serif;
+    }
+
+    .shell { max-width: 28rem; margin: 0 auto; padding: 1.25rem 1.1rem 8.5rem; }
+
+    .header { margin-bottom: 1rem; }
+    .kicker {
+      font-family: "Syne", sans-serif;
+      font-weight: 800;
+      font-size: 0.68rem;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      color: var(--wick);
+    }
+    .plan-date {
+      font-family: "Syne", sans-serif;
+      font-weight: 800;
+      font-size: 1.85rem;
+      letter-spacing: -0.03em;
+      margin: 0.2rem 0 0.15rem;
+    }
+    .weather { font-size: 0.85rem; color: var(--muted); min-height: 1.2em; }
+    .weather .name { color: var(--ink); font-weight: 500; }
+    .chrome {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.4rem;
+      margin-top: 0.75rem;
+    }
+    .chrome button {
+      background: var(--paper);
+      color: var(--ink);
+      border: 1px solid rgba(224,168,74,0.28);
+      border-radius: 999px;
+      padding: 0.4rem 0.75rem;
+      font: 600 0.72rem/1 "IBM Plex Sans", system-ui, sans-serif;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      cursor: pointer;
+    }
+    .chrome button.primary { background: var(--wick); color: #12161f; border-color: var(--wick); }
+    .chrome button:disabled { opacity: 0.4; cursor: not-allowed; }
+
+    .stamps { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 0.4rem; margin: 1rem 0 1.25rem; }
+    .stamp {
+      border: 2px solid currentColor;
+      background: transparent;
+      border-radius: 3px;
+      padding: 0.7rem 0.3rem 0.55rem;
+      cursor: pointer;
+      font: 700 0.72rem/1 "IBM Plex Sans", system-ui, sans-serif;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      color: var(--ink);
+    }
+    .stamp.anchor { color: var(--anchor); }
+    .stamp.flex { color: var(--flex); }
+    .stamp.draft { color: var(--draft); }
+    .stamp span { display: block; font-size: 1.35rem; line-height: 1; margin-bottom: 0.2rem; font-weight: 400; }
+
+    .blockers { color: var(--danger); font-size: 0.8rem; margin-bottom: 0.85rem; }
+
+    .rail-cap {
+      font-family: "IBM Plex Mono", monospace;
+      font-size: 0.7rem;
+      color: var(--muted);
+      background: none;
+      border: 1px dashed rgba(224,168,74,0.35);
+      border-radius: 8px;
+      padding: 0.35rem 0.55rem;
+      width: 100%;
+      text-align: left;
+      cursor: pointer;
+    }
+    .rail-cap:hover { border-color: var(--wick); color: var(--ink); }
+
+    .rail-wrap { position: relative; padding-left: 3.4rem; margin: 0.45rem 0; }
+    .rail-wrap::before {
+      content: "";
+      position: absolute;
+      left: 1.15rem; top: 0; bottom: 0; width: 3px;
+      background: linear-gradient(var(--wick), transparent 96%);
+      border-radius: 2px;
+    }
+    .gap {
+      position: relative;
+      margin-bottom: 0.3rem;
+      border: 1px dashed rgba(224,168,74,0.45);
+      border-radius: 10px;
+      background: rgba(224,168,74,0.06);
+      color: var(--wick);
+      min-height: 32rem;
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 0.45rem 0.75rem;
+      font-size: 0.75rem;
+    }
+    .gap .time-tag {
+      position: absolute; left: -3.4rem; width: 3rem; text-align: right;
+      font-family: "IBM Plex Mono", monospace; font-size: 0.68rem; color: var(--muted);
+    }
+    .gap .cta { font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; font-size: 0.65rem; }
+
+    .tray {
+      position: fixed; left: 0; right: 0; bottom: 0; z-index: 80;
+      background: #0e121a;
+      border-top: 1px solid rgba(224,168,74,0.25);
+      padding: 0.55rem 1rem 0.85rem;
+    }
+    .tray-label {
+      font-size: 0.65rem; letter-spacing: 0.12em; text-transform: uppercase;
+      color: var(--muted); margin-bottom: 0.35rem;
+    }
+    .tray.empty { color: var(--muted); font-size: 0.78rem; }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <header class="header">
+      <div class="kicker">Tonight’s Session</div>
+      <p class="plan-date" id="plan-date"></p>
+      <div class="weather" id="weather"></div>
+      <div class="chrome">
+        <button type="button" id="undo" disabled>Undo</button>
+        <button type="button" id="redo" disabled>Redo</button>
+        <button type="button" id="reset">Reset</button>
+        <button type="button" class="primary" id="submit">Submit</button>
+      </div>
+    </header>
+
+    <div class="stamps">
+      <button type="button" class="stamp anchor"><span>A</span>Anchor</button>
+      <button type="button" class="stamp flex"><span>F</span>Flex</button>
+      <button type="button" class="stamp draft"><span>D</span>Draft</button>
+    </div>
+
+    <div class="blockers" id="blockers"></div>
+
+    <button type="button" class="rail-cap" id="wake-cap">↑ wake</button>
+    <div class="rail-wrap">
+      <div class="gap" id="day-gap">
+        <span class="time-tag" id="gap-start"></span>
+        <span id="gap-label">Gap</span>
+        <span class="cta">Add into Gap</span>
+      </div>
+    </div>
+    <button type="button" class="rail-cap" id="sleep-cap">sleep ↓</button>
+  </div>
+
+  <div class="tray empty" id="tray">
+    <div class="tray-label">Unplaced Flex — Place / Shrink / Drop any time</div>
+    <div>No unplaced Flex.</div>
+  </div>
+
+  <script>
+    function esc(value) {
+      return String(value).replace(/[&<>"']/g, ch => ({
+        "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
+      }[ch]));
+    }
+
+    function render(session) {
+      document.title = session.plan_date_label;
+      document.getElementById("plan-date").textContent = session.plan_date_label;
+      const weatherBits = [];
+      if (session.weather_name) {
+        weatherBits.push('<span class="name">' + esc(session.weather_name) + "</span>");
+      }
+      if (session.weather_one_liner) weatherBits.push(esc(session.weather_one_liner));
+      document.getElementById("weather").innerHTML = weatherBits.join(" · ");
+      document.getElementById("undo").disabled = !session.can_undo;
+      document.getElementById("redo").disabled = !session.can_redo;
+      document.getElementById("blockers").textContent = (session.blockers || []).join(" ");
+      document.getElementById("wake-cap").textContent = "↑ " + session.bounds.wake + " wake";
+      document.getElementById("sleep-cap").textContent = session.bounds.sleep + " sleep ↓";
+      document.getElementById("gap-start").textContent = session.bounds.wake;
+      const unplaced = (session.flexes || []).filter(item => !item.start);
+      const tray = document.getElementById("tray");
+      if (unplaced.length) {
+        tray.classList.remove("empty");
+        tray.innerHTML =
+          '<div class="tray-label">Unplaced Flex — Place / Shrink / Drop any time</div>' +
+          unplaced.map(item => esc(item.name)).join(", ");
+      } else {
+        tray.classList.add("empty");
+        tray.innerHTML =
+          '<div class="tray-label">Unplaced Flex — Place / Shrink / Drop any time</div>' +
+          "<div>No unplaced Flex.</div>";
+      }
+    }
+
+    async function loadSession() {
+      const response = await fetch("/api/session");
+      const session = await response.json();
+      render(session);
+    }
+
+    document.getElementById("submit").addEventListener("click", async () => {
+      const response = await fetch("/api/submit", { method: "POST" });
+      if (response.status === 409) {
+        render(await response.json());
+        return;
+      }
+    });
+
+    loadSession();
+  </script>
+</body>
+</html>

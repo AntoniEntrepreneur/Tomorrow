@@ -1,7 +1,7 @@
 [project]
 name = "tomorrow"
 version = "0.1.0"
-description = "Night-before personal Plan wizard"
+description = "Night-before personal Plan"
 readme = "CONTEXT.md"
 requires-python = ">=3.11"
 dependencies = [
