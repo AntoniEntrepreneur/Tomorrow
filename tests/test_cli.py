@@ -21,6 +21,17 @@ def _write_defaults(tmp_path: Path) -> None:
     (tmp_path / "plans").mkdir()
 
 
+def _write_checklist_library(tmp_path: Path) -> None:
+    checklists_dir = tmp_path / "data" / "checklists"
+    checklists_dir.mkdir()
+    (checklists_dir / "gym-bag.toml").write_text(
+        'name = "Gym bag"\nitems = ["Towel"]\n', encoding="utf-8"
+    )
+    (checklists_dir / "sauna-kit.toml").write_text(
+        'name = "Sauna kit"\nitems = ["Towel"]\n', encoding="utf-8"
+    )
+
+
 def test_main_finds_clone_data_when_cwd_is_elsewhere(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -464,3 +475,77 @@ def test_drop_over_http_cannot_vanish_an_anchor(tmp_path: Path) -> None:
     assert status == 404
     assert payload["anchors"][0]["id"] == item_id
     assert payload["anchors"][0]["name"] == "Gym"
+
+
+def test_checklist_library_and_item_attach_over_http(tmp_path: Path) -> None:
+    _write_defaults(tmp_path)
+    _write_checklist_library(tmp_path)
+    server, thread = _start_server(tmp_path)
+    try:
+        get_status, get_body = _http("GET", "/api/session")
+        add_status, added_body = _http(
+            "POST",
+            "/api/add",
+            payload={
+                "kind": "anchor",
+                "name": "Gym",
+                "start": "18:00",
+                "duration_minutes": 90,
+            },
+        )
+        item_id = json.loads(added_body)["anchors"][0]["id"]
+        clear_status, cleared_body = _http(
+            "POST",
+            "/api/edit",
+            payload={"kind": "anchor", "id": item_id, "checklist": None},
+        )
+        pick_status, picked_body = _http(
+            "POST",
+            "/api/edit",
+            payload={"kind": "anchor", "id": item_id, "checklist": "sauna-kit"},
+        )
+        flex_status, flex_body = _http(
+            "POST",
+            "/api/add",
+            payload={
+                "kind": "flex",
+                "name": "Walk",
+                "duration_minutes": 30,
+                "checklist": "gym-bag",
+            },
+        )
+        flex_id = json.loads(flex_body)["flexes"][0]["id"]
+        flex_edit_status, flex_edited_body = _http(
+            "POST",
+            "/api/edit",
+            payload={"kind": "flex", "id": flex_id, "checklist": None},
+        )
+    finally:
+        _stop_server(server, thread)
+
+    session = json.loads(get_body)
+    added = json.loads(added_body)
+    cleared = json.loads(cleared_body)
+    picked = json.loads(picked_body)
+    flex = json.loads(flex_body)
+    flex_edited = json.loads(flex_edited_body)
+    flushed = json.loads((tmp_path / "data" / "session.json").read_text(encoding="utf-8"))
+    assert get_status == 200
+    assert session["checklists"] == [
+        {"id": "gym-bag", "name": "Gym bag"},
+        {"id": "sauna-kit", "name": "Sauna kit"},
+    ]
+    assert all("items" not in entry for entry in session["checklists"])
+    assert add_status == 200
+    assert added["anchors"][0]["checklist"] == "gym-bag"
+    assert "undo" not in added
+    assert clear_status == 200
+    assert cleared["anchors"][0]["checklist"] is None
+    assert pick_status == 200
+    assert picked["anchors"][0]["checklist"] == "sauna-kit"
+    assert flex_status == 200
+    assert flex["flexes"][0]["checklist"] == "gym-bag"
+    assert flex_edit_status == 200
+    assert flex_edited["flexes"][0]["checklist"] is None
+    assert flushed["anchors"][0]["checklist"] == "sauna-kit"
+    assert flushed["flexes"][0]["checklist"] is None
