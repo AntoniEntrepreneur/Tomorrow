@@ -1,4 +1,4 @@
-from datetime import date, time, timedelta
+from datetime import date, datetime, time, timedelta
 
 from tomorrow.checklists import Checklist
 from tomorrow.defaults import DayBounds
@@ -11,8 +11,16 @@ from tomorrow.plan import (
 )
 
 
-def test_default_plan_date_is_tomorrow() -> None:
-    assert default_plan_date(date(2026, 8, 10)) == date(2026, 8, 11)
+def test_plan_date_tuesday_evening_is_wednesday() -> None:
+    assert default_plan_date(datetime(2026, 8, 11, 22, 0), wake="06:30") == date(2026, 8, 12)
+
+
+def test_plan_date_wednesday_before_wake_is_wednesday() -> None:
+    assert default_plan_date(datetime(2026, 8, 12, 0, 30), wake="06:30") == date(2026, 8, 12)
+
+
+def test_plan_date_wednesday_after_wake_is_thursday() -> None:
+    assert default_plan_date(datetime(2026, 8, 12, 8, 0), wake="06:30") == date(2026, 8, 13)
 
 
 def test_format_plan_date_uses_english_long_form() -> None:

@@ -1,4 +1,4 @@
-from datetime import date, time, timedelta
+from datetime import date, datetime, time, timedelta
 from pathlib import Path
 
 from tomorrow.checklists import Checklist, load_checklist_library, suggest_checklist
@@ -270,7 +270,7 @@ def _seed_from_weekday_template(
     return list(template.anchors), list(template.flexes)
 
 
-def run_wizard(*, repo_root: Path, today: date | None = None) -> Path:
+def run_wizard(*, repo_root: Path, now: datetime | None = None) -> Path:
     defaults_path = repo_root / "data" / "defaults.toml"
     defaults = load_defaults(defaults_path)
     default_minutes_by_name = load_anchor_default_minutes(
@@ -278,7 +278,7 @@ def run_wizard(*, repo_root: Path, today: date | None = None) -> Path:
     )
     checklist_library = load_checklist_library(repo_root / "data")
 
-    plan_date = default_plan_date(today)
+    plan_date = default_plan_date(now, wake=defaults.wake)
     print("Tomorrow — night-before planning\n")
     print(f"Plan date: {format_plan_date(plan_date)}\n")
     wake = _prompt_clock("Wake time", default=defaults.wake)

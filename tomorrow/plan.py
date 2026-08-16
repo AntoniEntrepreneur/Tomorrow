@@ -1,4 +1,4 @@
-from datetime import date, time, timedelta
+from datetime import date, datetime, time, timedelta
 from pathlib import Path
 import re
 from typing import Mapping, Sequence
@@ -12,9 +12,11 @@ from tomorrow.domain import Anchor, FinalizedPlan, Flex, minutes_since_midnight,
 _TEMPLATES_DIR = Path(__file__).parent / "templates"
 
 
-def default_plan_date(today: date | None = None) -> date:
-    base = today or date.today()
-    return base + timedelta(days=1)
+def default_plan_date(now: datetime | None = None, *, wake: str) -> date:
+    current = now if now is not None else datetime.now()
+    if current.time() < parse_clock(wake):
+        return current.date()
+    return current.date() + timedelta(days=1)
 
 
 def format_plan_date(plan_date: date) -> str:

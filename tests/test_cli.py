@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import datetime
 from pathlib import Path
 
 import pytest
@@ -63,7 +63,7 @@ def test_wizard_accepts_defaults_and_writes_plan_with_no_drafts(
     inputs = iter(["", "", ""])
     monkeypatch.setattr("builtins.input", lambda _prompt: next(inputs))
 
-    path = run_wizard(repo_root=tmp_path, today=date(2026, 8, 10))
+    path = run_wizard(repo_root=tmp_path, now=datetime(2026, 8, 10, 22, 0))
 
     assert path == plans_dir / "2026-08-11.html"
     assert path.exists()
@@ -73,13 +73,26 @@ def test_wizard_accepts_defaults_and_writes_plan_with_no_drafts(
     assert "Sleep 23:00" in content
 
 
+def test_wizard_pre_wake_writes_today_plan(tmp_path: Path, monkeypatch) -> None:
+    _write_defaults(tmp_path)
+    plans_dir = tmp_path / "plans"
+
+    inputs = iter(["", "", ""])
+    monkeypatch.setattr("builtins.input", lambda _prompt: next(inputs))
+
+    path = run_wizard(repo_root=tmp_path, now=datetime(2026, 8, 12, 0, 30))
+
+    assert path == plans_dir / "2026-08-12.html"
+    assert "Wednesday, 12 August 2026" in path.read_text(encoding="utf-8")
+
+
 def test_wizard_custom_wake_and_sleep_are_written(tmp_path: Path, monkeypatch) -> None:
     _write_defaults(tmp_path)
 
     inputs = iter(["07:15", "22:00", ""])
     monkeypatch.setattr("builtins.input", lambda _prompt: next(inputs))
 
-    path = run_wizard(repo_root=tmp_path, today=date(2026, 8, 10))
+    path = run_wizard(repo_root=tmp_path, now=datetime(2026, 8, 10, 22, 0))
     content = path.read_text(encoding="utf-8")
 
     assert "Wake 07:15" in content
@@ -94,7 +107,7 @@ def test_wizard_rejects_invalid_clock_and_writes_retried_wake(
     inputs = iter(["25:30", "07:15", "", ""])
     monkeypatch.setattr("builtins.input", lambda _prompt: next(inputs))
 
-    path = run_wizard(repo_root=tmp_path, today=date(2026, 8, 10))
+    path = run_wizard(repo_root=tmp_path, now=datetime(2026, 8, 10, 22, 0))
     content = path.read_text(encoding="utf-8")
     output = capsys.readouterr().out
 
@@ -120,7 +133,7 @@ def test_wizard_promotes_draft_to_anchor_using_end_time(
     )
     monkeypatch.setattr("builtins.input", lambda _prompt: next(inputs))
 
-    path = run_wizard(repo_root=tmp_path, today=date(2026, 8, 10))
+    path = run_wizard(repo_root=tmp_path, now=datetime(2026, 8, 10, 22, 0))
     content = path.read_text(encoding="utf-8")
 
     assert "Standup" in content
@@ -147,7 +160,7 @@ def test_wizard_rejects_invalid_anchor_start_and_writes_retried_clock(
     )
     monkeypatch.setattr("builtins.input", lambda _prompt: next(inputs))
 
-    path = run_wizard(repo_root=tmp_path, today=date(2026, 8, 10))
+    path = run_wizard(repo_root=tmp_path, now=datetime(2026, 8, 10, 22, 0))
     content = path.read_text(encoding="utf-8")
     output = capsys.readouterr().out
 
@@ -179,7 +192,7 @@ def test_wizard_uses_library_default_duration_when_present(
     )
     monkeypatch.setattr("builtins.input", lambda _prompt: next(inputs))
 
-    path = run_wizard(repo_root=tmp_path, today=date(2026, 8, 10))
+    path = run_wizard(repo_root=tmp_path, now=datetime(2026, 8, 10, 22, 0))
     content = path.read_text(encoding="utf-8")
 
     assert "Gym" in content
@@ -207,7 +220,7 @@ def test_wizard_places_flex_with_snap_and_writes_timeline(
     )
     monkeypatch.setattr("builtins.input", lambda _prompt: next(inputs))
 
-    path = run_wizard(repo_root=tmp_path, today=date(2026, 8, 10))
+    path = run_wizard(repo_root=tmp_path, now=datetime(2026, 8, 10, 22, 0))
     content = path.read_text(encoding="utf-8")
 
     assert "Sauna" in content
@@ -246,7 +259,7 @@ def test_wizard_shrinks_flex_then_places_it(
     )
     monkeypatch.setattr("builtins.input", lambda _prompt: next(inputs))
 
-    path = run_wizard(repo_root=tmp_path, today=date(2026, 8, 10))
+    path = run_wizard(repo_root=tmp_path, now=datetime(2026, 8, 10, 22, 0))
     content = path.read_text(encoding="utf-8")
 
     assert "Deep work" in content
@@ -272,7 +285,7 @@ def test_wizard_drops_flex_and_finishes_without_timeline_footprint(
     )
     monkeypatch.setattr("builtins.input", lambda _prompt: next(inputs))
 
-    path = run_wizard(repo_root=tmp_path, today=date(2026, 8, 10))
+    path = run_wizard(repo_root=tmp_path, now=datetime(2026, 8, 10, 22, 0))
     content = path.read_text(encoding="utf-8")
 
     assert "Maybe sauna" not in content
@@ -300,7 +313,7 @@ def test_wizard_raises_and_writes_nothing_when_finalize_is_blocked(
     monkeypatch.setattr("builtins.input", lambda _prompt: next(inputs))
 
     with pytest.raises(PlanBlockedError):
-        run_wizard(repo_root=tmp_path, today=date(2026, 8, 10))
+        run_wizard(repo_root=tmp_path, now=datetime(2026, 8, 10, 22, 0))
 
     assert list((tmp_path / "plans").iterdir()) == []
 
@@ -321,7 +334,7 @@ def test_wizard_declining_weekday_template_leaves_empty_session(
     )
     monkeypatch.setattr("builtins.input", lambda _prompt: next(inputs))
 
-    path = run_wizard(repo_root=tmp_path, today=date(2026, 8, 10))
+    path = run_wizard(repo_root=tmp_path, now=datetime(2026, 8, 10, 22, 0))
     content = path.read_text(encoding="utf-8")
 
     assert "Standup" not in content
@@ -347,7 +360,7 @@ def test_wizard_accepts_weekday_template_and_seeds_unplaced_flex(
     )
     monkeypatch.setattr("builtins.input", lambda _prompt: next(inputs))
 
-    path = run_wizard(repo_root=tmp_path, today=date(2026, 8, 10))
+    path = run_wizard(repo_root=tmp_path, now=datetime(2026, 8, 10, 22, 0))
     content = path.read_text(encoding="utf-8")
 
     assert "Standup" in content
@@ -378,7 +391,7 @@ def test_wizard_suggests_and_attaches_checklist_when_name_resembles_library(
     )
     monkeypatch.setattr("builtins.input", lambda _prompt: next(inputs))
 
-    path = run_wizard(repo_root=tmp_path, today=date(2026, 8, 10))
+    path = run_wizard(repo_root=tmp_path, now=datetime(2026, 8, 10, 22, 0))
     content = path.read_text(encoding="utf-8")
 
     assert "Gym" in content
@@ -407,7 +420,7 @@ def test_wizard_leaves_checklist_unattached_when_suggestion_is_declined(
     )
     monkeypatch.setattr("builtins.input", lambda _prompt: next(inputs))
 
-    path = run_wizard(repo_root=tmp_path, today=date(2026, 8, 10))
+    path = run_wizard(repo_root=tmp_path, now=datetime(2026, 8, 10, 22, 0))
     content = path.read_text(encoding="utf-8")
 
     assert "Gym" in content
@@ -434,7 +447,7 @@ def test_wizard_keeps_template_attached_checklist_without_reprompt(
     )
     monkeypatch.setattr("builtins.input", lambda _prompt: next(inputs))
 
-    path = run_wizard(repo_root=tmp_path, today=date(2026, 8, 10))
+    path = run_wizard(repo_root=tmp_path, now=datetime(2026, 8, 10, 22, 0))
     content = path.read_text(encoding="utf-8")
 
     assert 'checklistId: "sauna-kit"' in content
@@ -454,7 +467,7 @@ def test_wizard_shows_weather_early_and_writes_one_liner_to_plan(
     inputs = iter(["", "", ""])
     monkeypatch.setattr("builtins.input", lambda _prompt: next(inputs))
 
-    path = run_wizard(repo_root=tmp_path, today=date(2026, 8, 10))
+    path = run_wizard(repo_root=tmp_path, now=datetime(2026, 8, 10, 22, 0))
     content = path.read_text(encoding="utf-8")
     output = capsys.readouterr().out
 
@@ -470,7 +483,7 @@ def test_wizard_omits_weather_quietly_when_fetch_fails(
     inputs = iter(["", "", ""])
     monkeypatch.setattr("builtins.input", lambda _prompt: next(inputs))
 
-    path = run_wizard(repo_root=tmp_path, today=date(2026, 8, 10))
+    path = run_wizard(repo_root=tmp_path, now=datetime(2026, 8, 10, 22, 0))
     content = path.read_text(encoding="utf-8")
     output = capsys.readouterr().out
 
@@ -489,7 +502,7 @@ def test_wizard_continues_when_weather_location_file_is_invalid(
     inputs = iter(["", "", ""])
     monkeypatch.setattr("builtins.input", lambda _prompt: next(inputs))
 
-    path = run_wizard(repo_root=tmp_path, today=date(2026, 8, 10))
+    path = run_wizard(repo_root=tmp_path, now=datetime(2026, 8, 10, 22, 0))
 
     assert path.exists()
     assert '<div class="plan-weather">' not in path.read_text(encoding="utf-8")
@@ -501,7 +514,7 @@ def test_main_finds_clone_data_when_cwd_is_elsewhere(
     monkeypatch.chdir(tmp_path)
     seen: dict[str, Path] = {}
 
-    def fake_run_wizard(*, repo_root: Path, today=None) -> Path:
+    def fake_run_wizard(*, repo_root: Path, now=None) -> Path:
         seen["repo_root"] = repo_root
         return repo_root / "plans" / "unused.html"
 
