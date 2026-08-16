@@ -167,11 +167,36 @@ def add_flex(
     return _commit(repo_root, document, mutate, now=now, opener=opener)
 
 
-def _require_flex(current: dict, item_id: str) -> dict:
-    for flex in current["flexes"]:
-        if flex["id"] == item_id:
-            return flex
+def _item_by_id(items: list, item_id: str) -> dict:
+    for item in items:
+        if item["id"] == item_id:
+            return item
     raise KeyError(item_id)
+
+
+def _drop_keyed(current: dict, key: str, item_id: str) -> dict:
+    item = _item_by_id(current[key], item_id)
+    current[key] = [entry for entry in current[key] if entry["id"] != item_id]
+    return item
+
+
+def add_draft(
+    repo_root: Path,
+    *,
+    name: str,
+    now: datetime | None = None,
+    opener: Callable[[Request], object] = _default_opener,
+) -> dict:
+    document = load_session(repo_root, now=now)
+
+    def mutate(current: dict) -> None:
+        current["drafts"].append({"id": uuid.uuid4().hex, "name": name})
+
+    return _commit(repo_root, document, mutate, now=now, opener=opener)
+
+
+def _require_flex(current: dict, item_id: str) -> dict:
+    return _item_by_id(current["flexes"], item_id)
 
 
 def place_flex(
@@ -216,10 +241,64 @@ def drop_flex(
     document = load_session(repo_root, now=now)
 
     def mutate(current: dict) -> None:
-        remaining = [flex for flex in current["flexes"] if flex["id"] != item_id]
-        if len(remaining) == len(current["flexes"]):
-            raise KeyError(item_id)
-        current["flexes"] = remaining
+        _drop_keyed(current, "flexes", item_id)
+
+    return _commit(repo_root, document, mutate, now=now, opener=opener)
+
+
+def drop_draft(
+    repo_root: Path,
+    *,
+    item_id: str,
+    now: datetime | None = None,
+    opener: Callable[[Request], object] = _default_opener,
+) -> dict:
+    document = load_session(repo_root, now=now)
+
+    def mutate(current: dict) -> None:
+        _drop_keyed(current, "drafts", item_id)
+
+    return _commit(repo_root, document, mutate, now=now, opener=opener)
+
+
+def promote_draft(
+    repo_root: Path,
+    *,
+    item_id: str,
+    kind: str,
+    duration_minutes: int,
+    start: str | None = None,
+    now: datetime | None = None,
+    opener: Callable[[Request], object] = _default_opener,
+) -> dict:
+    document = load_session(repo_root, now=now)
+
+    def mutate(current: dict) -> None:
+        draft = _drop_keyed(current, "drafts", item_id)
+        new_id = uuid.uuid4().hex
+        if kind == "anchor":
+            current["anchors"].append(
+                {
+                    "id": new_id,
+                    "name": draft["name"],
+                    "start": start,
+                    "duration_minutes": duration_minutes,
+                    "checklist": None,
+                }
+            )
+            return
+        if kind == "flex":
+            current["flexes"].append(
+                {
+                    "id": new_id,
+                    "name": draft["name"],
+                    "duration_minutes": duration_minutes,
+                    "start": start,
+                    "checklist": None,
+                }
+            )
+            return
+        raise ValueError(kind)
 
     return _commit(repo_root, document, mutate, now=now, opener=opener)
 
@@ -422,6 +501,14 @@ class SessionHandler(BaseHTTPRequestHandler):
         if path == "/api/add":
             payload = self._read_json()
             kind = payload.get("kind")
+            if kind == "draft":
+                view = add_draft(
+                    self.server.repo_root,
+                    name=payload["name"],
+                    **self._view_args(),
+                )
+                self._send_json(200, view)
+                return
             if kind == "flex":
                 view = add_flex(
                     self.server.repo_root,
@@ -492,12 +579,33 @@ class SessionHandler(BaseHTTPRequestHandler):
             return
         if path == "/api/drop":
             payload = self._read_json()
-            if payload.get("kind") != "flex":
+            kind = payload.get("kind")
+            if kind == "draft":
+                view = drop_draft(
+                    self.server.repo_root,
+                    item_id=payload["id"],
+                    **self._view_args(),
+                )
+                self._send_json(200, view)
+                return
+            if kind != "flex":
                 self.send_error(404)
                 return
             view = drop_flex(
                 self.server.repo_root,
                 item_id=payload["id"],
+                **self._view_args(),
+            )
+            self._send_json(200, view)
+            return
+        if path == "/api/promote":
+            payload = self._read_json()
+            view = promote_draft(
+                self.server.repo_root,
+                item_id=payload["id"],
+                kind=payload["kind"],
+                duration_minutes=int(payload["duration_minutes"]),
+                start=payload.get("start") or None,
                 **self._view_args(),
             )
             self._send_json(200, view)

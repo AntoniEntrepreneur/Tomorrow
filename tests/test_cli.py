@@ -154,6 +154,7 @@ def test_construction_page_is_blank_canvas_with_domain_jargon(tmp_path: Path) ->
     assert "Drop" in html
     assert "Submit" in html
     assert "Unplaced Flex" in html
+    assert "Promote" in html
     assert 'type="date"' not in html
     assert "latitude" not in html
     assert "longitude" not in html
@@ -464,3 +465,86 @@ def test_drop_over_http_cannot_vanish_an_anchor(tmp_path: Path) -> None:
     assert status == 404
     assert payload["anchors"][0]["id"] == item_id
     assert payload["anchors"][0]["name"] == "Gym"
+
+
+def test_add_promote_and_drop_draft_over_http(tmp_path: Path) -> None:
+    _write_defaults(tmp_path)
+    server, thread = _start_server(tmp_path)
+    try:
+        add_status, added_body = _http(
+            "POST",
+            "/api/add",
+            payload={"kind": "draft", "name": "Call dentist"},
+        )
+        draft_id = json.loads(added_body)["drafts"][0]["id"]
+        promote_status, promoted_body = _http(
+            "POST",
+            "/api/promote",
+            payload={
+                "id": draft_id,
+                "kind": "anchor",
+                "start": "09:00",
+                "duration_minutes": 30,
+            },
+        )
+        drop_add_status, drop_added_body = _http(
+            "POST",
+            "/api/add",
+            payload={"kind": "draft", "name": "Buy milk"},
+        )
+        leftover_id = json.loads(drop_added_body)["drafts"][0]["id"]
+        drop_status, dropped_body = _http(
+            "POST",
+            "/api/drop",
+            payload={"kind": "draft", "id": leftover_id},
+        )
+    finally:
+        _stop_server(server, thread)
+
+    added = json.loads(added_body)
+    promoted = json.loads(promoted_body)
+    dropped = json.loads(dropped_body)
+    flushed = json.loads((tmp_path / "data" / "session.json").read_text(encoding="utf-8"))
+    assert add_status == 200
+    assert added["drafts"][0]["name"] == "Call dentist"
+    assert added["drafts"][0]["id"]
+    assert "undo" not in added
+    assert added["blockers"]
+    assert promote_status == 200
+    assert promoted["drafts"] == []
+    assert promoted["anchors"][0]["name"] == "Call dentist"
+    assert promoted["anchors"][0]["id"] != draft_id
+    assert "undo" not in promoted
+    assert drop_add_status == 200
+    assert drop_status == 200
+    assert dropped["drafts"] == []
+    assert "undo" not in dropped
+    assert flushed["drafts"] == []
+    assert flushed["anchors"][0]["name"] == "Call dentist"
+
+
+def test_promote_draft_to_flex_over_http(tmp_path: Path) -> None:
+    _write_defaults(tmp_path)
+    server, thread = _start_server(tmp_path)
+    try:
+        _, added_body = _http(
+            "POST",
+            "/api/add",
+            payload={"kind": "draft", "name": "Walk"},
+        )
+        draft_id = json.loads(added_body)["drafts"][0]["id"]
+        status, body = _http(
+            "POST",
+            "/api/promote",
+            payload={"id": draft_id, "kind": "flex", "duration_minutes": 30},
+        )
+    finally:
+        _stop_server(server, thread)
+
+    payload = json.loads(body)
+    assert status == 200
+    assert payload["drafts"] == []
+    assert payload["flexes"][0]["name"] == "Walk"
+    assert payload["flexes"][0]["start"] is None
+    assert payload["flexes"][0]["id"] != draft_id
+    assert "undo" not in payload

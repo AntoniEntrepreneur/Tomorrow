@@ -88,6 +88,27 @@
     .stamp.draft { color: var(--draft); }
     .stamp span { display: block; font-size: 1.35rem; line-height: 1; margin-bottom: 0.2rem; font-weight: 400; }
 
+    .drafts { display: flex; flex-wrap: wrap; gap: 0.35rem; margin: 0 0 0.85rem; }
+    .drafts.empty { display: none; }
+    .drafts-label {
+      flex: 0 0 100%;
+      font-size: 0.65rem; letter-spacing: 0.12em; text-transform: uppercase;
+      color: var(--muted);
+    }
+    .draft-chip {
+      display: flex; align-items: center; gap: 0.35rem;
+      background: rgba(142,160,200,0.14);
+      border: 1px dashed var(--draft);
+      color: var(--draft);
+      border-radius: 999px;
+      padding: 0.25rem 0.35rem 0.25rem 0.65rem;
+      font-size: 0.78rem;
+    }
+    .draft-chip button {
+      background: transparent; border: none; color: inherit; cursor: pointer;
+      font-size: 0.68rem; padding: 0.15rem 0.35rem;
+    }
+
     .blockers { color: var(--danger); font-size: 0.8rem; margin-bottom: 0.85rem; }
 
     .rail-cap {
@@ -249,8 +270,10 @@
     <div class="stamps">
       <button type="button" class="stamp anchor" id="stamp-anchor"><span>A</span>Anchor</button>
       <button type="button" class="stamp flex" id="stamp-flex"><span>F</span>Flex</button>
-      <button type="button" class="stamp draft"><span>D</span>Draft</button>
+      <button type="button" class="stamp draft" id="stamp-draft"><span>D</span>Draft</button>
     </div>
+
+    <div class="drafts empty" id="drafts"></div>
 
     <div class="blockers" id="blockers"></div>
 
@@ -409,6 +432,26 @@
         ).join("") + "</div>";
     }
 
+    function renderDrafts(session) {
+      const drafts = session.drafts || [];
+      const list = document.getElementById("drafts");
+      if (!drafts.length) {
+        list.classList.add("empty");
+        list.innerHTML = "";
+        return;
+      }
+      list.classList.remove("empty");
+      list.innerHTML =
+        '<div class="drafts-label">Drafts</div>' +
+        drafts.map(item =>
+          '<div class="draft-chip">' +
+          "<span>" + esc(item.name) + "</span>" +
+          '<button type="button" data-promote="' + esc(item.id) + '">Promote</button>' +
+          '<button type="button" data-drop-draft="' + esc(item.id) + '">Drop</button>' +
+          "</div>"
+        ).join("");
+    }
+
     function render(session) {
       current = session;
       if (armedFlexId) {
@@ -429,6 +472,7 @@
       document.getElementById("wake-cap").textContent = "↑ " + session.bounds.wake + " wake";
       document.getElementById("sleep-cap").textContent = session.bounds.sleep + " sleep ↓";
       renderRail(session);
+      renderDrafts(session);
       renderTray(session);
       setChromeEnabled();
     }
@@ -465,6 +509,10 @@
       return (current.flexes || []).find(item => item.id === itemId);
     }
 
+    function findDraft(itemId) {
+      return (current.drafts || []).find(item => item.id === itemId);
+    }
+
     function gapRows() {
       return railRows(current).filter(row => row.kind === "gap");
     }
@@ -478,6 +526,45 @@
         '<div class="actions"><button class="primary" type="submit">Add Flex</button>' +
         '<button type="button" class="ghost" data-close>Cancel</button></div></form>'
       );
+    }
+
+    function sheetAddDraft() {
+      openSheet(
+        "<h2>Add Draft</h2><p class=\"hint\">Optional capture. Promote to Anchor or Flex, or Drop, before Submit.</p>" +
+        "<form id=\"add-draft\">" +
+        '<label>Name <input name="name" required></label>' +
+        '<div class="actions"><button class="primary" type="submit">Add Draft</button>' +
+        '<button type="button" class="ghost" data-close>Cancel</button></div></form>'
+      );
+    }
+
+    function sheetPromote(item) {
+      openSheet(
+        "<h2>Promote Draft · " + esc(item.name) + "</h2>" +
+        '<p class="hint">A new opaque id is minted. The Draft’s id does not leak.</p>' +
+        '<form id="promote-draft" data-id="' + esc(item.id) + '">' +
+        '<label>Promote to <select name="kind">' +
+        '<option value="anchor">Anchor</option>' +
+        '<option value="flex">Flex</option>' +
+        "</select></label>" +
+        '<div class="row">' +
+        '<label id="promote-start-label">Start <input name="start" type="time" required value="09:00"></label>' +
+        '<label>Duration (min) <input name="duration_minutes" type="number" min="1" required value="30"></label></div>' +
+        '<p class="hint" id="promote-flex-hint" hidden>Flex lands unplaced in the tray. Place it whenever you notice a Gap.</p>' +
+        '<div class="actions"><button class="primary" type="submit">Promote</button>' +
+        '<button type="button" class="ghost" data-close>Cancel</button>' +
+        '<button type="button" class="danger" data-drop-draft="' + esc(item.id) + '">Drop</button></div></form>'
+      );
+      const form = document.getElementById("promote-draft");
+      const kind = form.querySelector('[name="kind"]');
+      kind.addEventListener("change", () => syncPromoteFields(form));
+    }
+
+    function syncPromoteFields(form) {
+      const asFlex = form.kind.value === "flex";
+      form.start.required = !asFlex;
+      document.getElementById("promote-start-label").hidden = asFlex;
+      document.getElementById("promote-flex-hint").hidden = !asFlex;
     }
 
     function sheetPlace(item) {
@@ -585,6 +672,10 @@
       await mutate("/api/drop", { kind: "flex", id: itemId });
     }
 
+    async function dropDraft(itemId) {
+      await mutate("/api/drop", { kind: "draft", id: itemId });
+    }
+
     async function placeFlexAt(itemId, start) {
       armedFlexId = null;
       await mutate("/api/place", { id: itemId, start: start });
@@ -592,6 +683,7 @@
 
     document.getElementById("stamp-anchor").addEventListener("click", sheetAddAnchor);
     document.getElementById("stamp-flex").addEventListener("click", sheetAddFlex);
+    document.getElementById("stamp-draft").addEventListener("click", sheetAddDraft);
     document.getElementById("wake-cap").addEventListener("click", () => sheetEditBound("wake"));
     document.getElementById("sleep-cap").addEventListener("click", () => sheetEditBound("sleep"));
     document.getElementById("rail").addEventListener("click", event => {
@@ -616,6 +708,18 @@
         const item = findFlex(block.dataset.id);
         if (item) sheetPlacedFlex(item);
       }
+    });
+
+    document.getElementById("drafts").addEventListener("click", event => {
+      const dropId = event.target.dataset.dropDraft;
+      if (dropId) {
+        dropDraft(dropId);
+        return;
+      }
+      const promoteId = event.target.dataset.promote;
+      if (!promoteId) return;
+      const item = findDraft(promoteId);
+      if (item) sheetPromote(item);
     });
 
     document.getElementById("tray").addEventListener("click", event => {
@@ -664,6 +768,12 @@
         await dropFlex(dropId);
         return;
       }
+      const dropDraftId = event.target.dataset.dropDraft;
+      if (dropDraftId) {
+        event.preventDefault();
+        await dropDraft(dropDraftId);
+        return;
+      }
       const placeAt = event.target.dataset.placeAt;
       if (placeAt) {
         event.preventDefault();
@@ -703,6 +813,23 @@
           name: form.name.value,
           duration_minutes: Number(form.duration_minutes.value)
         });
+        return;
+      }
+      if (form.id === "add-draft") {
+        await mutate("/api/add", {
+          kind: "draft",
+          name: form.name.value
+        });
+        return;
+      }
+      if (form.id === "promote-draft") {
+        const payload = {
+          id: form.dataset.id,
+          kind: form.kind.value,
+          duration_minutes: Number(form.duration_minutes.value)
+        };
+        if (form.kind.value === "anchor") payload.start = clockValue(form.start);
+        await mutate("/api/promote", payload);
         return;
       }
       if (form.id === "place-flex") {

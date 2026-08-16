@@ -8,6 +8,7 @@ import pytest
 
 from tomorrow.domain import (
     Anchor,
+    Draft,
     Flex,
     PlanBlockedError,
     describe_blocker,
@@ -17,12 +18,15 @@ from tomorrow.domain import (
 from tomorrow.defaults import DayBounds
 from tomorrow.session import (
     add_anchor,
+    add_draft,
     add_flex,
     edit_anchor,
     edit_bounds,
+    drop_draft,
     drop_flex,
     load_session,
     place_flex,
+    promote_draft,
     reset_session,
     session_view,
     shrink_flex,
@@ -894,3 +898,203 @@ def test_dropped_flex_is_absent_from_the_submitted_plan(tmp_path: Path) -> None:
     assert "Walk" not in content
     assert "not today" not in content.lower()
     assert "dropped" not in content.lower()
+
+
+def test_adding_a_draft_mints_an_id_and_flushes_the_session_file(
+    tmp_path: Path,
+) -> None:
+    _write_defaults(tmp_path)
+
+    view = add_draft(
+        tmp_path,
+        name="Call dentist",
+        now=datetime(2026, 8, 10, 22, 0),
+    )
+    document = json.loads(
+        (tmp_path / "data" / "session.json").read_text(encoding="utf-8")
+    )
+
+    assert len(document["drafts"]) == 1
+    draft = document["drafts"][0]
+    assert draft["name"] == "Call dentist"
+    assert list(draft) == ["id", "name"]
+    assert isinstance(draft["id"], str) and draft["id"]
+    assert view["drafts"] == document["drafts"]
+    assert "undo" not in view
+    assert view["can_undo"] is True
+
+
+def test_leftover_draft_shows_the_same_blocker_as_finalize_plan(
+    tmp_path: Path,
+) -> None:
+    _write_defaults(tmp_path)
+
+    view = add_draft(
+        tmp_path,
+        name="Call dentist",
+        now=datetime(2026, 8, 10, 22, 0),
+    )
+    expected = finalize_plan(
+        bounds=DayBounds(wake="06:30", sleep="23:00"),
+        drafts=[Draft(name="Call dentist")],
+        anchors=[],
+    )
+
+    assert view["blockers"] == [
+        describe_blocker(blocker) for blocker in expected.blockers
+    ]
+    assert view["blockers"]
+
+
+def test_adding_anchor_or_flex_still_works_while_a_draft_is_present(
+    tmp_path: Path,
+) -> None:
+    _write_defaults(tmp_path)
+    now = datetime(2026, 8, 10, 22, 0)
+    add_draft(tmp_path, name="Call dentist", now=now)
+
+    anchored = add_anchor(
+        tmp_path, name="Gym", start="18:00", duration_minutes=90, now=now
+    )
+    flexed = add_flex(tmp_path, name="Walk", duration_minutes=30, now=now)
+    document = json.loads(
+        (tmp_path / "data" / "session.json").read_text(encoding="utf-8")
+    )
+
+    assert [draft["name"] for draft in document["drafts"]] == ["Call dentist"]
+    assert document["anchors"][0]["name"] == "Gym"
+    assert document["flexes"][0]["name"] == "Walk"
+    assert anchored["anchors"] == document["anchors"]
+    assert flexed["flexes"] == document["flexes"]
+    assert flexed["blockers"]
+
+
+def test_dropping_a_draft_removes_it_from_the_session_and_flushes(
+    tmp_path: Path,
+) -> None:
+    _write_defaults(tmp_path)
+    now = datetime(2026, 8, 10, 22, 0)
+    added = add_draft(tmp_path, name="Call dentist", now=now)
+    item_id = added["drafts"][0]["id"]
+
+    view = drop_draft(tmp_path, item_id=item_id, now=now)
+    document = json.loads(
+        (tmp_path / "data" / "session.json").read_text(encoding="utf-8")
+    )
+
+    assert document["drafts"] == []
+    assert view["drafts"] == []
+    assert view["blockers"] == []
+
+
+def test_dropped_draft_is_absent_from_the_submitted_plan(tmp_path: Path) -> None:
+    _write_defaults(tmp_path)
+    now = datetime(2026, 8, 10, 22, 0)
+    added = add_draft(tmp_path, name="Call dentist", now=now)
+    drop_draft(tmp_path, item_id=added["drafts"][0]["id"], now=now)
+
+    path = submit_session(tmp_path, now=now)
+    content = path.read_text(encoding="utf-8")
+
+    assert "Call dentist" not in content
+    assert "not today" not in content.lower()
+    assert "dropped" not in content.lower()
+
+
+def test_drop_cannot_vanish_an_anchor_via_drop_draft(tmp_path: Path) -> None:
+    _write_defaults(tmp_path)
+    now = datetime(2026, 8, 10, 22, 0)
+    added = add_anchor(
+        tmp_path, name="Gym", start="18:00", duration_minutes=90, now=now
+    )
+    add_draft(tmp_path, name="Call dentist", now=now)
+    anchor_id = added["anchors"][0]["id"]
+
+    with pytest.raises(KeyError):
+        drop_draft(tmp_path, item_id=anchor_id, now=now)
+    document = json.loads(
+        (tmp_path / "data" / "session.json").read_text(encoding="utf-8")
+    )
+
+    assert document["anchors"][0]["id"] == anchor_id
+    assert len(document["drafts"]) == 1
+
+
+def test_promoting_a_draft_to_anchor_mints_a_new_id_and_does_not_leak(
+    tmp_path: Path,
+) -> None:
+    _write_defaults(tmp_path)
+    now = datetime(2026, 8, 10, 22, 0)
+    added = add_draft(tmp_path, name="Call dentist", now=now)
+    draft_id = added["drafts"][0]["id"]
+
+    view = promote_draft(
+        tmp_path,
+        item_id=draft_id,
+        kind="anchor",
+        start="09:00",
+        duration_minutes=30,
+        now=now,
+    )
+    document = json.loads(
+        (tmp_path / "data" / "session.json").read_text(encoding="utf-8")
+    )
+
+    assert document["drafts"] == []
+    assert view["drafts"] == []
+    assert len(document["anchors"]) == 1
+    anchor = document["anchors"][0]
+    assert anchor["name"] == "Call dentist"
+    assert anchor["start"] == "09:00"
+    assert anchor["duration_minutes"] == 30
+    assert anchor["checklist"] is None
+    assert isinstance(anchor["id"], str) and anchor["id"]
+    assert anchor["id"] != draft_id
+    assert draft_id not in json.dumps({"anchors": document["anchors"]})
+    assert view["anchors"] == document["anchors"]
+    assert view["blockers"] == []
+
+
+def test_promoting_a_draft_to_flex_mints_a_new_id_and_stays_unplaced(
+    tmp_path: Path,
+) -> None:
+    _write_defaults(tmp_path)
+    now = datetime(2026, 8, 10, 22, 0)
+    added = add_draft(tmp_path, name="Walk", now=now)
+    draft_id = added["drafts"][0]["id"]
+
+    view = promote_draft(
+        tmp_path,
+        item_id=draft_id,
+        kind="flex",
+        duration_minutes=30,
+        now=now,
+    )
+    document = json.loads(
+        (tmp_path / "data" / "session.json").read_text(encoding="utf-8")
+    )
+
+    assert document["drafts"] == []
+    assert view["drafts"] == []
+    assert len(document["flexes"]) == 1
+    flex = document["flexes"][0]
+    assert flex["name"] == "Walk"
+    assert flex["duration_minutes"] == 30
+    assert flex["start"] is None
+    assert flex["checklist"] is None
+    assert isinstance(flex["id"], str) and flex["id"]
+    assert flex["id"] != draft_id
+    assert draft_id not in json.dumps({"flexes": document["flexes"]})
+    assert view["flexes"] == document["flexes"]
+    assert view["blockers"]
+
+
+def test_submit_refuses_while_any_draft_remains_after_add(tmp_path: Path) -> None:
+    _write_defaults(tmp_path)
+    now = datetime(2026, 8, 10, 22, 0)
+    add_draft(tmp_path, name="Call dentist", now=now)
+
+    with pytest.raises(PlanBlockedError):
+        submit_session(tmp_path, now=now)
+
+    assert list((tmp_path / "plans").iterdir()) == []
