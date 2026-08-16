@@ -25,6 +25,7 @@ from tomorrow.session import (
     edit_anchor,
     edit_bounds,
     drop_draft,
+    edit_flex,
     drop_flex,
     load_session,
     place_flex,
@@ -43,6 +44,18 @@ def _write_defaults(tmp_path: Path) -> None:
         'wake = "06:30"\nsleep = "23:00"\n', encoding="utf-8"
     )
     (tmp_path / "plans").mkdir()
+
+
+
+def _write_checklist_library(tmp_path: Path) -> None:
+    checklists_dir = tmp_path / "data" / "checklists"
+    checklists_dir.mkdir()
+    (checklists_dir / "gym-bag.toml").write_text(
+        'name = "Gym bag"\nitems = ["Towel", "Lock"]\n', encoding="utf-8"
+    )
+    (checklists_dir / "sauna-kit.toml").write_text(
+        'name = "Sauna kit"\nitems = ["Towel"]\n', encoding="utf-8"
+    )
 
 
 def _write_session(tmp_path: Path, document: dict) -> None:
@@ -190,6 +203,7 @@ def test_session_view_omits_undo_stacks_and_reports_flags(tmp_path: Path) -> Non
     ]
     assert view["weather_name"] is None
     assert view["weather_one_liner"] is None
+    assert view["checklists"] == []
 
 
 def test_submit_of_blank_session_writes_plan_html(tmp_path: Path) -> None:
@@ -1331,3 +1345,270 @@ def test_accepted_then_empty_session_does_not_look_like_pending(
     assert document["drafts"] == []
     assert view["template_offer"] == "accepted"
     assert view["show_template_offer"] is False
+
+
+def test_session_view_exposes_checklist_library_names_without_rows(
+    tmp_path: Path,
+) -> None:
+    _write_defaults(tmp_path)
+    _write_checklist_library(tmp_path)
+
+    view = session_view(tmp_path, now=datetime(2026, 8, 10, 22, 0))
+
+    assert view["checklists"] == [
+        {"id": "gym-bag", "name": "Gym bag"},
+        {"id": "sauna-kit", "name": "Sauna kit"},
+    ]
+    assert all("items" not in entry for entry in view["checklists"])
+    assert all("rows" not in entry for entry in view["checklists"])
+
+
+def test_adding_an_anchor_attaches_a_picked_checklist_and_flushes(
+    tmp_path: Path,
+) -> None:
+    _write_defaults(tmp_path)
+    _write_checklist_library(tmp_path)
+
+    view = add_anchor(
+        tmp_path,
+        name="Standup",
+        start="09:00",
+        duration_minutes=30,
+        checklist="sauna-kit",
+        now=datetime(2026, 8, 10, 22, 0),
+    )
+    document = json.loads(
+        (tmp_path / "data" / "session.json").read_text(encoding="utf-8")
+    )
+
+    assert document["anchors"][0]["name"] == "Standup"
+    assert document["anchors"][0]["checklist"] == "sauna-kit"
+    assert view["anchors"] == document["anchors"]
+
+
+def test_adding_an_anchor_attaches_a_name_match_checklist_by_default(
+    tmp_path: Path,
+) -> None:
+    _write_defaults(tmp_path)
+    _write_checklist_library(tmp_path)
+
+    view = add_anchor(
+        tmp_path,
+        name="Gym",
+        start="18:00",
+        duration_minutes=90,
+        now=datetime(2026, 8, 10, 22, 0),
+    )
+    document = json.loads(
+        (tmp_path / "data" / "session.json").read_text(encoding="utf-8")
+    )
+
+    assert document["anchors"][0]["checklist"] == "gym-bag"
+    assert view["anchors"] == document["anchors"]
+
+
+def test_adding_an_anchor_can_decline_the_name_match_checklist(
+    tmp_path: Path,
+) -> None:
+    _write_defaults(tmp_path)
+    _write_checklist_library(tmp_path)
+
+    view = add_anchor(
+        tmp_path,
+        name="Gym",
+        start="18:00",
+        duration_minutes=90,
+        checklist=None,
+        now=datetime(2026, 8, 10, 22, 0),
+    )
+    document = json.loads(
+        (tmp_path / "data" / "session.json").read_text(encoding="utf-8")
+    )
+
+    assert document["anchors"][0]["checklist"] is None
+    assert view["anchors"] == document["anchors"]
+
+
+def test_editing_an_anchor_can_change_or_clear_its_checklist(
+    tmp_path: Path,
+) -> None:
+    _write_defaults(tmp_path)
+    _write_checklist_library(tmp_path)
+    now = datetime(2026, 8, 10, 22, 0)
+    added = add_anchor(
+        tmp_path,
+        name="Gym",
+        start="18:00",
+        duration_minutes=90,
+        now=now,
+    )
+    item_id = added["anchors"][0]["id"]
+
+    changed = edit_anchor(
+        tmp_path, item_id=item_id, checklist="sauna-kit", now=now
+    )
+    cleared = edit_anchor(tmp_path, item_id=item_id, checklist=None, now=now)
+    flushed = json.loads(
+        (tmp_path / "data" / "session.json").read_text(encoding="utf-8")
+    )
+
+    assert changed["anchors"][0]["checklist"] == "sauna-kit"
+    assert cleared["anchors"][0]["checklist"] is None
+    assert flushed["anchors"][0]["checklist"] is None
+    assert flushed["anchors"][0]["id"] == item_id
+
+
+def test_editing_an_anchor_without_a_checklist_still_suggests_on_name(
+    tmp_path: Path,
+) -> None:
+    _write_defaults(tmp_path)
+    _write_checklist_library(tmp_path)
+    now = datetime(2026, 8, 10, 22, 0)
+    added = add_anchor(
+        tmp_path,
+        name="Standup",
+        start="09:00",
+        duration_minutes=30,
+        checklist=None,
+        now=now,
+    )
+    item_id = added["anchors"][0]["id"]
+
+    view = edit_anchor(tmp_path, item_id=item_id, name="Gym", now=now)
+    flushed = json.loads(
+        (tmp_path / "data" / "session.json").read_text(encoding="utf-8")
+    )
+
+    assert view["anchors"][0]["checklist"] == "gym-bag"
+    assert flushed["anchors"][0]["checklist"] == "gym-bag"
+
+
+def test_pre_attached_checklist_stays_without_a_re_prompt(tmp_path: Path) -> None:
+    _write_defaults(tmp_path)
+    _write_checklist_library(tmp_path)
+    now = datetime(2026, 8, 10, 22, 0)
+    _write_session(
+        tmp_path,
+        {
+            "plan_date": "2026-08-11",
+            "bounds": {"wake": "06:30", "sleep": "23:00"},
+            "template_offer": "accepted",
+            "drafts": [],
+            "anchors": [
+                {
+                    "id": "a1",
+                    "name": "Gym",
+                    "start": "18:00",
+                    "duration_minutes": 90,
+                    "checklist": "gym-bag",
+                }
+            ],
+            "flexes": [
+                {
+                    "id": "f1",
+                    "name": "Sauna",
+                    "duration_minutes": 45,
+                    "start": None,
+                    "checklist": "sauna-kit",
+                }
+            ],
+            "undo": {"past": [], "future": []},
+        },
+    )
+
+    renamed = edit_anchor(tmp_path, item_id="a1", name="Sauna", now=now)
+    flushed = json.loads(
+        (tmp_path / "data" / "session.json").read_text(encoding="utf-8")
+    )
+
+    assert renamed["anchors"][0]["checklist"] == "gym-bag"
+    assert flushed["anchors"][0]["checklist"] == "gym-bag"
+    assert flushed["flexes"][0]["checklist"] == "sauna-kit"
+
+
+def test_adding_flex_attaches_a_picked_or_name_match_checklist(
+    tmp_path: Path,
+) -> None:
+    _write_defaults(tmp_path)
+    _write_checklist_library(tmp_path)
+    now = datetime(2026, 8, 10, 22, 0)
+
+    picked = add_flex(
+        tmp_path,
+        name="Walk",
+        duration_minutes=30,
+        checklist="sauna-kit",
+        now=now,
+    )
+    suggested = add_flex(tmp_path, name="Gym", duration_minutes=60, now=now)
+    declined = add_flex(
+        tmp_path,
+        name="Gym",
+        duration_minutes=45,
+        checklist=None,
+        now=now,
+    )
+    flushed = json.loads(
+        (tmp_path / "data" / "session.json").read_text(encoding="utf-8")
+    )
+
+    assert picked["flexes"][0]["checklist"] == "sauna-kit"
+    assert suggested["flexes"][1]["checklist"] == "gym-bag"
+    assert declined["flexes"][2]["checklist"] is None
+    assert [item["checklist"] for item in flushed["flexes"]] == [
+        "sauna-kit",
+        "gym-bag",
+        None,
+    ]
+
+
+def test_editing_flex_can_change_clear_or_suggest_a_checklist(
+    tmp_path: Path,
+) -> None:
+    _write_defaults(tmp_path)
+    _write_checklist_library(tmp_path)
+    now = datetime(2026, 8, 10, 22, 0)
+    added = add_flex(
+        tmp_path, name="Walk", duration_minutes=30, checklist=None, now=now
+    )
+    item_id = added["flexes"][0]["id"]
+
+    changed = edit_flex(tmp_path, item_id=item_id, checklist="sauna-kit", now=now)
+    suggested = edit_flex(
+        tmp_path, item_id=item_id, name="Gym", checklist=None, now=now
+    )
+    named = edit_flex(tmp_path, item_id=item_id, name="Gym", now=now)
+    flushed = json.loads(
+        (tmp_path / "data" / "session.json").read_text(encoding="utf-8")
+    )
+
+    assert changed["flexes"][0]["checklist"] == "sauna-kit"
+    assert suggested["flexes"][0]["checklist"] is None
+    assert named["flexes"][0]["checklist"] == "gym-bag"
+    assert flushed["flexes"][0]["checklist"] == "gym-bag"
+    assert flushed["flexes"][0]["name"] == "Gym"
+
+
+def test_drafts_cannot_carry_a_checklist(tmp_path: Path) -> None:
+    _write_defaults(tmp_path)
+    _write_session(
+        tmp_path,
+        {
+            "plan_date": "2026-08-11",
+            "bounds": {"wake": "06:30", "sleep": "23:00"},
+            "template_offer": "pending",
+            "drafts": [
+                {"id": "d1", "name": "Gym", "checklist": "gym-bag"},
+            ],
+            "anchors": [],
+            "flexes": [],
+            "undo": {"past": [], "future": []},
+        },
+    )
+
+    view = session_view(tmp_path, now=datetime(2026, 8, 10, 22, 0))
+    document = load_session(tmp_path, now=datetime(2026, 8, 10, 22, 0))
+
+    assert view["drafts"] == [{"id": "d1", "name": "Gym"}]
+    assert "checklist" not in view["drafts"][0]
+    assert "checklist" not in document["drafts"][0]

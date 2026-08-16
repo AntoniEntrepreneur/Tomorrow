@@ -185,6 +185,7 @@
     }
     .block .time-tag { top: 0.65rem; }
     .block-title { font-weight: 600; font-size: 0.95rem; }
+    .block-checklist { font-size: 0.72rem; color: var(--muted); margin-top: 0.12rem; }
     .block-range { font-family: "IBM Plex Mono", monospace; font-size: 0.7rem; opacity: 0.6; margin-top: 0.12rem; }
     .gap {
       position: relative;
@@ -258,7 +259,7 @@
     }
     .sheet h2 { font-size: 1.05rem; font-weight: 600; margin-bottom: 0.85rem; }
     .sheet label { display: block; font-size: 0.75rem; font-weight: 600; margin: 0.65rem 0 0.25rem; }
-    .sheet input {
+    .sheet input, .sheet select {
       width: 100%;
       font: 400 1rem/1.3 "IBM Plex Sans", system-ui, sans-serif;
       padding: 0.5rem 0.6rem;
@@ -369,6 +370,51 @@
       return String(input.value || "").slice(0, 5);
     }
 
+    function normalizeName(value) {
+      return String(value).toLowerCase().replace(/[^a-z0-9]/g, "");
+    }
+
+    function checklistName(checklistId) {
+      if (!checklistId || !current) return "";
+      const entry = (current.checklists || []).find(item => item.id === checklistId);
+      return entry ? entry.name : "";
+    }
+
+    function suggestChecklist(itemName) {
+      const needle = normalizeName(itemName);
+      if (!needle || !current) return "";
+      const matches = (current.checklists || []).filter(entry => {
+        const id = normalizeName(entry.id);
+        const name = normalizeName(entry.name);
+        return (id && (needle.includes(id) || id.includes(needle))) ||
+          (name && (needle.includes(name) || name.includes(needle)));
+      });
+      return matches.length === 1 ? matches[0].id : "";
+    }
+
+    function checklistField(selectedId) {
+      const selected = selectedId || "";
+      const options = (current && current.checklists || []).map(entry =>
+        '<option value="' + esc(entry.id) + '"' +
+        (entry.id === selected ? " selected" : "") + ">" +
+        esc(entry.name) + "</option>"
+      ).join("");
+      return '<label>Checklist <select name="checklist"' +
+        (selected ? ' data-touched="1"' : "") + ">" +
+        '<option value="">None</option>' + options + "</select></label>";
+    }
+
+    function maybeSuggestChecklist(form) {
+      if (!form || !form.checklist) return;
+      if (form.checklist.dataset.touched === "1") return;
+      form.checklist.value = suggestChecklist(form.name && form.name.value);
+    }
+
+    function checklistPayload(form) {
+      const value = form.checklist ? form.checklist.value : "";
+      return value || null;
+    }
+
     function heightPx(durationMin, total, floor) {
       return Math.max(floor, Math.round((durationMin / Math.max(total, 1)) * 520));
     }
@@ -382,14 +428,16 @@
         name: item.name,
         start: item.start,
         durationMin: item.duration_minutes,
-        end: endClock(item.start, item.duration_minutes)
+        end: endClock(item.start, item.duration_minutes),
+        checklist: item.checklist
       })).concat((session.flexes || []).filter(item => item.start).map(item => ({
         kind: "flex",
         id: item.id,
         name: item.name,
         start: item.start,
         durationMin: item.duration_minutes,
-        end: endClock(item.start, item.duration_minutes)
+        end: endClock(item.start, item.duration_minutes),
+        checklist: item.checklist
       }))).sort((a, b) => toMin(a.start) - toMin(b.start));
       const rows = [];
       let cursor = wake;
@@ -438,10 +486,12 @@
             "<span>Gap · " + esc(fmtDur(row.durationMin)) + "</span>" +
             '<span class="cta">' + cta + "</span></button>";
         }
+        const checklistLabel = checklistName(row.checklist);
         return '<button type="button" class="block ' + row.kind + '" data-kind="' + row.kind +
           '" data-id="' + esc(row.id) + '" style="min-height:' + heightPx(row.durationMin, total, 52) + 'px">' +
           '<span class="time-tag">' + esc(row.start) + "</span>" +
           '<div class="block-title">' + esc(row.name) + "</div>" +
+          (checklistLabel ? '<div class="block-checklist">' + esc(checklistLabel) + "</div>" : "") +
           '<div class="block-range">' + esc(row.start) + "–" + esc(row.end) +
           " · " + esc(fmtDur(row.durationMin)) + "</div></button>";
       }).join("");
@@ -466,6 +516,7 @@
           '<span class="name">' + esc(item.name) + "</span>" +
           '<span class="meta">' + esc(fmtDur(item.duration_minutes)) + " · unplaced</span>" +
           '<div class="ops">' +
+          '<button type="button" data-edit-flex="' + esc(item.id) + '">Edit</button>' +
           '<button type="button" data-place="' + esc(item.id) + '">Place</button>' +
           '<button type="button" data-shrink="' + esc(item.id) + '">Shrink</button>' +
           '<button type="button" data-drop="' + esc(item.id) + '">Drop</button>' +
@@ -569,9 +620,11 @@
         "<form id=\"add-flex\">" +
         '<label>Name <input name="name" required></label>' +
         '<label>Duration (min) <input name="duration_minutes" type="number" min="1" required value="45"></label>' +
+        checklistField("") +
         '<div class="actions"><button class="primary" type="submit">Add Flex</button>' +
         '<button type="button" class="ghost" data-close>Cancel</button></div></form>'
       );
+      maybeSuggestChecklist(document.getElementById("add-flex"));
     }
 
     function sheetAddDraft() {
@@ -654,35 +707,48 @@
       );
     }
 
-    function sheetPlacedFlex(item) {
+    function sheetEditFlex(item) {
+      const placedHint = item.start
+        ? esc(item.start) + " · " + esc(fmtDur(item.duration_minutes))
+        : "Unplaced · " + esc(fmtDur(item.duration_minutes));
       openSheet(
         "<h2>Flex · " + esc(item.name) + "</h2>" +
-        '<p class="hint">' + esc(item.start) + " · " + esc(fmtDur(item.duration_minutes)) + "</p>" +
-        '<div class="actions">' +
-        '<button type="button" class="primary" data-place="' + esc(item.id) + '">Place</button>' +
+        '<p class="hint">' + placedHint + "</p>" +
+        '<form id="edit-flex" data-id="' + esc(item.id) + '">' +
+        '<label>Name <input name="name" required value="' + esc(item.name) + '"></label>' +
+        '<label>Duration (min) <input name="duration_minutes" type="number" min="1" required value="' +
+        esc(item.duration_minutes) + '"></label>' +
+        checklistField(item.checklist) +
+        '<div class="actions"><button class="primary" type="submit">Update</button>' +
+        '<button type="button" class="ghost" data-place="' + esc(item.id) + '">Place</button>' +
         '<button type="button" class="ghost" data-shrink="' + esc(item.id) + '">Shrink</button>' +
         '<button type="button" class="ghost" data-close>Cancel</button>' +
-        '<button type="button" class="danger" data-drop="' + esc(item.id) + '">Drop</button></div>'
+        '<button type="button" class="danger" data-drop="' + esc(item.id) + '">Drop</button></div></form>'
       );
+      maybeSuggestChecklist(document.getElementById("edit-flex"));
     }
 
     function sheetAddAnchor() {
       openSheet(
         "<h2>Add Anchor</h2><form id=\"add-anchor\">" +
         formFields("", "", 60) +
+        checklistField("") +
         '<div class="actions"><button class="primary" type="submit">Add Anchor</button>' +
         '<button type="button" class="ghost" data-close>Cancel</button></div></form>'
       );
+      maybeSuggestChecklist(document.getElementById("add-anchor"));
     }
 
     function sheetEditAnchor(item) {
       openSheet(
         "<h2>Edit Anchor</h2><form id=\"edit-anchor\" data-id=\"" + esc(item.id) + "\">" +
         formFields(item.name, item.start, item.duration_minutes) +
+        checklistField(item.checklist) +
         '<div class="actions"><button class="primary" type="submit">Update</button>' +
         '<button type="button" class="ghost" data-close>Cancel</button>' +
         '<button type="button" class="danger" data-remove="' + esc(item.id) + '">Remove</button></div></form>'
       );
+      maybeSuggestChecklist(document.getElementById("edit-anchor"));
     }
 
     function sheetEditBound(which) {
@@ -752,7 +818,7 @@
       }
       if (block.dataset.kind === "flex") {
         const item = findFlex(block.dataset.id);
-        if (item) sheetPlacedFlex(item);
+        if (item) sheetEditFlex(item);
       }
     });
 
@@ -787,6 +853,13 @@
         event.stopPropagation();
         const item = findFlex(shrinkId);
         if (item) sheetShrink(item);
+        return;
+      }
+      const editId = event.target.dataset.editFlex;
+      if (editId) {
+        event.stopPropagation();
+        const item = findFlex(editId);
+        if (item) sheetEditFlex(item);
         return;
       }
       const chip = event.target.closest("[data-arm]");
@@ -841,6 +914,16 @@
       }
     });
 
+    document.getElementById("sheet").addEventListener("input", event => {
+      const form = event.target.form;
+      if (!form) return;
+      if (event.target.name === "checklist") {
+        event.target.dataset.touched = "1";
+        return;
+      }
+      if (event.target.name === "name") maybeSuggestChecklist(form);
+    });
+
     document.getElementById("sheet").addEventListener("submit", async event => {
       event.preventDefault();
       const form = event.target;
@@ -849,7 +932,8 @@
           kind: "anchor",
           name: form.name.value,
           start: clockValue(form.start),
-          duration_minutes: Number(form.duration_minutes.value)
+          duration_minutes: Number(form.duration_minutes.value),
+          checklist: checklistPayload(form)
         });
         return;
       }
@@ -857,7 +941,8 @@
         await mutate("/api/add", {
           kind: "flex",
           name: form.name.value,
-          duration_minutes: Number(form.duration_minutes.value)
+          duration_minutes: Number(form.duration_minutes.value),
+          checklist: checklistPayload(form)
         });
         return;
       }
@@ -895,7 +980,18 @@
           id: form.dataset.id,
           name: form.name.value,
           start: clockValue(form.start),
-          duration_minutes: Number(form.duration_minutes.value)
+          duration_minutes: Number(form.duration_minutes.value),
+          checklist: checklistPayload(form)
+        });
+        return;
+      }
+      if (form.id === "edit-flex") {
+        await mutate("/api/edit", {
+          kind: "flex",
+          id: form.dataset.id,
+          name: form.name.value,
+          duration_minutes: Number(form.duration_minutes.value),
+          checklist: checklistPayload(form)
         });
         return;
       }

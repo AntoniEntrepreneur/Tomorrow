@@ -13,6 +13,7 @@ import threading
 import uuid
 import webbrowser
 
+from tomorrow.checklists import load_checklist_library, suggest_checklist
 from tomorrow.defaults import DayBounds, load_defaults
 from tomorrow.domain import (
     Anchor,
@@ -35,6 +36,7 @@ SESSION_PORT = 8765
 SESSION_URL = f"http://{SESSION_HOST}:{SESSION_PORT}"
 _PAGE_PATH = Path(__file__).parent / "static" / "session.html"
 _WEATHER_TIMEOUT_SECONDS = 5
+_UNSET = object()
 
 
 def _default_opener(request: Request) -> object:
@@ -60,6 +62,8 @@ def _blank_session(repo_root: Path, *, now: datetime | None = None) -> dict:
 
 
 def save_session(repo_root: Path, document: dict) -> None:
+    for draft in document.get("drafts", []):
+        draft.pop("checklist", None)
     path = _session_path(repo_root)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(document, indent=2) + "\n", encoding="utf-8")
@@ -86,10 +90,12 @@ def load_session(repo_root: Path, *, now: datetime | None = None) -> dict:
     if not path.is_file():
         return blank
     document = json.loads(path.read_text(encoding="utf-8"))
-    if document.get("plan_date") == blank["plan_date"]:
-        return document
-    save_session(repo_root, blank)
-    return blank
+    if document.get("plan_date") != blank["plan_date"]:
+        save_session(repo_root, blank)
+        return blank
+    for draft in document.get("drafts", []):
+        draft.pop("checklist", None)
+    return document
 
 
 def _weekday_template_file(repo_root: Path, document: dict) -> Path:
@@ -135,16 +141,26 @@ def _commit(
     return session_view(repo_root, now=now, opener=opener)
 
 
+def _attached_checklist(
+    repo_root: Path, name: str, checklist: str | None | object
+) -> str | None:
+    if checklist is not _UNSET:
+        return checklist  # type: ignore[return-value]
+    return suggest_checklist(name, load_checklist_library(repo_root / "data"))
+
+
 def add_anchor(
     repo_root: Path,
     *,
     name: str,
     start: str,
     duration_minutes: int,
+    checklist: str | None | object = _UNSET,
     now: datetime | None = None,
     opener: Callable[[Request], object] = _default_opener,
 ) -> dict:
     document = load_session(repo_root, now=now)
+    attached = _attached_checklist(repo_root, name, checklist)
 
     def mutate(current: dict) -> None:
         current["anchors"].append(
@@ -153,7 +169,7 @@ def add_anchor(
                 "name": name,
                 "start": start,
                 "duration_minutes": duration_minutes,
-                "checklist": None,
+                "checklist": attached,
             }
         )
 
@@ -165,10 +181,12 @@ def add_flex(
     *,
     name: str,
     duration_minutes: int,
+    checklist: str | None | object = _UNSET,
     now: datetime | None = None,
     opener: Callable[[Request], object] = _default_opener,
 ) -> dict:
     document = load_session(repo_root, now=now)
+    attached = _attached_checklist(repo_root, name, checklist)
 
     def mutate(current: dict) -> None:
         current["flexes"].append(
@@ -177,7 +195,7 @@ def add_flex(
                 "name": name,
                 "duration_minutes": duration_minutes,
                 "start": None,
-                "checklist": None,
+                "checklist": attached,
             }
         )
 
@@ -377,6 +395,42 @@ def decline_template(
     return _commit(repo_root, document, mutate, now=now, opener=opener)
 
 
+def _apply_item_checklist(
+    repo_root: Path, item: dict, *, name: str, checklist: object
+) -> None:
+    if checklist is not _UNSET:
+        item["checklist"] = checklist
+    elif not item.get("checklist"):
+        item["checklist"] = suggest_checklist(
+            name, load_checklist_library(repo_root / "data")
+        )
+
+
+def edit_flex(
+    repo_root: Path,
+    *,
+    item_id: str,
+    name: str | None = None,
+    duration_minutes: int | None = None,
+    checklist: str | None | object = _UNSET,
+    now: datetime | None = None,
+    opener: Callable[[Request], object] = _default_opener,
+) -> dict:
+    document = load_session(repo_root, now=now)
+
+    def mutate(current: dict) -> None:
+        flex = _require_flex(current, item_id)
+        if name is not None:
+            flex["name"] = name
+        if duration_minutes is not None:
+            flex["duration_minutes"] = duration_minutes
+        _apply_item_checklist(
+            repo_root, flex, name=flex["name"], checklist=checklist
+        )
+
+    return _commit(repo_root, document, mutate, now=now, opener=opener)
+
+
 def edit_anchor(
     repo_root: Path,
     *,
@@ -384,6 +438,7 @@ def edit_anchor(
     name: str | None = None,
     start: str | None = None,
     duration_minutes: int | None = None,
+    checklist: str | None | object = _UNSET,
     remove: bool = False,
     now: datetime | None = None,
     opener: Callable[[Request], object] = _default_opener,
@@ -407,6 +462,9 @@ def edit_anchor(
                     anchor["start"] = start
                 if duration_minutes is not None:
                     anchor["duration_minutes"] = duration_minutes
+                _apply_item_checklist(
+                    repo_root, anchor, name=anchor["name"], checklist=checklist
+                )
                 return
         raise KeyError(item_id)
 
@@ -492,7 +550,10 @@ def session_view(
         "bounds": document["bounds"],
         "template_offer": document["template_offer"],
         "show_template_offer": _show_template_offer(repo_root, document),
-        "drafts": document["drafts"],
+        "drafts": [
+            {key: value for key, value in item.items() if key != "checklist"}
+            for item in document["drafts"]
+        ],
         "anchors": document["anchors"],
         "flexes": document["flexes"],
         "gaps": gaps,
@@ -501,6 +562,10 @@ def session_view(
         "can_redo": bool(undo.get("future")),
         "weather_name": load_weather_name(data_dir),
         "weather_one_liner": try_fetch_weather(data_dir, plan_date, opener=opener),
+        "checklists": [
+            {"id": checklist_id, "name": checklist.name}
+            for checklist_id, checklist in load_checklist_library(data_dir).items()
+        ],
     }
 
 
@@ -533,6 +598,12 @@ def submit_session(
         plan=result.plan,
         weather=weather,
     )
+
+
+def _optional_checklist(payload: dict) -> str | None | object:
+    if "checklist" not in payload:
+        return _UNSET
+    return payload.get("checklist")
 
 
 class SessionHTTPServer(ThreadingHTTPServer):
@@ -589,6 +660,7 @@ class SessionHandler(BaseHTTPRequestHandler):
                     self.server.repo_root,
                     name=payload["name"],
                     duration_minutes=int(payload["duration_minutes"]),
+                    checklist=_optional_checklist(payload),
                     **self._view_args(),
                 )
                 self._send_json(200, view)
@@ -601,6 +673,7 @@ class SessionHandler(BaseHTTPRequestHandler):
                 name=payload["name"],
                 start=payload["start"],
                 duration_minutes=int(payload["duration_minutes"]),
+                checklist=_optional_checklist(payload),
                 **self._view_args(),
             )
             self._send_json(200, view)
@@ -617,6 +690,18 @@ class SessionHandler(BaseHTTPRequestHandler):
                 )
                 self._send_json(200, view)
                 return
+            if kind == "flex":
+                duration = payload.get("duration_minutes")
+                view = edit_flex(
+                    self.server.repo_root,
+                    item_id=payload["id"],
+                    name=payload.get("name"),
+                    duration_minutes=int(duration) if duration is not None else None,
+                    checklist=_optional_checklist(payload),
+                    **self._view_args(),
+                )
+                self._send_json(200, view)
+                return
             if kind != "anchor":
                 self.send_error(404)
                 return
@@ -627,6 +712,7 @@ class SessionHandler(BaseHTTPRequestHandler):
                 name=payload.get("name"),
                 start=payload.get("start"),
                 duration_minutes=int(duration) if duration is not None else None,
+                checklist=_optional_checklist(payload),
                 remove=bool(payload.get("remove")),
                 **self._view_args(),
             )
