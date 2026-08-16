@@ -232,6 +232,45 @@ def test_submit_refuses_blocked_session_over_http(tmp_path: Path) -> None:
     assert list((tmp_path / "plans").iterdir()) == []
 
 
+def test_reset_over_http_blanks_session_and_keeps_plan_html(tmp_path: Path) -> None:
+    _write_defaults(tmp_path)
+    plan_path = tmp_path / "plans" / "2026-08-11.html"
+    plan_path.write_text("<html>existing plan</html>", encoding="utf-8")
+    (tmp_path / "data" / "session.json").write_text(
+        json.dumps(
+            {
+                "plan_date": "2026-08-11",
+                "bounds": {"wake": "07:15", "sleep": "22:00"},
+                "template_offer": "declined",
+                "drafts": [{"id": "d1", "name": "Call dentist"}],
+                "anchors": [],
+                "flexes": [],
+                "undo": {"past": [{"plan_date": "2026-08-11"}], "future": []},
+            }
+        ),
+        encoding="utf-8",
+    )
+    server, thread = _start_server(tmp_path)
+    try:
+        status, body = _http("POST", "/api/reset")
+    finally:
+        _stop_server(server, thread)
+
+    payload = json.loads(body)
+    flushed = json.loads((tmp_path / "data" / "session.json").read_text(encoding="utf-8"))
+    assert status == 200
+    assert payload["plan_date"] == "2026-08-11"
+    assert payload["bounds"] == {"wake": "06:30", "sleep": "23:00"}
+    assert payload["template_offer"] == "pending"
+    assert payload["drafts"] == []
+    assert payload["anchors"] == []
+    assert payload["flexes"] == []
+    assert "undo" not in payload
+    assert flushed["drafts"] == []
+    assert flushed["bounds"] == {"wake": "06:30", "sleep": "23:00"}
+    assert plan_path.read_text(encoding="utf-8") == "<html>existing plan</html>"
+
+
 def test_ctrl_c_stops_without_writing_a_plan(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

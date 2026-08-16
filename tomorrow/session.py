@@ -36,10 +36,11 @@ def _default_opener(request: Request) -> object:
     return urlopen(request, timeout=_WEATHER_TIMEOUT_SECONDS)
 
 
-def load_session(repo_root: Path, *, now: datetime | None = None) -> dict:
-    path = repo_root / "data" / "session.json"
-    if path.is_file():
-        return json.loads(path.read_text(encoding="utf-8"))
+def _session_path(repo_root: Path) -> Path:
+    return repo_root / "data" / "session.json"
+
+
+def _blank_session(repo_root: Path, *, now: datetime | None = None) -> dict:
     defaults = load_defaults(repo_root / "data" / "defaults.toml")
     plan_date = default_plan_date(now, wake=defaults.wake)
     return {
@@ -51,6 +52,38 @@ def load_session(repo_root: Path, *, now: datetime | None = None) -> dict:
         "flexes": [],
         "undo": {"past": [], "future": []},
     }
+
+
+def _save_session(repo_root: Path, document: dict) -> None:
+    path = _session_path(repo_root)
+    path.write_text(json.dumps(document, indent=2) + "\n", encoding="utf-8")
+
+
+def _discard_past_plans(repo_root: Path, *, now: datetime | None = None) -> None:
+    today = (now if now is not None else datetime.now()).date()
+    plans_dir = repo_root / "plans"
+    if not plans_dir.is_dir():
+        return
+    for path in plans_dir.glob("*.html"):
+        try:
+            plan_date = date.fromisoformat(path.stem)
+        except ValueError:
+            continue
+        if plan_date < today:
+            path.unlink()
+
+
+def load_session(repo_root: Path, *, now: datetime | None = None) -> dict:
+    _discard_past_plans(repo_root, now=now)
+    blank = _blank_session(repo_root, now=now)
+    path = _session_path(repo_root)
+    if not path.is_file():
+        return blank
+    document = json.loads(path.read_text(encoding="utf-8"))
+    if document.get("plan_date") == blank["plan_date"]:
+        return document
+    _save_session(repo_root, blank)
+    return blank
 
 
 def _unpack(document: dict) -> tuple[DayBounds, list[Draft], list[Anchor], list[Flex]]:
@@ -112,6 +145,16 @@ def session_view(
     }
 
 
+def reset_session(
+    repo_root: Path,
+    *,
+    now: datetime | None = None,
+    opener: Callable[[Request], object] = _default_opener,
+) -> dict:
+    _save_session(repo_root, _blank_session(repo_root, now=now))
+    return session_view(repo_root, now=now, opener=opener)
+
+
 def submit_session(
     repo_root: Path,
     *,
@@ -166,6 +209,14 @@ class SessionHandler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:
         path = urlparse(self.path).path
+        if path == "/api/reset":
+            view = reset_session(
+                self.server.repo_root,
+                now=self.server.now,
+                opener=self.server.opener,
+            )
+            self._send_json(200, view)
+            return
         if path != "/api/submit":
             self.send_error(404)
             return
