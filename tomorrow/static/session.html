@@ -71,6 +71,39 @@
     .chrome button.primary { background: var(--wick); color: #12161f; border-color: var(--wick); }
     .chrome button:disabled { opacity: 0.4; cursor: not-allowed; }
 
+    .template-offer {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 0.55rem 0.75rem;
+      margin: 0 0 1rem;
+      padding: 0.7rem 0.85rem;
+      background: var(--paper);
+      border: 1px solid rgba(224,168,74,0.35);
+      border-radius: 12px;
+    }
+    .template-offer[hidden] { display: none; }
+    .template-offer p { flex: 1 1 10rem; font-size: 0.88rem; font-weight: 500; }
+    .template-offer .actions { display: flex; gap: 0.4rem; }
+    .template-offer button {
+      font: 600 0.78rem/1 "IBM Plex Sans", system-ui, sans-serif;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      padding: 0.4rem 0.75rem;
+      border-radius: 999px;
+      cursor: pointer;
+    }
+    .template-offer .primary {
+      background: var(--wick);
+      color: #12161f;
+      border: 1px solid var(--wick);
+    }
+    .template-offer .ghost {
+      background: transparent;
+      color: var(--ink);
+      border: 1px solid rgba(224,168,74,0.28);
+    }
+
     .stamps { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 0.4rem; margin: 1rem 0 1.25rem; }
     .stamp {
       border: 2px solid currentColor;
@@ -245,6 +278,14 @@
         <button type="button" class="primary" id="submit">Submit</button>
       </div>
     </header>
+
+    <div class="template-offer" id="template-offer" hidden>
+      <p>Use this weekday's Template?</p>
+      <div class="actions">
+        <button type="button" class="primary" id="template-yes">Yes</button>
+        <button type="button" class="ghost" id="template-no">No</button>
+      </div>
+    </div>
 
     <div class="stamps">
       <button type="button" class="stamp anchor" id="stamp-anchor"><span>A</span>Anchor</button>
@@ -428,9 +469,14 @@
       document.getElementById("blockers").textContent = (session.blockers || []).join(" ");
       document.getElementById("wake-cap").textContent = "↑ " + session.bounds.wake + " wake";
       document.getElementById("sleep-cap").textContent = session.bounds.sleep + " sleep ↓";
+      renderTemplateOffer(session);
       renderRail(session);
       renderTray(session);
       setChromeEnabled();
+    }
+
+    function renderTemplateOffer(session) {
+      document.getElementById("template-offer").hidden = !session.show_template_offer;
     }
 
     function openSheet(html) {
@@ -747,6 +793,13 @@
     document.getElementById("reset").addEventListener("click", async () => {
       const response = await fetch("/api/reset", { method: "POST" });
       render(await response.json());
+    });
+
+    document.getElementById("template-yes").addEventListener("click", () => {
+      mutate("/api/template", { action: "apply" });
+    });
+    document.getElementById("template-no").addEventListener("click", () => {
+      mutate("/api/template", { action: "decline" });
     });
 
     loadSession();

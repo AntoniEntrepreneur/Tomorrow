@@ -28,6 +28,7 @@ from tomorrow.domain import (
 )
 from tomorrow.plan import default_plan_date, format_plan_date, write_finalized_plan
 from tomorrow.weather import load_weather_name, try_fetch_weather
+from tomorrow.weekday_template import load_weekday_template, weekday_template_path
 
 SESSION_HOST = "127.0.0.1"
 SESSION_PORT = 8765
@@ -89,6 +90,22 @@ def load_session(repo_root: Path, *, now: datetime | None = None) -> dict:
         return document
     save_session(repo_root, blank)
     return blank
+
+
+def _weekday_template_file(repo_root: Path, document: dict) -> Path:
+    return weekday_template_path(
+        repo_root / "data", date.fromisoformat(document["plan_date"])
+    )
+
+
+def _session_has_items(document: dict) -> bool:
+    return bool(document["drafts"] or document["anchors"] or document["flexes"])
+
+
+def _show_template_offer(repo_root: Path, document: dict) -> bool:
+    if document["template_offer"] != "pending" or _session_has_items(document):
+        return False
+    return _weekday_template_file(repo_root, document).is_file()
 
 
 def _snapshot_without_undo(document: dict) -> dict:
@@ -224,6 +241,63 @@ def drop_flex(
     return _commit(repo_root, document, mutate, now=now, opener=opener)
 
 
+def apply_template(
+    repo_root: Path,
+    *,
+    now: datetime | None = None,
+    opener: Callable[[Request], object] = _default_opener,
+) -> dict:
+    document = load_session(repo_root, now=now)
+    seed = load_weekday_template(_weekday_template_file(repo_root, document))
+    if (
+        seed is None
+        or document["template_offer"] != "pending"
+        or _session_has_items(document)
+    ):
+        return session_view(repo_root, now=now, opener=opener)
+
+    def mutate(current: dict) -> None:
+        current["anchors"].extend(
+            {
+                "id": uuid.uuid4().hex,
+                "name": anchor.name,
+                "start": anchor.start.strftime("%H:%M"),
+                "duration_minutes": int(anchor.duration.total_seconds() // 60),
+                "checklist": anchor.checklist,
+            }
+            for anchor in seed.anchors
+        )
+        current["flexes"].extend(
+            {
+                "id": uuid.uuid4().hex,
+                "name": flex.name,
+                "duration_minutes": int(flex.duration.total_seconds() // 60),
+                "start": None,
+                "checklist": flex.checklist,
+            }
+            for flex in seed.flexes
+        )
+        current["template_offer"] = "accepted"
+
+    return _commit(repo_root, document, mutate, now=now, opener=opener)
+
+
+def decline_template(
+    repo_root: Path,
+    *,
+    now: datetime | None = None,
+    opener: Callable[[Request], object] = _default_opener,
+) -> dict:
+    document = load_session(repo_root, now=now)
+    if document["template_offer"] != "pending":
+        return session_view(repo_root, now=now, opener=opener)
+
+    def mutate(current: dict) -> None:
+        current["template_offer"] = "declined"
+
+    return _commit(repo_root, document, mutate, now=now, opener=opener)
+
+
 def edit_anchor(
     repo_root: Path,
     *,
@@ -338,6 +412,7 @@ def session_view(
         "plan_date_label": format_plan_date(plan_date),
         "bounds": document["bounds"],
         "template_offer": document["template_offer"],
+        "show_template_offer": _show_template_offer(repo_root, document),
         "drafts": document["drafts"],
         "anchors": document["anchors"],
         "flexes": document["flexes"],
@@ -501,6 +576,19 @@ class SessionHandler(BaseHTTPRequestHandler):
                 **self._view_args(),
             )
             self._send_json(200, view)
+            return
+        if path == "/api/template":
+            payload = self._read_json()
+            action = payload.get("action")
+            if action == "apply":
+                view = apply_template(self.server.repo_root, **self._view_args())
+                self._send_json(200, view)
+                return
+            if action == "decline":
+                view = decline_template(self.server.repo_root, **self._view_args())
+                self._send_json(200, view)
+                return
+            self.send_error(404)
             return
         if path != "/api/submit":
             self.send_error(404)
