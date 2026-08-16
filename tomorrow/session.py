@@ -569,14 +569,63 @@ def session_view(
     }
 
 
+def undo_session(
+    repo_root: Path,
+    *,
+    now: datetime | None = None,
+    opener: Callable[[Request], object] = _default_opener,
+) -> dict:
+    document = load_session(repo_root, now=now)
+    undo = document.get("undo", {"past": [], "future": []})
+    past = list(undo.get("past", []))
+    if not past:
+        return session_view(repo_root, now=now, opener=opener)
+    future = list(undo.get("future", []))
+    snapshot = past.pop()
+    future.append(_snapshot_without_undo(document))
+    restored = copy.deepcopy(snapshot)
+    restored["undo"] = {"past": past, "future": future}
+    save_session(repo_root, restored)
+    return session_view(repo_root, now=now, opener=opener)
+
+
+def redo_session(
+    repo_root: Path,
+    *,
+    now: datetime | None = None,
+    opener: Callable[[Request], object] = _default_opener,
+) -> dict:
+    document = load_session(repo_root, now=now)
+    undo = document.get("undo", {"past": [], "future": []})
+    future = list(undo.get("future", []))
+    if not future:
+        return session_view(repo_root, now=now, opener=opener)
+    past = list(undo.get("past", []))
+    snapshot = future.pop()
+    past.append(_snapshot_without_undo(document))
+    restored = copy.deepcopy(snapshot)
+    restored["undo"] = {"past": past[-20:], "future": future}
+    save_session(repo_root, restored)
+    return session_view(repo_root, now=now, opener=opener)
+
+
 def reset_session(
     repo_root: Path,
     *,
     now: datetime | None = None,
     opener: Callable[[Request], object] = _default_opener,
 ) -> dict:
-    save_session(repo_root, _blank_session(repo_root, now=now))
-    return session_view(repo_root, now=now, opener=opener)
+    document = load_session(repo_root, now=now)
+    blank = _blank_session(repo_root, now=now)
+
+    def mutate(current: dict) -> None:
+        current["bounds"] = blank["bounds"]
+        current["template_offer"] = blank["template_offer"]
+        current["drafts"] = []
+        current["anchors"] = []
+        current["flexes"] = []
+
+    return _commit(repo_root, document, mutate, now=now, opener=opener)
 
 
 def submit_session(
@@ -783,6 +832,14 @@ class SessionHandler(BaseHTTPRequestHandler):
                 self._send_json(200, view)
                 return
             self.send_error(404)
+            return
+        if path == "/api/undo":
+            view = undo_session(self.server.repo_root, **self._view_args())
+            self._send_json(200, view)
+            return
+        if path == "/api/redo":
+            view = redo_session(self.server.repo_root, **self._view_args())
+            self._send_json(200, view)
             return
         if path != "/api/submit":
             self.send_error(404)

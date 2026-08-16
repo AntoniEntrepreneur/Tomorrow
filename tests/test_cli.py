@@ -187,10 +187,41 @@ def test_construction_page_is_blank_canvas_with_domain_jargon(tmp_path: Path) ->
     assert "Unplaced Flex" in html
     assert "Promote" in html
     assert "Template" in html
+    assert "Undo" in html
+    assert "Redo" in html
+    assert 'id="undo"' in html
+    assert 'id="redo"' in html
+    assert "/api/undo" in html
+    assert "/api/redo" in html
+    assert "confirm(" not in html
+    assert "toast" not in html
     assert 'type="date"' not in html
     assert "named-routine" not in html
     assert "latitude" not in html
     assert "longitude" not in html
+
+
+def test_session_page_wires_undo_shortcuts_and_keeps_stamps_enabled(
+    tmp_path: Path,
+) -> None:
+    _write_defaults(tmp_path)
+    server, thread = _start_server(tmp_path)
+    try:
+        status, body = _http("GET", "/")
+    finally:
+        _stop_server(server, thread)
+
+    html = body.decode("utf-8")
+    assert status == 200
+    assert 'key === "z"' in html or 'key === "Z"' in html or 'toLowerCase()' in html
+    assert "shiftKey" in html
+    assert 'key === "y"' in html or 'key === "Y"' in html
+    assert "INPUT" in html
+    assert "TEXTAREA" in html
+    assert "sheetKind" in html or 'kind === "stamp"' in html or 'kind === "edit"' in html
+    assert "openSheet(" in html
+    assert "stamp" in html
+    assert "disabled" in html
 
 
 def test_session_json_omits_undo_stacks(tmp_path: Path) -> None:
@@ -312,6 +343,8 @@ def test_reset_over_http_blanks_session_and_keeps_plan_html(tmp_path: Path) -> N
     assert payload["anchors"] == []
     assert payload["flexes"] == []
     assert "undo" not in payload
+    assert payload["can_undo"] is True
+    assert payload["can_redo"] is False
     assert flushed["drafts"] == []
     assert flushed["bounds"] == {"wake": "06:30", "sleep": "23:00"}
     assert plan_path.read_text(encoding="utf-8") == "<html>existing plan</html>"
@@ -700,3 +733,33 @@ def test_checklist_library_and_item_attach_over_http(tmp_path: Path) -> None:
     assert flex_edited["flexes"][0]["checklist"] is None
     assert flushed["anchors"][0]["checklist"] == "sauna-kit"
     assert flushed["flexes"][0]["checklist"] is None
+
+
+def test_undo_and_redo_over_http_omit_stacks_and_restore_ids(tmp_path: Path) -> None:
+    _write_defaults(tmp_path)
+    server, thread = _start_server(tmp_path)
+    try:
+        _, added_body = _http(
+            "POST",
+            "/api/add",
+            payload={"kind": "draft", "name": "Call dentist"},
+        )
+        added = json.loads(added_body)
+        undo_status, undo_body = _http("POST", "/api/undo")
+        redo_status, redo_body = _http("POST", "/api/redo")
+    finally:
+        _stop_server(server, thread)
+
+    undone = json.loads(undo_body)
+    redone = json.loads(redo_body)
+    assert undo_status == 200
+    assert redo_status == 200
+    assert "undo" not in undone
+    assert "undo" not in redone
+    assert undone["drafts"] == []
+    assert undone["can_undo"] is False
+    assert undone["can_redo"] is True
+    assert redone["drafts"] == added["drafts"]
+    assert redone["drafts"][0]["id"] == added["drafts"][0]["id"]
+    assert redone["can_undo"] is True
+    assert redone["can_redo"] is False

@@ -336,6 +336,7 @@
   <script>
     let current = null;
     let sheetOpen = false;
+    let sheetKind = null;
     let armedFlexId = null;
 
     function esc(value) {
@@ -465,11 +466,15 @@
       return rows;
     }
 
+    function sessionUndoBlocked() {
+      return sheetKind === "edit";
+    }
+
     function setChromeEnabled() {
       if (!current) return;
-      const overlay = sheetOpen;
-      document.getElementById("undo").disabled = overlay || !current.can_undo;
-      document.getElementById("redo").disabled = overlay || !current.can_redo;
+      const blocked = sessionUndoBlocked();
+      document.getElementById("undo").disabled = blocked || !current.can_undo;
+      document.getElementById("redo").disabled = blocked || !current.can_redo;
       document.getElementById("submit").disabled = (current.blockers || []).length > 0;
     }
 
@@ -574,12 +579,13 @@
       document.getElementById("template-offer").hidden = !session.show_template_offer;
     }
 
-    function openSheet(html) {
+    function openSheet(html, kind) {
       const backdrop = document.getElementById("sheet-backdrop");
       document.getElementById("sheet").innerHTML = html;
       backdrop.hidden = false;
       backdrop.classList.add("open");
       sheetOpen = true;
+      sheetKind = kind || "edit";
       setChromeEnabled();
       const first = document.getElementById("sheet").querySelector("input, button");
       if (first) first.focus();
@@ -591,6 +597,7 @@
       backdrop.hidden = true;
       document.getElementById("sheet").innerHTML = "";
       sheetOpen = false;
+      sheetKind = null;
       setChromeEnabled();
     }
 
@@ -622,7 +629,8 @@
         '<label>Duration (min) <input name="duration_minutes" type="number" min="1" required value="45"></label>' +
         checklistField("") +
         '<div class="actions"><button class="primary" type="submit">Add Flex</button>' +
-        '<button type="button" class="ghost" data-close>Cancel</button></div></form>'
+        '<button type="button" class="ghost" data-close>Cancel</button></div></form>',
+        "stamp"
       );
       maybeSuggestChecklist(document.getElementById("add-flex"));
     }
@@ -633,7 +641,8 @@
         "<form id=\"add-draft\">" +
         '<label>Name <input name="name" required></label>' +
         '<div class="actions"><button class="primary" type="submit">Add Draft</button>' +
-        '<button type="button" class="ghost" data-close>Cancel</button></div></form>'
+        '<button type="button" class="ghost" data-close>Cancel</button></div></form>',
+        "stamp"
       );
     }
 
@@ -734,7 +743,8 @@
         formFields("", "", 60) +
         checklistField("") +
         '<div class="actions"><button class="primary" type="submit">Add Anchor</button>' +
-        '<button type="button" class="ghost" data-close>Cancel</button></div></form>'
+        '<button type="button" class="ghost" data-close>Cancel</button></div></form>',
+        "stamp"
       );
       maybeSuggestChecklist(document.getElementById("add-anchor"));
     }
@@ -1003,7 +1013,30 @@
     });
 
     document.addEventListener("keydown", event => {
-      if (event.key === "Escape" && sheetOpen) closeSheet();
+      if (event.key === "Escape" && sheetOpen) {
+        closeSheet();
+        return;
+      }
+      const key = event.key.toLowerCase();
+      const modifier = event.metaKey || event.ctrlKey;
+      if (!modifier) return;
+      const redo = (key === "z" && event.shiftKey) || (key === "y" && event.ctrlKey);
+      if (key !== "z" && !(key === "y" && event.ctrlKey)) return;
+      const typing = event.target && (
+        event.target.tagName === "INPUT" ||
+        event.target.tagName === "TEXTAREA"
+      );
+      if (typing && key === "z" && !event.shiftKey) return;
+      if (sessionUndoBlocked()) return;
+      if (redo) {
+        if (!current || !current.can_redo) return;
+        event.preventDefault();
+        mutate("/api/redo", {});
+        return;
+      }
+      if (!current || !current.can_undo) return;
+      event.preventDefault();
+      mutate("/api/undo", {});
     });
 
     document.getElementById("submit").addEventListener("click", async () => {
@@ -1016,6 +1049,15 @@
     document.getElementById("reset").addEventListener("click", async () => {
       const response = await fetch("/api/reset", { method: "POST" });
       render(await response.json());
+    });
+
+    document.getElementById("undo").addEventListener("click", () => {
+      if (sessionUndoBlocked()) return;
+      mutate("/api/undo", {});
+    });
+    document.getElementById("redo").addEventListener("click", () => {
+      if (sessionUndoBlocked()) return;
+      mutate("/api/redo", {});
     });
 
     document.getElementById("template-yes").addEventListener("click", () => {

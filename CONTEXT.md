@@ -32,8 +32,16 @@ Writing a Plan from the current Session. Allowed only when no Draft remains, eve
 _Avoid_: Save, export, publish, write
 
 **Reset**:
-Discard the Session's contents to a blank Session for the same Plan date. Does not delete an existing Plan.
+Discard the Session's contents to a blank Session for the same Plan date. Does not delete an existing Plan. Undoable.
 _Avoid_: Start over, clear, new session, discard (as the name of this act)
+
+**Undo**:
+Restore the previous Session from a short stack of snapshots. Covers Session mutations including Drop and Reset. Does not touch Plan HTML.
+_Avoid_: revert, history, revision
+
+**Redo**:
+Restore a Session snapshot that Undo pushed aside. Does not touch Plan HTML.
+_Avoid_: unrevert, history, revision
 
 **Anchor**:
 A Plan item locked to a clock start that other items must respect. It must occupy time: an end time, an explicit duration, a Template/library default duration, or a duration you give when asked. Anchors may not overlap each other or sit outside day bounds.
@@ -64,7 +72,7 @@ A named reusable list of things to bring or do, attached to a Plan item and show
 _Avoid_: Packing list, subtasks (unless they are literally checklist rows)
 
 **Drop**:
-An explicit decision to remove a Flex (or Draft) from tomorrow so the Plan can finish honestly. The item is gone — no not-today list, no note on the Plan.
+An explicit decision to remove a Flex (or Draft) from tomorrow so the Plan can finish honestly. The item is gone from the Plan — no not-today list, no note on the Plan. Undo can restore it until that step ages off the stack.
 _Avoid_: Defer, snooze, skip (unless we later define those)
 
 **Defaults**:

@@ -34,6 +34,8 @@ from tomorrow.session import (
     session_view,
     shrink_flex,
     submit_session,
+    redo_session,
+    undo_session,
 )
 
 
@@ -404,22 +406,24 @@ def test_reset_blanks_session_for_the_same_plan_date(tmp_path: Path) -> None:
     view = reset_session(tmp_path, now=datetime(2026, 8, 10, 22, 0))
     flushed = json.loads((tmp_path / "data" / "session.json").read_text(encoding="utf-8"))
 
-    assert flushed == {
-        "plan_date": "2026-08-11",
-        "bounds": {"wake": "06:30", "sleep": "23:00"},
-        "template_offer": "pending",
-        "drafts": [],
-        "anchors": [],
-        "flexes": [],
-        "undo": {"past": [], "future": []},
-    }
+    assert flushed["plan_date"] == "2026-08-11"
+    assert flushed["bounds"] == {"wake": "06:30", "sleep": "23:00"}
+    assert flushed["template_offer"] == "pending"
+    assert flushed["drafts"] == []
+    assert flushed["anchors"] == []
+    assert flushed["flexes"] == []
+    assert flushed["undo"]["future"] == []
+    assert "undo" not in flushed["undo"]["past"][-1]
+    assert flushed["undo"]["past"][-1]["drafts"] == [
+        {"id": "d1", "name": "Call dentist"}
+    ]
     assert view["plan_date"] == "2026-08-11"
     assert view["bounds"] == {"wake": "06:30", "sleep": "23:00"}
     assert view["template_offer"] == "pending"
     assert view["drafts"] == []
     assert view["anchors"] == []
     assert view["flexes"] == []
-    assert view["can_undo"] is False
+    assert view["can_undo"] is True
     assert view["can_redo"] is False
     assert "undo" not in view
 
@@ -1612,3 +1616,239 @@ def test_drafts_cannot_carry_a_checklist(tmp_path: Path) -> None:
     assert view["drafts"] == [{"id": "d1", "name": "Gym"}]
     assert "checklist" not in view["drafts"][0]
     assert "checklist" not in document["drafts"][0]
+
+
+def test_undo_of_add_restores_the_previous_session(tmp_path: Path) -> None:
+    _write_defaults(tmp_path)
+    now = datetime(2026, 8, 10, 22, 0)
+    added = add_flex(tmp_path, name="Walk", duration_minutes=30, now=now)
+
+    view = undo_session(tmp_path, now=now)
+    document = load_session(tmp_path, now=now)
+
+    assert added["flexes"][0]["name"] == "Walk"
+    assert view["flexes"] == []
+    assert view["anchors"] == []
+    assert view["drafts"] == []
+    assert view["template_offer"] == "pending"
+    assert view["can_undo"] is False
+    assert view["can_redo"] is True
+    assert "undo" not in view
+    assert document["flexes"] == []
+    assert "undo" not in document["undo"]["future"][0]
+
+
+def test_redo_restores_the_undone_session(tmp_path: Path) -> None:
+    _write_defaults(tmp_path)
+    now = datetime(2026, 8, 10, 22, 0)
+    added = add_flex(tmp_path, name="Walk", duration_minutes=30, now=now)
+    undo_session(tmp_path, now=now)
+
+    view = redo_session(tmp_path, now=now)
+    document = load_session(tmp_path, now=now)
+
+    assert view["flexes"] == added["flexes"]
+    assert view["flexes"][0]["id"] == added["flexes"][0]["id"]
+    assert view["can_undo"] is True
+    assert view["can_redo"] is False
+    assert "undo" not in view
+    assert document["flexes"] == added["flexes"]
+    assert document["undo"]["future"] == []
+
+
+def test_a_new_mutation_after_undo_clears_redo(tmp_path: Path) -> None:
+    _write_defaults(tmp_path)
+    now = datetime(2026, 8, 10, 22, 0)
+    add_flex(tmp_path, name="Walk", duration_minutes=30, now=now)
+    undo_session(tmp_path, now=now)
+    add_draft(tmp_path, name="Call dentist", now=now)
+
+    view = redo_session(tmp_path, now=now)
+    document = load_session(tmp_path, now=now)
+
+    assert [draft["name"] for draft in view["drafts"]] == ["Call dentist"]
+    assert view["flexes"] == []
+    assert view["can_redo"] is False
+    assert document["undo"]["future"] == []
+
+
+def test_undo_of_empty_stack_is_a_noop(tmp_path: Path) -> None:
+    _write_defaults(tmp_path)
+    now = datetime(2026, 8, 10, 22, 0)
+
+    view = undo_session(tmp_path, now=now)
+
+    assert view["can_undo"] is False
+    assert view["can_redo"] is False
+    assert view["flexes"] == []
+    assert not (tmp_path / "data" / "session.json").exists()
+
+
+def test_reset_is_undoable_and_restores_the_same_ids(tmp_path: Path) -> None:
+    _write_defaults(tmp_path)
+    now = datetime(2026, 8, 10, 22, 0)
+    added = add_flex(tmp_path, name="Walk", duration_minutes=30, now=now)
+    reset = reset_session(tmp_path, now=now)
+
+    view = undo_session(tmp_path, now=now)
+
+    assert reset["flexes"] == []
+    assert reset["can_undo"] is True
+    assert reset["template_offer"] == "pending"
+    assert view["flexes"] == added["flexes"]
+    assert view["flexes"][0]["id"] == added["flexes"][0]["id"]
+    assert view["can_undo"] is True
+    assert view["can_redo"] is True
+
+
+def test_oldest_undo_step_ages_off_after_twenty(tmp_path: Path) -> None:
+    _write_defaults(tmp_path)
+    now = datetime(2026, 8, 10, 22, 0)
+    first = add_draft(tmp_path, name="keep-me", now=now)
+    for index in range(20):
+        add_draft(tmp_path, name=f"later-{index}", now=now)
+
+    for _ in range(20):
+        undo_session(tmp_path, now=now)
+    view = undo_session(tmp_path, now=now)
+
+    names = [draft["name"] for draft in view["drafts"]]
+    assert "keep-me" in names
+    assert names[0] == first["drafts"][0]["name"]
+    assert view["drafts"][0]["id"] == first["drafts"][0]["id"]
+    assert view["can_undo"] is False
+
+
+def test_submit_is_not_an_undo_step_and_does_not_touch_the_stack(
+    tmp_path: Path,
+) -> None:
+    _write_defaults(tmp_path)
+    now = datetime(2026, 8, 10, 22, 0)
+    added = add_anchor(
+        tmp_path, name="Gym", start="18:00", duration_minutes=90, now=now
+    )
+    before = load_session(tmp_path, now=now)
+
+    submit_session(tmp_path, now=now)
+    after = load_session(tmp_path, now=now)
+
+    assert after["undo"] == before["undo"]
+    assert after["anchors"] == added["anchors"]
+    assert (tmp_path / "plans" / "2026-08-11.html").exists()
+
+
+def test_undo_after_submit_restores_session_and_leaves_plan_html(
+    tmp_path: Path,
+) -> None:
+    _write_defaults(tmp_path)
+    now = datetime(2026, 8, 10, 22, 0)
+    added = add_flex(tmp_path, name="Walk", duration_minutes=30, now=now)
+    drop_flex(tmp_path, item_id=added["flexes"][0]["id"], now=now)
+    plan_path = submit_session(tmp_path, now=now)
+    submitted = plan_path.read_text(encoding="utf-8")
+
+    view = undo_session(tmp_path, now=now)
+
+    assert view["flexes"] == added["flexes"]
+    assert view["flexes"][0]["id"] == added["flexes"][0]["id"]
+    assert plan_path.read_text(encoding="utf-8") == submitted
+    assert "Walk" not in submitted
+
+
+def test_undo_of_template_apply_is_one_step(tmp_path: Path) -> None:
+    _write_defaults(tmp_path)
+    _write_tuesday_template(tmp_path)
+    now = datetime(2026, 8, 10, 22, 0)
+    applied = apply_template(tmp_path, now=now)
+
+    view = undo_session(tmp_path, now=now)
+
+    assert applied["template_offer"] == "accepted"
+    assert len(applied["anchors"]) == 1
+    assert len(applied["flexes"]) == 1
+    assert view["anchors"] == []
+    assert view["flexes"] == []
+    assert view["template_offer"] == "pending"
+    assert view["can_undo"] is False
+    assert view["can_redo"] is True
+
+
+def test_undo_restores_edits_drop_place_shrink_and_promote(
+    tmp_path: Path,
+) -> None:
+    _write_defaults(tmp_path)
+    _write_checklist_library(tmp_path)
+    now = datetime(2026, 8, 10, 22, 0)
+    flex = add_flex(tmp_path, name="Walk", duration_minutes=30, now=now)
+    flex_id = flex["flexes"][0]["id"]
+    edit_flex(
+        tmp_path,
+        item_id=flex_id,
+        name="Long walk",
+        duration_minutes=45,
+        checklist="gym-bag",
+        now=now,
+    )
+    undo_session(tmp_path, now=now)
+    assert session_view(tmp_path, now=now)["flexes"][0]["name"] == "Walk"
+    assert session_view(tmp_path, now=now)["flexes"][0]["checklist"] is None
+
+    place_flex(tmp_path, item_id=flex_id, start="07:00", now=now)
+    undo_session(tmp_path, now=now)
+    assert session_view(tmp_path, now=now)["flexes"][0]["start"] is None
+
+    shrink_flex(tmp_path, item_id=flex_id, duration_minutes=10, now=now)
+    undo_session(tmp_path, now=now)
+    assert session_view(tmp_path, now=now)["flexes"][0]["duration_minutes"] == 30
+
+    drop_flex(tmp_path, item_id=flex_id, now=now)
+    undo_session(tmp_path, now=now)
+    assert session_view(tmp_path, now=now)["flexes"][0]["id"] == flex_id
+
+    edit_bounds(tmp_path, wake="07:00", now=now)
+    undo_session(tmp_path, now=now)
+    assert session_view(tmp_path, now=now)["bounds"]["wake"] == "06:30"
+
+    draft = add_draft(tmp_path, name="Call dentist", now=now)
+    promote_draft(
+        tmp_path,
+        item_id=draft["drafts"][0]["id"],
+        kind="flex",
+        duration_minutes=20,
+        now=now,
+    )
+    undo_session(tmp_path, now=now)
+    restored = session_view(tmp_path, now=now)
+    assert restored["drafts"][0]["id"] == draft["drafts"][0]["id"]
+    assert restored["drafts"][0]["name"] == "Call dentist"
+
+
+def test_undo_of_template_decline_restores_pending_offer(tmp_path: Path) -> None:
+    _write_defaults(tmp_path)
+    _write_tuesday_template(tmp_path)
+    now = datetime(2026, 8, 10, 22, 0)
+    declined = decline_template(tmp_path, now=now)
+
+    view = undo_session(tmp_path, now=now)
+
+    assert declined["template_offer"] == "declined"
+    assert declined["show_template_offer"] is False
+    assert view["template_offer"] == "pending"
+    assert view["show_template_offer"] is True
+    assert view["can_redo"] is True
+
+
+def test_undo_stack_survives_same_night_resume(tmp_path: Path) -> None:
+    _write_defaults(tmp_path)
+    evening = datetime(2026, 8, 10, 22, 0)
+    added = add_flex(tmp_path, name="Walk", duration_minutes=30, now=evening)
+    drop_flex(tmp_path, item_id=added["flexes"][0]["id"], now=evening)
+
+    later = datetime(2026, 8, 10, 23, 30)
+    resumed = load_session(tmp_path, now=later)
+    view = undo_session(tmp_path, now=later)
+
+    assert resumed["flexes"] == []
+    assert len(resumed["undo"]["past"]) >= 1
+    assert view["flexes"][0]["id"] == added["flexes"][0]["id"]
+    assert view["plan_date"] == "2026-08-11"
