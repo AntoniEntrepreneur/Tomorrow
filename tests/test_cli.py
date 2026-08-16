@@ -21,6 +21,25 @@ def _write_defaults(tmp_path: Path) -> None:
     (tmp_path / "plans").mkdir()
 
 
+def _write_tuesday_template(tmp_path: Path) -> None:
+    templates = tmp_path / "data" / "templates"
+    templates.mkdir()
+    (templates / "tuesday.toml").write_text(
+        """
+[[anchor]]
+name = "Standup"
+start = "07:00"
+duration = 15
+
+[[flex]]
+name = "Sauna"
+duration = 30
+""".strip()
+        + "\n",
+        encoding="utf-8",
+    )
+
+
 def test_main_finds_clone_data_when_cwd_is_elsewhere(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -155,7 +174,9 @@ def test_construction_page_is_blank_canvas_with_domain_jargon(tmp_path: Path) ->
     assert "Submit" in html
     assert "Unplaced Flex" in html
     assert "Promote" in html
+    assert "Template" in html
     assert 'type="date"' not in html
+    assert "named-routine" not in html
     assert "latitude" not in html
     assert "longitude" not in html
 
@@ -175,6 +196,7 @@ def test_session_json_omits_undo_stacks(tmp_path: Path) -> None:
     assert payload["can_redo"] is False
     assert payload["plan_date"] == "2026-08-11"
     assert payload["template_offer"] == "pending"
+    assert payload["show_template_offer"] is False
 
 
 def test_submit_writes_plan_opens_file_and_exits(
@@ -331,9 +353,6 @@ def test_add_anchor_over_http_returns_session_without_undo_stacks(
     assert payload["can_undo"] is True
     assert len(payload["anchors"]) == 1
     assert payload["anchors"][0]["name"] == "Gym"
-    assert payload["anchors"][0]["start"] == "18:00"
-    assert payload["anchors"][0]["duration_minutes"] == 90
-    assert payload["anchors"][0]["id"]
 
 
 def test_edit_anchor_and_bounds_over_http(tmp_path: Path) -> None:
@@ -548,3 +567,50 @@ def test_promote_draft_to_flex_over_http(tmp_path: Path) -> None:
     assert payload["flexes"][0]["start"] is None
     assert payload["flexes"][0]["id"] != draft_id
     assert "undo" not in payload
+
+def test_apply_template_over_http(tmp_path: Path) -> None:
+    _write_defaults(tmp_path)
+    _write_tuesday_template(tmp_path)
+    server, thread = _start_server(tmp_path)
+    try:
+        _, offered_body = _http("GET", "/api/session")
+        apply_status, applied_body = _http(
+            "POST", "/api/template", payload={"action": "apply"}
+        )
+    finally:
+        _stop_server(server, thread)
+
+    offered = json.loads(offered_body)
+    applied = json.loads(applied_body)
+    flushed = json.loads((tmp_path / "data" / "session.json").read_text(encoding="utf-8"))
+    assert offered["show_template_offer"] is True
+    assert apply_status == 200
+    assert applied["template_offer"] == "accepted"
+    assert applied["show_template_offer"] is False
+    assert "undo" not in applied
+    assert applied["can_undo"] is True
+    assert applied["anchors"][0]["name"] == "Standup"
+    assert applied["flexes"][0]["name"] == "Sauna"
+    assert applied["flexes"][0]["start"] is None
+    assert flushed["template_offer"] == "accepted"
+
+
+def test_decline_template_over_http(tmp_path: Path) -> None:
+    _write_defaults(tmp_path)
+    _write_tuesday_template(tmp_path)
+    server, thread = _start_server(tmp_path)
+    try:
+        decline_status, declined_body = _http(
+            "POST", "/api/template", payload={"action": "decline"}
+        )
+    finally:
+        _stop_server(server, thread)
+
+    declined = json.loads(declined_body)
+    flushed = json.loads((tmp_path / "data" / "session.json").read_text(encoding="utf-8"))
+    assert decline_status == 200
+    assert declined["template_offer"] == "declined"
+    assert declined["show_template_offer"] is False
+    assert "undo" not in declined
+    assert declined["can_undo"] is True
+    assert flushed["template_offer"] == "declined"

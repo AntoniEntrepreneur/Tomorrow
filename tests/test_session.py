@@ -20,6 +20,8 @@ from tomorrow.session import (
     add_anchor,
     add_draft,
     add_flex,
+    apply_template,
+    decline_template,
     edit_anchor,
     edit_bounds,
     drop_draft,
@@ -46,6 +48,27 @@ def _write_defaults(tmp_path: Path) -> None:
 def _write_session(tmp_path: Path, document: dict) -> None:
     (tmp_path / "data" / "session.json").write_text(
         json.dumps(document), encoding="utf-8"
+    )
+
+
+def _write_tuesday_template(tmp_path: Path) -> None:
+    templates = tmp_path / "data" / "templates"
+    templates.mkdir()
+    (templates / "tuesday.toml").write_text(
+        """
+[[anchor]]
+name = "Standup"
+start = "07:00"
+duration = 15
+checklist = "morning-out"
+
+[[flex]]
+name = "Sauna"
+duration = 30
+checklist = "sauna-kit"
+""".strip()
+        + "\n",
+        encoding="utf-8",
     )
 
 
@@ -158,6 +181,7 @@ def test_session_view_omits_undo_stacks_and_reports_flags(tmp_path: Path) -> Non
     assert view["plan_date_label"] == "Tuesday, 11 August 2026"
     assert view["bounds"] == {"wake": "06:30", "sleep": "23:00"}
     assert view["template_offer"] == "pending"
+    assert view["show_template_offer"] is False
     assert view["drafts"] == []
     assert view["anchors"] == []
     assert view["flexes"] == []
@@ -1098,3 +1122,212 @@ def test_submit_refuses_while_any_draft_remains_after_add(tmp_path: Path) -> Non
         submit_session(tmp_path, now=now)
 
     assert list((tmp_path / "plans").iterdir()) == []
+
+
+def test_blank_session_offers_weekday_template_when_file_exists(
+    tmp_path: Path,
+) -> None:
+    _write_defaults(tmp_path)
+    _write_tuesday_template(tmp_path)
+
+    view = session_view(tmp_path, now=datetime(2026, 8, 10, 22, 0))
+
+    assert view["template_offer"] == "pending"
+    assert view["show_template_offer"] is True
+    assert view["anchors"] == []
+    assert view["flexes"] == []
+    assert view["drafts"] == []
+
+
+def test_blank_session_does_not_offer_template_when_weekday_file_is_missing(
+    tmp_path: Path,
+) -> None:
+    _write_defaults(tmp_path)
+
+    view = session_view(tmp_path, now=datetime(2026, 8, 10, 22, 0))
+
+    assert view["template_offer"] == "pending"
+    assert view["show_template_offer"] is False
+
+
+def test_accepting_template_copies_anchors_and_unplaced_flex_and_flushes(
+    tmp_path: Path,
+) -> None:
+    _write_defaults(tmp_path)
+    _write_tuesday_template(tmp_path)
+    now = datetime(2026, 8, 10, 22, 0)
+
+    view = apply_template(tmp_path, now=now)
+    document = json.loads(
+        (tmp_path / "data" / "session.json").read_text(encoding="utf-8")
+    )
+
+    assert document["template_offer"] == "accepted"
+    assert view["template_offer"] == "accepted"
+    assert view["show_template_offer"] is False
+    assert document["anchors"] == view["anchors"]
+    assert document["flexes"] == view["flexes"]
+    assert len(document["anchors"]) == 1
+    assert document["anchors"][0]["name"] == "Standup"
+    assert document["anchors"][0]["start"] == "07:00"
+    assert document["anchors"][0]["duration_minutes"] == 15
+    assert document["anchors"][0]["checklist"] == "morning-out"
+    assert document["anchors"][0]["id"]
+    assert document["flexes"] == [
+        {
+            "id": document["flexes"][0]["id"],
+            "name": "Sauna",
+            "duration_minutes": 30,
+            "start": None,
+            "checklist": "sauna-kit",
+        }
+    ]
+    assert document["flexes"][0]["id"]
+    assert document["anchors"][0]["id"] != document["flexes"][0]["id"]
+    assert len(document["undo"]["past"]) == 1
+    assert document["undo"]["future"] == []
+    assert view["can_undo"] is True
+    assert "undo" not in view
+
+
+def test_declining_template_persists_through_an_empty_session(
+    tmp_path: Path,
+) -> None:
+    _write_defaults(tmp_path)
+    _write_tuesday_template(tmp_path)
+    now = datetime(2026, 8, 10, 22, 0)
+
+    declined = decline_template(tmp_path, now=now)
+    added = add_flex(tmp_path, name="Walk", duration_minutes=30, now=now)
+    emptied = drop_flex(tmp_path, item_id=added["flexes"][0]["id"], now=now)
+    document = json.loads(
+        (tmp_path / "data" / "session.json").read_text(encoding="utf-8")
+    )
+
+    assert declined["template_offer"] == "declined"
+    assert declined["show_template_offer"] is False
+    assert declined["can_undo"] is True
+    assert "undo" not in declined
+    assert emptied["template_offer"] == "declined"
+    assert emptied["show_template_offer"] is False
+    assert emptied["flexes"] == []
+    assert emptied["anchors"] == []
+    assert emptied["drafts"] == []
+    assert document["template_offer"] == "declined"
+    assert len(document["undo"]["past"]) >= 1
+
+
+def test_template_offer_hides_while_the_session_has_items(
+    tmp_path: Path,
+) -> None:
+    _write_defaults(tmp_path)
+    _write_tuesday_template(tmp_path)
+    now = datetime(2026, 8, 10, 22, 0)
+
+    view = add_flex(tmp_path, name="Walk", duration_minutes=30, now=now)
+
+    assert view["template_offer"] == "pending"
+    assert view["show_template_offer"] is False
+    assert view["flexes"]
+
+
+def test_template_offer_hides_when_a_draft_remains(tmp_path: Path) -> None:
+    _write_defaults(tmp_path)
+    _write_tuesday_template(tmp_path)
+    _write_session(
+        tmp_path,
+        {
+            "plan_date": "2026-08-11",
+            "bounds": {"wake": "06:30", "sleep": "23:00"},
+            "template_offer": "pending",
+            "drafts": [{"id": "d1", "name": "Call dentist"}],
+            "anchors": [],
+            "flexes": [],
+            "undo": {"past": [], "future": []},
+        },
+    )
+
+    view = session_view(tmp_path, now=datetime(2026, 8, 10, 22, 0))
+
+    assert view["template_offer"] == "pending"
+    assert view["show_template_offer"] is False
+
+
+def test_offer_uses_this_weekdays_template_file_only(tmp_path: Path) -> None:
+    _write_defaults(tmp_path)
+    templates = tmp_path / "data" / "templates"
+    templates.mkdir()
+    (templates / "wednesday.toml").write_text(
+        '[[flex]]\nname = "Wrong day"\nduration = 20\n',
+        encoding="utf-8",
+    )
+
+    view = session_view(tmp_path, now=datetime(2026, 8, 10, 22, 0))
+
+    assert view["plan_date"] == "2026-08-11"
+    assert view["show_template_offer"] is False
+
+
+def test_accepting_template_does_not_seed_a_session_that_already_has_items(
+    tmp_path: Path,
+) -> None:
+    _write_defaults(tmp_path)
+    _write_tuesday_template(tmp_path)
+    now = datetime(2026, 8, 10, 22, 0)
+    added = add_flex(tmp_path, name="Walk", duration_minutes=30, now=now)
+
+    view = apply_template(tmp_path, now=now)
+    document = json.loads(
+        (tmp_path / "data" / "session.json").read_text(encoding="utf-8")
+    )
+
+    assert document["template_offer"] == "pending"
+    assert [flex["name"] for flex in document["flexes"]] == ["Walk"]
+    assert document["anchors"] == []
+    assert view["template_offer"] == "pending"
+    assert view["flexes"][0]["id"] == added["flexes"][0]["id"]
+
+
+def test_reset_returns_template_offer_to_pending_and_offers_again(
+    tmp_path: Path,
+) -> None:
+    _write_defaults(tmp_path)
+    _write_tuesday_template(tmp_path)
+    now = datetime(2026, 8, 10, 22, 0)
+    apply_template(tmp_path, now=now)
+
+    view = reset_session(tmp_path, now=now)
+    document = json.loads(
+        (tmp_path / "data" / "session.json").read_text(encoding="utf-8")
+    )
+
+    assert document["template_offer"] == "pending"
+    assert document["anchors"] == []
+    assert document["flexes"] == []
+    assert view["template_offer"] == "pending"
+    assert view["show_template_offer"] is True
+
+
+def test_accepted_then_empty_session_does_not_look_like_pending(
+    tmp_path: Path,
+) -> None:
+    _write_defaults(tmp_path)
+    _write_tuesday_template(tmp_path)
+    now = datetime(2026, 8, 10, 22, 0)
+    seeded = apply_template(tmp_path, now=now)
+    for flex in list(seeded["flexes"]):
+        drop_flex(tmp_path, item_id=flex["id"], now=now)
+    for anchor in list(seeded["anchors"]):
+        edit_anchor(tmp_path, item_id=anchor["id"], remove=True, now=now)
+
+    view = session_view(tmp_path, now=now)
+    document = json.loads(
+        (tmp_path / "data" / "session.json").read_text(encoding="utf-8")
+    )
+
+    assert document["template_offer"] == "accepted"
+    assert document["anchors"] == []
+    assert document["flexes"] == []
+    assert document["drafts"] == []
+    assert view["template_offer"] == "accepted"
+    assert view["show_template_offer"] is False
