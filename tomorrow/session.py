@@ -143,6 +143,87 @@ def add_anchor(
     return _commit(repo_root, document, mutate, now=now, opener=opener)
 
 
+def add_flex(
+    repo_root: Path,
+    *,
+    name: str,
+    duration_minutes: int,
+    now: datetime | None = None,
+    opener: Callable[[Request], object] = _default_opener,
+) -> dict:
+    document = load_session(repo_root, now=now)
+
+    def mutate(current: dict) -> None:
+        current["flexes"].append(
+            {
+                "id": uuid.uuid4().hex,
+                "name": name,
+                "duration_minutes": duration_minutes,
+                "start": None,
+                "checklist": None,
+            }
+        )
+
+    return _commit(repo_root, document, mutate, now=now, opener=opener)
+
+
+def _require_flex(current: dict, item_id: str) -> dict:
+    for flex in current["flexes"]:
+        if flex["id"] == item_id:
+            return flex
+    raise KeyError(item_id)
+
+
+def place_flex(
+    repo_root: Path,
+    *,
+    item_id: str,
+    start: str,
+    now: datetime | None = None,
+    opener: Callable[[Request], object] = _default_opener,
+) -> dict:
+    document = load_session(repo_root, now=now)
+
+    def mutate(current: dict) -> None:
+        _require_flex(current, item_id)["start"] = start
+
+    return _commit(repo_root, document, mutate, now=now, opener=opener)
+
+
+def shrink_flex(
+    repo_root: Path,
+    *,
+    item_id: str,
+    duration_minutes: int,
+    now: datetime | None = None,
+    opener: Callable[[Request], object] = _default_opener,
+) -> dict:
+    document = load_session(repo_root, now=now)
+
+    def mutate(current: dict) -> None:
+        _require_flex(current, item_id)["duration_minutes"] = duration_minutes
+
+    return _commit(repo_root, document, mutate, now=now, opener=opener)
+
+
+def drop_flex(
+    repo_root: Path,
+    *,
+    item_id: str,
+    now: datetime | None = None,
+    opener: Callable[[Request], object] = _default_opener,
+) -> dict:
+    document = load_session(repo_root, now=now)
+
+    def mutate(current: dict) -> None:
+        remaining = [flex for flex in current["flexes"] if flex["id"] != item_id]
+        if len(remaining) == len(current["flexes"]):
+            raise KeyError(item_id)
+        current["flexes"] = remaining
+
+    return _commit(repo_root, document, mutate, now=now, opener=opener)
+
+
 def edit_anchor(
     repo_root: Path,
     *,
@@ -340,7 +421,17 @@ class SessionHandler(BaseHTTPRequestHandler):
             return
         if path == "/api/add":
             payload = self._read_json()
-            if payload.get("kind") != "anchor":
+            kind = payload.get("kind")
+            if kind == "flex":
+                view = add_flex(
+                    self.server.repo_root,
+                    name=payload["name"],
+                    duration_minutes=int(payload["duration_minutes"]),
+                    **self._view_args(),
+                )
+                self._send_json(200, view)
+                return
+            if kind != "anchor":
                 self.send_error(404)
                 return
             view = add_anchor(
@@ -375,6 +466,38 @@ class SessionHandler(BaseHTTPRequestHandler):
                 start=payload.get("start"),
                 duration_minutes=int(duration) if duration is not None else None,
                 remove=bool(payload.get("remove")),
+                **self._view_args(),
+            )
+            self._send_json(200, view)
+            return
+        if path == "/api/place":
+            payload = self._read_json()
+            view = place_flex(
+                self.server.repo_root,
+                item_id=payload["id"],
+                start=payload["start"],
+                **self._view_args(),
+            )
+            self._send_json(200, view)
+            return
+        if path == "/api/shrink":
+            payload = self._read_json()
+            view = shrink_flex(
+                self.server.repo_root,
+                item_id=payload["id"],
+                duration_minutes=int(payload["duration_minutes"]),
+                **self._view_args(),
+            )
+            self._send_json(200, view)
+            return
+        if path == "/api/drop":
+            payload = self._read_json()
+            if payload.get("kind") != "flex":
+                self.send_error(404)
+                return
+            view = drop_flex(
+                self.server.repo_root,
+                item_id=payload["id"],
                 **self._view_args(),
             )
             self._send_json(200, view)

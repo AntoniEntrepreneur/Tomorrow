@@ -8,6 +8,7 @@ import pytest
 
 from tomorrow.domain import (
     Anchor,
+    Flex,
     PlanBlockedError,
     describe_blocker,
     finalize_plan,
@@ -16,11 +17,15 @@ from tomorrow.domain import (
 from tomorrow.defaults import DayBounds
 from tomorrow.session import (
     add_anchor,
+    add_flex,
     edit_anchor,
     edit_bounds,
+    drop_flex,
     load_session,
+    place_flex,
     reset_session,
     session_view,
+    shrink_flex,
     submit_session,
 )
 
@@ -677,3 +682,215 @@ def test_submit_refuses_while_anchor_blockers_remain(tmp_path: Path) -> None:
         submit_session(tmp_path, now=now)
 
     assert list((tmp_path / "plans").iterdir()) == []
+
+
+def test_adding_flex_mints_an_id_stays_unplaced_and_flushes(tmp_path: Path) -> None:
+    _write_defaults(tmp_path)
+
+    view = add_flex(
+        tmp_path,
+        name="Walk",
+        duration_minutes=30,
+        now=datetime(2026, 8, 10, 22, 0),
+    )
+    document = json.loads(
+        (tmp_path / "data" / "session.json").read_text(encoding="utf-8")
+    )
+
+    assert len(document["flexes"]) == 1
+    flex = document["flexes"][0]
+    assert flex["name"] == "Walk"
+    assert flex["duration_minutes"] == 30
+    assert flex["start"] is None
+    assert flex["checklist"] is None
+    assert isinstance(flex["id"], str) and flex["id"]
+    assert view["flexes"] == document["flexes"]
+    assert "undo" not in view
+    assert view["can_undo"] is True
+
+
+def test_unplaced_flex_shows_the_same_blocker_as_finalize_plan(tmp_path: Path) -> None:
+    _write_defaults(tmp_path)
+
+    view = add_flex(
+        tmp_path,
+        name="Walk",
+        duration_minutes=30,
+        now=datetime(2026, 8, 10, 22, 0),
+    )
+    expected = finalize_plan(
+        bounds=DayBounds(wake="06:30", sleep="23:00"),
+        drafts=[],
+        anchors=[],
+        flexes=[Flex(name="Walk", duration=timedelta(minutes=30))],
+    )
+
+    assert view["blockers"] == [
+        describe_blocker(blocker) for blocker in expected.blockers
+    ]
+    assert view["blockers"]
+
+
+def test_placing_flex_into_a_gap_flushes_and_clears_the_unplaced_blocker(
+    tmp_path: Path,
+) -> None:
+    _write_defaults(tmp_path)
+    now = datetime(2026, 8, 10, 22, 0)
+    added = add_flex(tmp_path, name="Walk", duration_minutes=30, now=now)
+    item_id = added["flexes"][0]["id"]
+
+    view = place_flex(tmp_path, item_id=item_id, start="07:15", now=now)
+    document = json.loads(
+        (tmp_path / "data" / "session.json").read_text(encoding="utf-8")
+    )
+
+    assert document["flexes"] == [
+        {
+            "id": item_id,
+            "name": "Walk",
+            "duration_minutes": 30,
+            "start": "07:15",
+            "checklist": None,
+        }
+    ]
+    assert view["flexes"] == document["flexes"]
+    assert view["blockers"] == []
+
+
+def test_placed_flex_that_does_not_fit_is_a_live_blocker(tmp_path: Path) -> None:
+    _write_defaults(tmp_path)
+    now = datetime(2026, 8, 10, 22, 0)
+    added = add_flex(tmp_path, name="Deep work", duration_minutes=90, now=now)
+    item_id = added["flexes"][0]["id"]
+
+    view = place_flex(tmp_path, item_id=item_id, start="22:00", now=now)
+    expected = finalize_plan(
+        bounds=DayBounds(wake="06:30", sleep="23:00"),
+        drafts=[],
+        anchors=[],
+        flexes=[
+            Flex(
+                name="Deep work",
+                duration=timedelta(minutes=90),
+                start=parse_clock("22:00"),
+            )
+        ],
+    )
+
+    assert view["blockers"] == [
+        describe_blocker(blocker) for blocker in expected.blockers
+    ]
+    assert view["blockers"]
+
+
+def test_shrinking_flex_flushes_and_can_clear_a_does_not_fit_blocker(
+    tmp_path: Path,
+) -> None:
+    _write_defaults(tmp_path)
+    now = datetime(2026, 8, 10, 22, 0)
+    added = add_flex(tmp_path, name="Deep work", duration_minutes=90, now=now)
+    item_id = added["flexes"][0]["id"]
+    place_flex(tmp_path, item_id=item_id, start="22:00", now=now)
+
+    view = shrink_flex(tmp_path, item_id=item_id, duration_minutes=45, now=now)
+    document = json.loads(
+        (tmp_path / "data" / "session.json").read_text(encoding="utf-8")
+    )
+
+    assert document["flexes"][0]["duration_minutes"] == 45
+    assert document["flexes"][0]["start"] == "22:00"
+    assert view["flexes"] == document["flexes"]
+    assert view["blockers"] == []
+
+
+def test_shrinking_unplaced_flex_leaves_it_unplaced(tmp_path: Path) -> None:
+    _write_defaults(tmp_path)
+    now = datetime(2026, 8, 10, 22, 0)
+    added = add_flex(tmp_path, name="Walk", duration_minutes=45, now=now)
+    item_id = added["flexes"][0]["id"]
+
+    view = shrink_flex(tmp_path, item_id=item_id, duration_minutes=20, now=now)
+    document = json.loads(
+        (tmp_path / "data" / "session.json").read_text(encoding="utf-8")
+    )
+
+    assert document["flexes"][0]["duration_minutes"] == 20
+    assert document["flexes"][0]["start"] is None
+    assert view["flexes"] == document["flexes"]
+    assert view["blockers"]
+
+
+def test_dropping_flex_removes_it_from_the_session_and_flushes(tmp_path: Path) -> None:
+    _write_defaults(tmp_path)
+    now = datetime(2026, 8, 10, 22, 0)
+    added = add_flex(tmp_path, name="Walk", duration_minutes=30, now=now)
+    item_id = added["flexes"][0]["id"]
+
+    view = drop_flex(tmp_path, item_id=item_id, now=now)
+    document = json.loads(
+        (tmp_path / "data" / "session.json").read_text(encoding="utf-8")
+    )
+
+    assert document["flexes"] == []
+    assert view["flexes"] == []
+    assert view["blockers"] == []
+
+
+def test_drop_cannot_vanish_an_anchor(tmp_path: Path) -> None:
+    _write_defaults(tmp_path)
+    now = datetime(2026, 8, 10, 22, 0)
+    added = add_anchor(
+        tmp_path, name="Gym", start="18:00", duration_minutes=90, now=now
+    )
+    add_flex(tmp_path, name="Walk", duration_minutes=30, now=now)
+    anchor_id = added["anchors"][0]["id"]
+
+    with pytest.raises(KeyError):
+        drop_flex(tmp_path, item_id=anchor_id, now=now)
+    document = json.loads(
+        (tmp_path / "data" / "session.json").read_text(encoding="utf-8")
+    )
+
+    assert document["anchors"][0]["id"] == anchor_id
+    assert document["anchors"][0]["name"] == "Gym"
+    assert len(document["flexes"]) == 1
+
+
+def test_submit_refuses_while_flex_blockers_remain(tmp_path: Path) -> None:
+    _write_defaults(tmp_path)
+    now = datetime(2026, 8, 10, 22, 0)
+    add_flex(tmp_path, name="Walk", duration_minutes=30, now=now)
+
+    with pytest.raises(PlanBlockedError):
+        submit_session(tmp_path, now=now)
+
+    assert list((tmp_path / "plans").iterdir()) == []
+
+
+def test_submit_of_honestly_placed_flex_writes_plan_html(tmp_path: Path) -> None:
+    _write_defaults(tmp_path)
+    now = datetime(2026, 8, 10, 22, 0)
+    added = add_flex(tmp_path, name="Walk", duration_minutes=30, now=now)
+    place_flex(tmp_path, item_id=added["flexes"][0]["id"], start="07:15", now=now)
+
+    path = submit_session(tmp_path, now=now)
+    content = path.read_text(encoding="utf-8")
+
+    assert path == tmp_path / "plans" / "2026-08-11.html"
+    assert "Walk" in content
+    assert "07:15" in content
+    assert 'class="block flex"' in content
+
+
+def test_dropped_flex_is_absent_from_the_submitted_plan(tmp_path: Path) -> None:
+    _write_defaults(tmp_path)
+    now = datetime(2026, 8, 10, 22, 0)
+    added = add_flex(tmp_path, name="Walk", duration_minutes=30, now=now)
+    drop_flex(tmp_path, item_id=added["flexes"][0]["id"], now=now)
+
+    path = submit_session(tmp_path, now=now)
+    content = path.read_text(encoding="utf-8")
+
+    assert "Walk" not in content
+    assert "not today" not in content.lower()
+    assert "dropped" not in content.lower()

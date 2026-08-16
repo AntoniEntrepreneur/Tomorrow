@@ -142,7 +142,12 @@
       display: flex; align-items: center; justify-content: space-between;
       padding: 0.45rem 0.75rem;
       font-size: 0.75rem;
+      width: 100%;
+      text-align: left;
+      font: inherit;
+      cursor: pointer;
     }
+    .gap.armed { outline: 2px solid var(--wick); }
     .gap .cta { font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; font-size: 0.65rem; }
 
     .tray {
@@ -156,6 +161,28 @@
       color: var(--muted); margin-bottom: 0.35rem;
     }
     .tray.empty { color: var(--muted); font-size: 0.78rem; }
+    .tray-chips { display: flex; gap: 0.4rem; overflow-x: auto; }
+    .flex-chip {
+      flex: 0 0 auto;
+      background: var(--flex-bg);
+      color: var(--flex);
+      border: 1px solid rgba(224,184,150,0.55);
+      border-radius: 10px;
+      padding: 0.45rem 0.65rem;
+      font-size: 0.8rem;
+      cursor: pointer;
+      min-width: 9.5rem;
+      text-align: left;
+    }
+    .flex-chip.armed { outline: 2px solid var(--wick); }
+    .flex-chip .name { font-weight: 600; display: block; }
+    .flex-chip .meta { font-family: "IBM Plex Mono", monospace; font-size: 0.65rem; opacity: 0.75; }
+    .flex-chip .ops { display: flex; gap: 0.25rem; margin-top: 0.25rem; }
+    .flex-chip .ops button {
+      background: transparent; border: 1px solid rgba(224,184,150,0.35);
+      color: inherit; border-radius: 999px; font-size: 0.62rem;
+      padding: 0.1rem 0.4rem; cursor: pointer;
+    }
 
     .sheet-backdrop {
       display: none;
@@ -197,6 +224,11 @@
     }
     .sheet .primary { background: var(--wick); color: #12161f; }
     .sheet .ghost { background: transparent; border: 1px solid rgba(224,168,74,0.28); color: var(--ink); }
+    .sheet .choice-row { display: flex; gap: 0.4rem; flex-wrap: wrap; margin: 0.4rem 0 0.8rem; }
+    .sheet .choice-row button {
+      background: transparent; border: 1px solid rgba(224,168,74,0.35); color: var(--ink);
+    }
+    .sheet .hint { font-size: 0.8rem; color: var(--muted); margin-bottom: 0.6rem; }
     .sheet .danger { background: var(--danger); color: #fff; margin-left: auto; }
   </style>
 </head>
@@ -216,7 +248,7 @@
 
     <div class="stamps">
       <button type="button" class="stamp anchor" id="stamp-anchor"><span>A</span>Anchor</button>
-      <button type="button" class="stamp flex"><span>F</span>Flex</button>
+      <button type="button" class="stamp flex" id="stamp-flex"><span>F</span>Flex</button>
       <button type="button" class="stamp draft"><span>D</span>Draft</button>
     </div>
 
@@ -239,6 +271,7 @@
   <script>
     let current = null;
     let sheetOpen = false;
+    let armedFlexId = null;
 
     function esc(value) {
       return String(value).replace(/[&<>"']/g, ch => ({
@@ -332,10 +365,14 @@
       const total = Math.max(1, toMin(session.bounds.sleep) - toMin(session.bounds.wake));
       document.getElementById("rail").innerHTML = railRows(session).map(row => {
         if (row.kind === "gap") {
-          return '<div class="gap" style="min-height:' + heightPx(row.durationMin, total, 40) + 'px">' +
+          const armed = armedFlexId ? " armed" : "";
+          const cta = armedFlexId ? "Place here" : "Place Flex";
+          return '<button type="button" class="gap' + armed + '" data-kind="gap" data-start="' +
+            esc(row.start) + '" data-end="' + esc(row.end) + '" style="min-height:' +
+            heightPx(row.durationMin, total, 40) + 'px">' +
             '<span class="time-tag">' + esc(row.start) + "</span>" +
             "<span>Gap · " + esc(fmtDur(row.durationMin)) + "</span>" +
-            '<span class="cta">Add into Gap</span></div>';
+            '<span class="cta">' + cta + "</span></button>";
         }
         return '<button type="button" class="block ' + row.kind + '" data-kind="' + row.kind +
           '" data-id="' + esc(row.id) + '" style="min-height:' + heightPx(row.durationMin, total, 52) + 'px">' +
@@ -346,8 +383,40 @@
       }).join("");
     }
 
+    function renderTray(session) {
+      const unplaced = (session.flexes || []).filter(item => !item.start);
+      const tray = document.getElementById("tray");
+      if (!unplaced.length) {
+        tray.classList.add("empty");
+        tray.innerHTML =
+          '<div class="tray-label">Unplaced Flex — Place / Shrink / Drop any time</div>' +
+          "<div>No unplaced Flex.</div>";
+        return;
+      }
+      tray.classList.remove("empty");
+      tray.innerHTML =
+        '<div class="tray-label">Unplaced Flex — Place / Shrink / Drop any time</div>' +
+        '<div class="tray-chips">' + unplaced.map(item =>
+          '<div class="flex-chip' + (armedFlexId === item.id ? " armed" : "") +
+          '" data-arm="' + esc(item.id) + '">' +
+          '<span class="name">' + esc(item.name) + "</span>" +
+          '<span class="meta">' + esc(fmtDur(item.duration_minutes)) + " · unplaced</span>" +
+          '<div class="ops">' +
+          '<button type="button" data-place="' + esc(item.id) + '">Place</button>' +
+          '<button type="button" data-shrink="' + esc(item.id) + '">Shrink</button>' +
+          '<button type="button" data-drop="' + esc(item.id) + '">Drop</button>' +
+          "</div></div>"
+        ).join("") + "</div>";
+    }
+
     function render(session) {
       current = session;
+      if (armedFlexId) {
+        const stillUnplaced = (session.flexes || []).some(
+          item => item.id === armedFlexId && !item.start
+        );
+        if (!stillUnplaced) armedFlexId = null;
+      }
       document.title = session.plan_date_label;
       document.getElementById("plan-date").textContent = session.plan_date_label;
       const weatherBits = [];
@@ -360,20 +429,8 @@
       document.getElementById("wake-cap").textContent = "↑ " + session.bounds.wake + " wake";
       document.getElementById("sleep-cap").textContent = session.bounds.sleep + " sleep ↓";
       renderRail(session);
+      renderTray(session);
       setChromeEnabled();
-      const unplaced = (session.flexes || []).filter(item => !item.start);
-      const tray = document.getElementById("tray");
-      if (unplaced.length) {
-        tray.classList.remove("empty");
-        tray.innerHTML =
-          '<div class="tray-label">Unplaced Flex — Place / Shrink / Drop any time</div>' +
-          unplaced.map(item => esc(item.name)).join(", ");
-      } else {
-        tray.classList.add("empty");
-        tray.innerHTML =
-          '<div class="tray-label">Unplaced Flex — Place / Shrink / Drop any time</div>' +
-          "<div>No unplaced Flex.</div>";
-      }
     }
 
     function openSheet(html) {
@@ -402,6 +459,78 @@
         '<label>Start <input name="start" type="time" required value="' + esc(start || "") + '"></label>' +
         '<label>Duration (min) <input name="duration_minutes" type="number" min="1" required value="' +
         esc(durationMin || "") + '"></label></div>';
+    }
+
+    function findFlex(itemId) {
+      return (current.flexes || []).find(item => item.id === itemId);
+    }
+
+    function gapRows() {
+      return railRows(current).filter(row => row.kind === "gap");
+    }
+
+    function sheetAddFlex() {
+      openSheet(
+        "<h2>Add Flex</h2><p class=\"hint\">Unplaced Flex lands in the tray. Place it whenever you notice a Gap.</p>" +
+        "<form id=\"add-flex\">" +
+        '<label>Name <input name="name" required></label>' +
+        '<label>Duration (min) <input name="duration_minutes" type="number" min="1" required value="45"></label>' +
+        '<div class="actions"><button class="primary" type="submit">Add Flex</button>' +
+        '<button type="button" class="ghost" data-close>Cancel</button></div></form>'
+      );
+    }
+
+    function sheetPlace(item) {
+      const opts = gapRows().map(gap =>
+        '<button type="button" data-place-at="' + esc(item.id) + '" data-start="' + esc(gap.start) + '">' +
+        esc(gap.start) + "–" + esc(gap.end) + " · " + esc(fmtDur(gap.durationMin)) + "</button>"
+      ).join("");
+      openSheet(
+        "<h2>Place Flex · " + esc(item.name) + " (" + esc(fmtDur(item.duration_minutes)) + ")</h2>" +
+        '<p class="hint">Snap to a Gap start, or type a clock time.</p>' +
+        '<div class="choice-row">' + (opts || "<span>No Gaps.</span>") + "</div>" +
+        '<form id="place-flex" data-id="' + esc(item.id) + '">' +
+        '<label>Start <input name="start" type="time" required></label>' +
+        '<div class="actions"><button class="primary" type="submit">Place</button>' +
+        '<button type="button" class="ghost" data-close>Cancel</button></div></form>'
+      );
+    }
+
+    function sheetShrink(item) {
+      openSheet(
+        "<h2>Shrink Flex · " + esc(item.name) + "</h2>" +
+        '<form id="shrink-flex" data-id="' + esc(item.id) + '">' +
+        '<label>New duration (min) <input name="duration_minutes" type="number" min="1" required value="' +
+        esc(item.duration_minutes) + '"></label>' +
+        '<div class="actions"><button class="primary" type="submit">Shrink</button>' +
+        '<button type="button" class="ghost" data-close>Cancel</button></div></form>'
+      );
+    }
+
+    function sheetGapPlace(start, end) {
+      const unplaced = (current.flexes || []).filter(item => !item.start);
+      const opts = unplaced.map(item =>
+        '<button type="button" data-place-at="' + esc(item.id) + '" data-start="' + esc(start) + '">' +
+        esc(item.name) + " · " + esc(fmtDur(item.duration_minutes)) + "</button>"
+      ).join("");
+      openSheet(
+        "<h2>Place into this Gap</h2>" +
+        '<p class="hint">Gap ' + esc(start) + "–" + esc(end) + ". Stamp Flex to add to the tray; clicking a Gap Places it.</p>" +
+        '<div class="choice-row">' + (opts || "<span>No unplaced Flex.</span>") + "</div>" +
+        '<div class="actions"><button type="button" class="ghost" data-close>Cancel</button></div>'
+      );
+    }
+
+    function sheetPlacedFlex(item) {
+      openSheet(
+        "<h2>Flex · " + esc(item.name) + "</h2>" +
+        '<p class="hint">' + esc(item.start) + " · " + esc(fmtDur(item.duration_minutes)) + "</p>" +
+        '<div class="actions">' +
+        '<button type="button" class="primary" data-place="' + esc(item.id) + '">Place</button>' +
+        '<button type="button" class="ghost" data-shrink="' + esc(item.id) + '">Shrink</button>' +
+        '<button type="button" class="ghost" data-close>Cancel</button>' +
+        '<button type="button" class="danger" data-drop="' + esc(item.id) + '">Drop</button></div>'
+      );
     }
 
     function sheetAddAnchor() {
@@ -451,14 +580,69 @@
       render(await response.json());
     }
 
+    async function dropFlex(itemId) {
+      armedFlexId = armedFlexId === itemId ? null : armedFlexId;
+      await mutate("/api/drop", { kind: "flex", id: itemId });
+    }
+
+    async function placeFlexAt(itemId, start) {
+      armedFlexId = null;
+      await mutate("/api/place", { id: itemId, start: start });
+    }
+
     document.getElementById("stamp-anchor").addEventListener("click", sheetAddAnchor);
+    document.getElementById("stamp-flex").addEventListener("click", sheetAddFlex);
     document.getElementById("wake-cap").addEventListener("click", () => sheetEditBound("wake"));
     document.getElementById("sleep-cap").addEventListener("click", () => sheetEditBound("sleep"));
     document.getElementById("rail").addEventListener("click", event => {
-      const block = event.target.closest("[data-kind='anchor']");
-      if (!block || !current) return;
-      const item = current.anchors.find(anchor => anchor.id === block.dataset.id);
-      if (item) sheetEditAnchor(item);
+      if (!current) return;
+      const gap = event.target.closest("[data-kind='gap']");
+      if (gap) {
+        if (armedFlexId) {
+          placeFlexAt(armedFlexId, gap.dataset.start);
+          return;
+        }
+        sheetGapPlace(gap.dataset.start, gap.dataset.end);
+        return;
+      }
+      const block = event.target.closest("[data-kind]");
+      if (!block) return;
+      if (block.dataset.kind === "anchor") {
+        const item = current.anchors.find(anchor => anchor.id === block.dataset.id);
+        if (item) sheetEditAnchor(item);
+        return;
+      }
+      if (block.dataset.kind === "flex") {
+        const item = findFlex(block.dataset.id);
+        if (item) sheetPlacedFlex(item);
+      }
+    });
+
+    document.getElementById("tray").addEventListener("click", event => {
+      const dropId = event.target.dataset.drop;
+      if (dropId) {
+        event.stopPropagation();
+        dropFlex(dropId);
+        return;
+      }
+      const placeId = event.target.dataset.place;
+      if (placeId) {
+        event.stopPropagation();
+        const item = findFlex(placeId);
+        if (item) sheetPlace(item);
+        return;
+      }
+      const shrinkId = event.target.dataset.shrink;
+      if (shrinkId) {
+        event.stopPropagation();
+        const item = findFlex(shrinkId);
+        if (item) sheetShrink(item);
+        return;
+      }
+      const chip = event.target.closest("[data-arm]");
+      if (!chip) return;
+      armedFlexId = armedFlexId === chip.dataset.arm ? null : chip.dataset.arm;
+      if (current) render(current);
     });
 
     document.getElementById("sheet-backdrop").addEventListener("click", event => {
@@ -472,6 +656,32 @@
       if (removeId) {
         event.preventDefault();
         await mutate("/api/edit", { kind: "anchor", id: removeId, remove: true });
+        return;
+      }
+      const dropId = event.target.dataset.drop;
+      if (dropId) {
+        event.preventDefault();
+        await dropFlex(dropId);
+        return;
+      }
+      const placeAt = event.target.dataset.placeAt;
+      if (placeAt) {
+        event.preventDefault();
+        await placeFlexAt(placeAt, event.target.dataset.start);
+        return;
+      }
+      const placeId = event.target.dataset.place;
+      if (placeId) {
+        event.preventDefault();
+        const item = findFlex(placeId);
+        if (item) sheetPlace(item);
+        return;
+      }
+      const shrinkId = event.target.dataset.shrink;
+      if (shrinkId) {
+        event.preventDefault();
+        const item = findFlex(shrinkId);
+        if (item) sheetShrink(item);
       }
     });
 
@@ -483,6 +693,25 @@
           kind: "anchor",
           name: form.name.value,
           start: clockValue(form.start),
+          duration_minutes: Number(form.duration_minutes.value)
+        });
+        return;
+      }
+      if (form.id === "add-flex") {
+        await mutate("/api/add", {
+          kind: "flex",
+          name: form.name.value,
+          duration_minutes: Number(form.duration_minutes.value)
+        });
+        return;
+      }
+      if (form.id === "place-flex") {
+        await placeFlexAt(form.dataset.id, clockValue(form.start));
+        return;
+      }
+      if (form.id === "shrink-flex") {
+        await mutate("/api/shrink", {
+          id: form.dataset.id,
           duration_minutes: Number(form.duration_minutes.value)
         });
         return;

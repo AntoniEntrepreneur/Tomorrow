@@ -385,3 +385,82 @@ def test_edit_anchor_and_bounds_over_http(tmp_path: Path) -> None:
     assert bounds["bounds"] == {"wake": "07:00", "sleep": "22:00"}
     assert remove_status == 200
     assert removed["anchors"] == []
+
+
+def test_add_place_shrink_and_drop_flex_over_http(tmp_path: Path) -> None:
+    _write_defaults(tmp_path)
+    server, thread = _start_server(tmp_path)
+    try:
+        add_status, added_body = _http(
+            "POST",
+            "/api/add",
+            payload={"kind": "flex", "name": "Walk", "duration_minutes": 90},
+        )
+        item_id = json.loads(added_body)["flexes"][0]["id"]
+        place_status, placed_body = _http(
+            "POST",
+            "/api/place",
+            payload={"id": item_id, "start": "22:00"},
+        )
+        shrink_status, shrunk_body = _http(
+            "POST",
+            "/api/shrink",
+            payload={"id": item_id, "duration_minutes": 45},
+        )
+        drop_status, dropped_body = _http(
+            "POST",
+            "/api/drop",
+            payload={"kind": "flex", "id": item_id},
+        )
+    finally:
+        _stop_server(server, thread)
+
+    added = json.loads(added_body)
+    placed = json.loads(placed_body)
+    shrunk = json.loads(shrunk_body)
+    dropped = json.loads(dropped_body)
+    flushed = json.loads((tmp_path / "data" / "session.json").read_text(encoding="utf-8"))
+    assert add_status == 200
+    assert added["flexes"][0]["name"] == "Walk"
+    assert added["flexes"][0]["id"]
+    assert "undo" not in added
+    assert place_status == 200
+    assert placed["flexes"][0]["start"] == "22:00"
+    assert "undo" not in placed
+    assert shrink_status == 200
+    assert shrunk["flexes"][0]["duration_minutes"] == 45
+    assert "undo" not in shrunk
+    assert drop_status == 200
+    assert dropped["flexes"] == []
+    assert "undo" not in dropped
+    assert flushed["flexes"] == []
+
+
+def test_drop_over_http_cannot_vanish_an_anchor(tmp_path: Path) -> None:
+    _write_defaults(tmp_path)
+    server, thread = _start_server(tmp_path)
+    try:
+        _, added_body = _http(
+            "POST",
+            "/api/add",
+            payload={
+                "kind": "anchor",
+                "name": "Gym",
+                "start": "18:00",
+                "duration_minutes": 90,
+            },
+        )
+        item_id = json.loads(added_body)["anchors"][0]["id"]
+        status, _body = _http(
+            "POST",
+            "/api/drop",
+            payload={"kind": "anchor", "id": item_id},
+        )
+        _, session_body = _http("GET", "/api/session")
+    finally:
+        _stop_server(server, thread)
+
+    payload = json.loads(session_body)
+    assert status == 404
+    assert payload["anchors"][0]["id"] == item_id
+    assert payload["anchors"][0]["name"] == "Gym"
