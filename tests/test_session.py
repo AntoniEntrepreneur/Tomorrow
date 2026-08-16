@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timedelta
 from io import BytesIO
 from pathlib import Path
 from urllib.error import URLError
@@ -6,8 +6,23 @@ import json
 
 import pytest
 
-from tomorrow.domain import PlanBlockedError
-from tomorrow.session import load_session, reset_session, session_view, submit_session
+from tomorrow.domain import (
+    Anchor,
+    PlanBlockedError,
+    describe_blocker,
+    finalize_plan,
+    parse_clock,
+)
+from tomorrow.defaults import DayBounds
+from tomorrow.session import (
+    add_anchor,
+    edit_anchor,
+    edit_bounds,
+    load_session,
+    reset_session,
+    session_view,
+    submit_session,
+)
 
 
 def _write_defaults(tmp_path: Path) -> None:
@@ -137,6 +152,9 @@ def test_session_view_omits_undo_stacks_and_reports_flags(tmp_path: Path) -> Non
     assert view["drafts"] == []
     assert view["anchors"] == []
     assert view["flexes"] == []
+    assert view["gaps"] == [
+        {"start": "06:30", "end": "23:00", "duration_minutes": 990}
+    ]
     assert view["weather_name"] is None
     assert view["weather_one_liner"] is None
 
@@ -460,3 +478,202 @@ def test_plans_before_today_are_deleted_and_today_or_later_are_kept(
         "2026-08-16.html": "today",
         "2026-08-17.html": "tomorrow",
     }
+
+
+def test_adding_an_anchor_mints_an_id_and_flushes_the_session_file(
+    tmp_path: Path,
+) -> None:
+    _write_defaults(tmp_path)
+
+    view = add_anchor(
+        tmp_path,
+        name="Gym",
+        start="18:00",
+        duration_minutes=90,
+        now=datetime(2026, 8, 10, 22, 0),
+    )
+    document = json.loads(
+        (tmp_path / "data" / "session.json").read_text(encoding="utf-8")
+    )
+
+    assert len(document["anchors"]) == 1
+    anchor = document["anchors"][0]
+    assert anchor["name"] == "Gym"
+    assert anchor["start"] == "18:00"
+    assert anchor["duration_minutes"] == 90
+    assert isinstance(anchor["id"], str) and anchor["id"]
+    assert view["anchors"] == document["anchors"]
+    assert view["blockers"] == []
+    assert "undo" not in view
+    assert view["can_undo"] is True
+
+
+def test_overlapping_anchors_show_the_same_blockers_as_finalize_plan(
+    tmp_path: Path,
+) -> None:
+    _write_defaults(tmp_path)
+    now = datetime(2026, 8, 10, 22, 0)
+    add_anchor(
+        tmp_path, name="Gym", start="18:00", duration_minutes=90, now=now
+    )
+    view = add_anchor(
+        tmp_path, name="Dinner", start="18:30", duration_minutes=60, now=now
+    )
+
+    gym = Anchor(
+        name="Gym", start=parse_clock("18:00"), duration=timedelta(minutes=90)
+    )
+    dinner = Anchor(
+        name="Dinner", start=parse_clock("18:30"), duration=timedelta(minutes=60)
+    )
+    expected = finalize_plan(
+        bounds=DayBounds(wake="06:30", sleep="23:00"),
+        drafts=[],
+        anchors=[gym, dinner],
+    )
+
+    assert view["blockers"] == [
+        describe_blocker(blocker) for blocker in expected.blockers
+    ]
+    assert view["blockers"]
+
+
+def test_editing_an_anchor_updates_name_clock_and_duration_and_flushes(
+    tmp_path: Path,
+) -> None:
+    _write_defaults(tmp_path)
+    now = datetime(2026, 8, 10, 22, 0)
+    added = add_anchor(
+        tmp_path, name="Gym", start="18:00", duration_minutes=90, now=now
+    )
+    item_id = added["anchors"][0]["id"]
+
+    view = edit_anchor(
+        tmp_path,
+        item_id=item_id,
+        name="Weights",
+        start="19:00",
+        duration_minutes=60,
+        now=now,
+    )
+    document = json.loads(
+        (tmp_path / "data" / "session.json").read_text(encoding="utf-8")
+    )
+
+    assert document["anchors"] == [
+        {
+            "id": item_id,
+            "name": "Weights",
+            "start": "19:00",
+            "duration_minutes": 60,
+            "checklist": None,
+        }
+    ]
+    assert view["anchors"] == document["anchors"]
+    assert view["blockers"] == []
+
+
+def test_an_anchor_is_removed_by_editing_it_away(tmp_path: Path) -> None:
+    _write_defaults(tmp_path)
+    now = datetime(2026, 8, 10, 22, 0)
+    added = add_anchor(
+        tmp_path, name="Gym", start="18:00", duration_minutes=90, now=now
+    )
+    item_id = added["anchors"][0]["id"]
+
+    view = edit_anchor(tmp_path, item_id=item_id, remove=True, now=now)
+    document = json.loads(
+        (tmp_path / "data" / "session.json").read_text(encoding="utf-8")
+    )
+
+    assert document["anchors"] == []
+    assert view["anchors"] == []
+    assert view["blockers"] == []
+
+
+def test_changing_session_bounds_flushes_and_does_not_rewrite_defaults(
+    tmp_path: Path,
+) -> None:
+    _write_defaults(tmp_path)
+    now = datetime(2026, 8, 10, 22, 0)
+
+    view = edit_bounds(tmp_path, wake="07:00", sleep="22:00", now=now)
+    document = json.loads(
+        (tmp_path / "data" / "session.json").read_text(encoding="utf-8")
+    )
+    defaults_text = (tmp_path / "data" / "defaults.toml").read_text(encoding="utf-8")
+
+    assert document["bounds"] == {"wake": "07:00", "sleep": "22:00"}
+    assert view["bounds"] == document["bounds"]
+    assert 'wake = "06:30"' in defaults_text
+    assert 'sleep = "23:00"' in defaults_text
+
+
+def test_gaps_update_when_bounds_change(tmp_path: Path) -> None:
+    _write_defaults(tmp_path)
+    now = datetime(2026, 8, 10, 22, 0)
+    added = add_anchor(
+        tmp_path, name="Gym", start="18:00", duration_minutes=90, now=now
+    )
+
+    assert added["gaps"] == [
+        {"start": "06:30", "end": "18:00", "duration_minutes": 690},
+        {"start": "19:30", "end": "23:00", "duration_minutes": 210},
+    ]
+
+    tightened = edit_bounds(tmp_path, sleep="20:00", now=now)
+
+    assert tightened["gaps"] == [
+        {"start": "06:30", "end": "18:00", "duration_minutes": 690},
+        {"start": "19:30", "end": "20:00", "duration_minutes": 30},
+    ]
+
+
+def test_anchor_outside_new_bounds_is_a_live_blocker(tmp_path: Path) -> None:
+    _write_defaults(tmp_path)
+    now = datetime(2026, 8, 10, 22, 0)
+    add_anchor(tmp_path, name="Gym", start="18:00", duration_minutes=90, now=now)
+
+    view = edit_bounds(tmp_path, sleep="18:30", now=now)
+    gym = Anchor(
+        name="Gym", start=parse_clock("18:00"), duration=timedelta(minutes=90)
+    )
+    expected = finalize_plan(
+        bounds=DayBounds(wake="06:30", sleep="18:30"),
+        drafts=[],
+        anchors=[gym],
+    )
+
+    assert view["blockers"] == [
+        describe_blocker(blocker) for blocker in expected.blockers
+    ]
+    assert view["blockers"]
+
+
+def test_submit_of_clean_session_with_anchors_writes_plan_html(
+    tmp_path: Path,
+) -> None:
+    _write_defaults(tmp_path)
+    now = datetime(2026, 8, 10, 22, 0)
+    add_anchor(tmp_path, name="Gym", start="18:00", duration_minutes=90, now=now)
+
+    path = submit_session(tmp_path, now=now)
+    content = path.read_text(encoding="utf-8")
+
+    assert path == tmp_path / "plans" / "2026-08-11.html"
+    assert "Gym" in content
+    assert "18:00" in content
+    assert "19:30" in content
+    assert 'class="block anchor"' in content
+
+
+def test_submit_refuses_while_anchor_blockers_remain(tmp_path: Path) -> None:
+    _write_defaults(tmp_path)
+    now = datetime(2026, 8, 10, 22, 0)
+    add_anchor(tmp_path, name="Gym", start="18:00", duration_minutes=90, now=now)
+    add_anchor(tmp_path, name="Dinner", start="18:30", duration_minutes=60, now=now)
+
+    with pytest.raises(PlanBlockedError):
+        submit_session(tmp_path, now=now)
+
+    assert list((tmp_path / "plans").iterdir()) == []

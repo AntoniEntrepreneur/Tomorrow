@@ -6,9 +6,11 @@ from pathlib import Path
 from typing import Callable
 from urllib.parse import urlparse
 from urllib.request import Request, urlopen
+import copy
 import errno
 import json
 import threading
+import uuid
 import webbrowser
 
 from tomorrow.defaults import DayBounds, load_defaults
@@ -18,8 +20,10 @@ from tomorrow.domain import (
     FinalizeResult,
     Flex,
     PlanBlockedError,
+    compute_gaps,
     describe_blocker,
     finalize_plan,
+    minutes_between,
     parse_clock,
 )
 from tomorrow.plan import default_plan_date, format_plan_date, write_finalized_plan
@@ -54,8 +58,9 @@ def _blank_session(repo_root: Path, *, now: datetime | None = None) -> dict:
     }
 
 
-def _save_session(repo_root: Path, document: dict) -> None:
+def save_session(repo_root: Path, document: dict) -> None:
     path = _session_path(repo_root)
+    path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(document, indent=2) + "\n", encoding="utf-8")
 
 
@@ -82,8 +87,115 @@ def load_session(repo_root: Path, *, now: datetime | None = None) -> dict:
     document = json.loads(path.read_text(encoding="utf-8"))
     if document.get("plan_date") == blank["plan_date"]:
         return document
-    _save_session(repo_root, blank)
+    save_session(repo_root, blank)
     return blank
+
+
+def _snapshot_without_undo(document: dict) -> dict:
+    snapshot = copy.deepcopy(document)
+    snapshot.pop("undo", None)
+    return snapshot
+
+
+def _apply_mutation(document: dict, mutate: Callable[[dict], None]) -> None:
+    undo = document.get("undo", {"past": [], "future": []})
+    past = list(undo.get("past", []))
+    past.append(_snapshot_without_undo(document))
+    mutate(document)
+    document["undo"] = {"past": past[-20:], "future": []}
+
+
+def _commit(
+    repo_root: Path,
+    document: dict,
+    mutate: Callable[[dict], None],
+    *,
+    now: datetime | None,
+    opener: Callable[[Request], object],
+) -> dict:
+    _apply_mutation(document, mutate)
+    save_session(repo_root, document)
+    return session_view(repo_root, now=now, opener=opener)
+
+
+def add_anchor(
+    repo_root: Path,
+    *,
+    name: str,
+    start: str,
+    duration_minutes: int,
+    now: datetime | None = None,
+    opener: Callable[[Request], object] = _default_opener,
+) -> dict:
+    document = load_session(repo_root, now=now)
+
+    def mutate(current: dict) -> None:
+        current["anchors"].append(
+            {
+                "id": uuid.uuid4().hex,
+                "name": name,
+                "start": start,
+                "duration_minutes": duration_minutes,
+                "checklist": None,
+            }
+        )
+
+    return _commit(repo_root, document, mutate, now=now, opener=opener)
+
+
+def edit_anchor(
+    repo_root: Path,
+    *,
+    item_id: str,
+    name: str | None = None,
+    start: str | None = None,
+    duration_minutes: int | None = None,
+    remove: bool = False,
+    now: datetime | None = None,
+    opener: Callable[[Request], object] = _default_opener,
+) -> dict:
+    document = load_session(repo_root, now=now)
+
+    def mutate(current: dict) -> None:
+        if remove:
+            remaining = [
+                anchor for anchor in current["anchors"] if anchor["id"] != item_id
+            ]
+            if len(remaining) == len(current["anchors"]):
+                raise KeyError(item_id)
+            current["anchors"] = remaining
+            return
+        for anchor in current["anchors"]:
+            if anchor["id"] == item_id:
+                if name is not None:
+                    anchor["name"] = name
+                if start is not None:
+                    anchor["start"] = start
+                if duration_minutes is not None:
+                    anchor["duration_minutes"] = duration_minutes
+                return
+        raise KeyError(item_id)
+
+    return _commit(repo_root, document, mutate, now=now, opener=opener)
+
+
+def edit_bounds(
+    repo_root: Path,
+    *,
+    wake: str | None = None,
+    sleep: str | None = None,
+    now: datetime | None = None,
+    opener: Callable[[Request], object] = _default_opener,
+) -> dict:
+    document = load_session(repo_root, now=now)
+
+    def mutate(current: dict) -> None:
+        if wake is not None:
+            current["bounds"]["wake"] = wake
+        if sleep is not None:
+            current["bounds"]["sleep"] = sleep
+
+    return _commit(repo_root, document, mutate, now=now, opener=opener)
 
 
 def _unpack(document: dict) -> tuple[DayBounds, list[Draft], list[Anchor], list[Flex]]:
@@ -125,10 +237,21 @@ def session_view(
     opener: Callable[[Request], object] = _default_opener,
 ) -> dict:
     document = load_session(repo_root, now=now)
-    result = _finalize_document(document)
+    bounds, drafts, anchors, flexes = _unpack(document)
+    result = finalize_plan(
+        bounds=bounds, drafts=drafts, anchors=anchors, flexes=flexes
+    )
     undo = document.get("undo", {"past": [], "future": []})
     plan_date = date.fromisoformat(document["plan_date"])
     data_dir = repo_root / "data"
+    gaps = [
+        {
+            "start": gap.start.strftime("%H:%M"),
+            "end": gap.end.strftime("%H:%M"),
+            "duration_minutes": minutes_between(gap.start, gap.end),
+        }
+        for gap in compute_gaps(bounds=bounds, anchors=anchors)
+    ]
     return {
         "plan_date": document["plan_date"],
         "plan_date_label": format_plan_date(plan_date),
@@ -137,6 +260,7 @@ def session_view(
         "drafts": document["drafts"],
         "anchors": document["anchors"],
         "flexes": document["flexes"],
+        "gaps": gaps,
         "blockers": [describe_blocker(blocker) for blocker in result.blockers],
         "can_undo": bool(undo.get("past")),
         "can_redo": bool(undo.get("future")),
@@ -151,7 +275,7 @@ def reset_session(
     now: datetime | None = None,
     opener: Callable[[Request], object] = _default_opener,
 ) -> dict:
-    _save_session(repo_root, _blank_session(repo_root, now=now))
+    save_session(repo_root, _blank_session(repo_root, now=now))
     return session_view(repo_root, now=now, opener=opener)
 
 
@@ -191,6 +315,12 @@ class SessionHandler(BaseHTTPRequestHandler):
     def log_message(self, format: str, *args: object) -> None:
         return
 
+    def _view_args(self) -> dict:
+        return {
+            "now": self.server.now,
+            "opener": self.server.opener,
+        }
+
     def do_GET(self) -> None:
         path = urlparse(self.path).path
         if path in {"/", "/index.html"}:
@@ -198,22 +328,54 @@ class SessionHandler(BaseHTTPRequestHandler):
             self._send(200, "text/html; charset=utf-8", body)
             return
         if path == "/api/session":
-            view = session_view(
-                self.server.repo_root,
-                now=self.server.now,
-                opener=self.server.opener,
-            )
-            self._send_json(200, view)
+            self._send_json(200, session_view(self.server.repo_root, **self._view_args()))
             return
         self.send_error(404)
 
     def do_POST(self) -> None:
         path = urlparse(self.path).path
         if path == "/api/reset":
-            view = reset_session(
+            view = reset_session(self.server.repo_root, **self._view_args())
+            self._send_json(200, view)
+            return
+        if path == "/api/add":
+            payload = self._read_json()
+            if payload.get("kind") != "anchor":
+                self.send_error(404)
+                return
+            view = add_anchor(
                 self.server.repo_root,
-                now=self.server.now,
-                opener=self.server.opener,
+                name=payload["name"],
+                start=payload["start"],
+                duration_minutes=int(payload["duration_minutes"]),
+                **self._view_args(),
+            )
+            self._send_json(200, view)
+            return
+        if path == "/api/edit":
+            payload = self._read_json()
+            kind = payload.get("kind")
+            if kind == "bounds":
+                view = edit_bounds(
+                    self.server.repo_root,
+                    wake=payload.get("wake"),
+                    sleep=payload.get("sleep"),
+                    **self._view_args(),
+                )
+                self._send_json(200, view)
+                return
+            if kind != "anchor":
+                self.send_error(404)
+                return
+            duration = payload.get("duration_minutes")
+            view = edit_anchor(
+                self.server.repo_root,
+                item_id=payload["id"],
+                name=payload.get("name"),
+                start=payload.get("start"),
+                duration_minutes=int(duration) if duration is not None else None,
+                remove=bool(payload.get("remove")),
+                **self._view_args(),
             )
             self._send_json(200, view)
             return
@@ -221,22 +383,19 @@ class SessionHandler(BaseHTTPRequestHandler):
             self.send_error(404)
             return
         try:
-            plan_path = submit_session(
-                self.server.repo_root,
-                now=self.server.now,
-                opener=self.server.opener,
-            )
+            plan_path = submit_session(self.server.repo_root, **self._view_args())
         except PlanBlockedError:
-            view = session_view(
-                self.server.repo_root,
-                now=self.server.now,
-                opener=self.server.opener,
-            )
-            self._send_json(409, view)
+            self._send_json(409, session_view(self.server.repo_root, **self._view_args()))
             return
         self.server.submitted_path = plan_path
         self._send_json(200, {"ok": True, "path": str(plan_path)})
         threading.Thread(target=self.server.shutdown, daemon=True).start()
+
+    def _read_json(self) -> dict:
+        length = int(self.headers.get("Content-Length", "0"))
+        if length == 0:
+            return {}
+        return json.loads(self.rfile.read(length).decode("utf-8"))
 
     def _send_json(self, status: int, payload: dict) -> None:
         body = json.dumps(payload).encode("utf-8")

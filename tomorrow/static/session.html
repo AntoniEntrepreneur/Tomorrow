@@ -17,7 +17,9 @@
       --muted: #8b93a7;
       --wick: #e0a84a;
       --anchor: #6fbfa3;
+      --anchor-bg: #1a2e2a;
       --flex: #e0b896;
+      --flex-bg: #2c241c;
       --draft: #8ea0c8;
       --danger: #e07a6a;
     }
@@ -110,6 +112,26 @@
       background: linear-gradient(var(--wick), transparent 96%);
       border-radius: 2px;
     }
+    .block {
+      position: relative;
+      margin-bottom: 0.3rem;
+      border-radius: 10px;
+      padding: 0.6rem 0.8rem;
+      cursor: pointer;
+      width: 100%;
+      text-align: left;
+      color: inherit;
+      font: inherit;
+    }
+    .block.anchor { background: var(--anchor-bg); border: none; border-left: 3px solid var(--anchor); }
+    .block.flex { background: var(--flex-bg); border: none; border-left: 3px dashed var(--flex); }
+    .block .time-tag, .gap .time-tag {
+      position: absolute; left: -3.4rem; width: 3rem; text-align: right;
+      font-family: "IBM Plex Mono", monospace; font-size: 0.68rem; color: var(--muted);
+    }
+    .block .time-tag { top: 0.65rem; }
+    .block-title { font-weight: 600; font-size: 0.95rem; }
+    .block-range { font-family: "IBM Plex Mono", monospace; font-size: 0.7rem; opacity: 0.6; margin-top: 0.12rem; }
     .gap {
       position: relative;
       margin-bottom: 0.3rem;
@@ -117,14 +139,9 @@
       border-radius: 10px;
       background: rgba(224,168,74,0.06);
       color: var(--wick);
-      min-height: 32rem;
       display: flex; align-items: center; justify-content: space-between;
       padding: 0.45rem 0.75rem;
       font-size: 0.75rem;
-    }
-    .gap .time-tag {
-      position: absolute; left: -3.4rem; width: 3rem; text-align: right;
-      font-family: "IBM Plex Mono", monospace; font-size: 0.68rem; color: var(--muted);
     }
     .gap .cta { font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; font-size: 0.65rem; }
 
@@ -139,6 +156,48 @@
       color: var(--muted); margin-bottom: 0.35rem;
     }
     .tray.empty { color: var(--muted); font-size: 0.78rem; }
+
+    .sheet-backdrop {
+      display: none;
+      position: fixed; inset: 0; z-index: 250;
+      background: rgba(10, 12, 16, 0.55);
+      align-items: flex-end;
+      justify-content: center;
+    }
+    .sheet-backdrop.open { display: flex; }
+    .sheet {
+      width: min(28rem, 100%);
+      max-height: 85dvh;
+      overflow: auto;
+      background: var(--paper);
+      color: var(--ink);
+      border-radius: 16px 16px 0 0;
+      padding: 1.1rem 1.15rem 2.25rem;
+      border-top: 1px solid rgba(224,168,74,0.28);
+    }
+    .sheet h2 { font-size: 1.05rem; font-weight: 600; margin-bottom: 0.85rem; }
+    .sheet label { display: block; font-size: 0.75rem; font-weight: 600; margin: 0.65rem 0 0.25rem; }
+    .sheet input {
+      width: 100%;
+      font: 400 1rem/1.3 "IBM Plex Sans", system-ui, sans-serif;
+      padding: 0.5rem 0.6rem;
+      border: 1px solid rgba(224,168,74,0.28);
+      border-radius: 8px;
+      background: #12161f;
+      color: var(--ink);
+    }
+    .sheet .row { display: grid; grid-template-columns: 1fr 1fr; gap: 0.6rem; }
+    .sheet .actions { display: flex; gap: 0.5rem; margin-top: 1rem; flex-wrap: wrap; }
+    .sheet button {
+      font: 600 0.88rem/1 "IBM Plex Sans", system-ui, sans-serif;
+      padding: 0.55rem 0.85rem;
+      border-radius: 8px;
+      border: none;
+      cursor: pointer;
+    }
+    .sheet .primary { background: var(--wick); color: #12161f; }
+    .sheet .ghost { background: transparent; border: 1px solid rgba(224,168,74,0.28); color: var(--ink); }
+    .sheet .danger { background: var(--danger); color: #fff; margin-left: auto; }
   </style>
 </head>
 <body>
@@ -156,7 +215,7 @@
     </header>
 
     <div class="stamps">
-      <button type="button" class="stamp anchor"><span>A</span>Anchor</button>
+      <button type="button" class="stamp anchor" id="stamp-anchor"><span>A</span>Anchor</button>
       <button type="button" class="stamp flex"><span>F</span>Flex</button>
       <button type="button" class="stamp draft"><span>D</span>Draft</button>
     </div>
@@ -164,13 +223,7 @@
     <div class="blockers" id="blockers"></div>
 
     <button type="button" class="rail-cap" id="wake-cap">↑ wake</button>
-    <div class="rail-wrap">
-      <div class="gap" id="day-gap">
-        <span class="time-tag" id="gap-start"></span>
-        <span id="gap-label">Gap</span>
-        <span class="cta">Add into Gap</span>
-      </div>
-    </div>
+    <div class="rail-wrap" id="rail"></div>
     <button type="button" class="rail-cap" id="sleep-cap">sleep ↓</button>
   </div>
 
@@ -179,14 +232,122 @@
     <div>No unplaced Flex.</div>
   </div>
 
+  <div class="sheet-backdrop" id="sheet-backdrop" hidden>
+    <div class="sheet" id="sheet"></div>
+  </div>
+
   <script>
+    let current = null;
+    let sheetOpen = false;
+
     function esc(value) {
       return String(value).replace(/[&<>"']/g, ch => ({
         "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
       }[ch]));
     }
 
+    function toMin(clock) {
+      const [hours, minutes] = String(clock).split(":").map(Number);
+      return hours * 60 + minutes;
+    }
+
+    function toClock(minutes) {
+      const hours = Math.floor(minutes / 60);
+      const mins = minutes % 60;
+      return String(hours).padStart(2, "0") + ":" + String(mins).padStart(2, "0");
+    }
+
+    function endClock(start, durationMin) {
+      return toClock(toMin(start) + Number(durationMin));
+    }
+
+    function fmtDur(minutes) {
+      const value = Number(minutes);
+      if (value >= 60 && value % 60 === 0) return (value / 60) + "h";
+      if (value >= 60) return Math.floor(value / 60) + "h " + (value % 60) + "m";
+      return value + "m";
+    }
+
+    function clockValue(input) {
+      return String(input.value || "").slice(0, 5);
+    }
+
+    function heightPx(durationMin, total, floor) {
+      return Math.max(floor, Math.round((durationMin / Math.max(total, 1)) * 520));
+    }
+
+    function railRows(session) {
+      const wake = toMin(session.bounds.wake);
+      const sleep = toMin(session.bounds.sleep);
+      const occupied = (session.anchors || []).map(item => ({
+        kind: "anchor",
+        id: item.id,
+        name: item.name,
+        start: item.start,
+        durationMin: item.duration_minutes,
+        end: endClock(item.start, item.duration_minutes)
+      })).concat((session.flexes || []).filter(item => item.start).map(item => ({
+        kind: "flex",
+        id: item.id,
+        name: item.name,
+        start: item.start,
+        durationMin: item.duration_minutes,
+        end: endClock(item.start, item.duration_minutes)
+      }))).sort((a, b) => toMin(a.start) - toMin(b.start));
+      const rows = [];
+      let cursor = wake;
+      for (const item of occupied) {
+        const start = toMin(item.start);
+        if (start > cursor) {
+          rows.push({
+            kind: "gap",
+            start: toClock(cursor),
+            end: item.start,
+            durationMin: start - cursor
+          });
+        }
+        rows.push(item);
+        cursor = Math.max(cursor, toMin(item.end));
+      }
+      if (sleep > cursor) {
+        rows.push({
+          kind: "gap",
+          start: toClock(cursor),
+          end: toClock(sleep),
+          durationMin: sleep - cursor
+        });
+      }
+      return rows;
+    }
+
+    function setChromeEnabled() {
+      if (!current) return;
+      const overlay = sheetOpen;
+      document.getElementById("undo").disabled = overlay || !current.can_undo;
+      document.getElementById("redo").disabled = overlay || !current.can_redo;
+      document.getElementById("submit").disabled = (current.blockers || []).length > 0;
+    }
+
+    function renderRail(session) {
+      const total = Math.max(1, toMin(session.bounds.sleep) - toMin(session.bounds.wake));
+      document.getElementById("rail").innerHTML = railRows(session).map(row => {
+        if (row.kind === "gap") {
+          return '<div class="gap" style="min-height:' + heightPx(row.durationMin, total, 40) + 'px">' +
+            '<span class="time-tag">' + esc(row.start) + "</span>" +
+            "<span>Gap · " + esc(fmtDur(row.durationMin)) + "</span>" +
+            '<span class="cta">Add into Gap</span></div>';
+        }
+        return '<button type="button" class="block ' + row.kind + '" data-kind="' + row.kind +
+          '" data-id="' + esc(row.id) + '" style="min-height:' + heightPx(row.durationMin, total, 52) + 'px">' +
+          '<span class="time-tag">' + esc(row.start) + "</span>" +
+          '<div class="block-title">' + esc(row.name) + "</div>" +
+          '<div class="block-range">' + esc(row.start) + "–" + esc(row.end) +
+          " · " + esc(fmtDur(row.durationMin)) + "</div></button>";
+      }).join("");
+    }
+
     function render(session) {
+      current = session;
       document.title = session.plan_date_label;
       document.getElementById("plan-date").textContent = session.plan_date_label;
       const weatherBits = [];
@@ -195,12 +356,11 @@
       }
       if (session.weather_one_liner) weatherBits.push(esc(session.weather_one_liner));
       document.getElementById("weather").innerHTML = weatherBits.join(" · ");
-      document.getElementById("undo").disabled = !session.can_undo;
-      document.getElementById("redo").disabled = !session.can_redo;
       document.getElementById("blockers").textContent = (session.blockers || []).join(" ");
       document.getElementById("wake-cap").textContent = "↑ " + session.bounds.wake + " wake";
       document.getElementById("sleep-cap").textContent = session.bounds.sleep + " sleep ↓";
-      document.getElementById("gap-start").textContent = session.bounds.wake;
+      renderRail(session);
+      setChromeEnabled();
       const unplaced = (session.flexes || []).filter(item => !item.start);
       const tray = document.getElementById("tray");
       if (unplaced.length) {
@@ -216,17 +376,142 @@
       }
     }
 
+    function openSheet(html) {
+      const backdrop = document.getElementById("sheet-backdrop");
+      document.getElementById("sheet").innerHTML = html;
+      backdrop.hidden = false;
+      backdrop.classList.add("open");
+      sheetOpen = true;
+      setChromeEnabled();
+      const first = document.getElementById("sheet").querySelector("input, button");
+      if (first) first.focus();
+    }
+
+    function closeSheet() {
+      const backdrop = document.getElementById("sheet-backdrop");
+      backdrop.classList.remove("open");
+      backdrop.hidden = true;
+      document.getElementById("sheet").innerHTML = "";
+      sheetOpen = false;
+      setChromeEnabled();
+    }
+
+    function formFields(name, start, durationMin) {
+      return '<label>Name <input name="name" required value="' + esc(name || "") + '"></label>' +
+        '<div class="row">' +
+        '<label>Start <input name="start" type="time" required value="' + esc(start || "") + '"></label>' +
+        '<label>Duration (min) <input name="duration_minutes" type="number" min="1" required value="' +
+        esc(durationMin || "") + '"></label></div>';
+    }
+
+    function sheetAddAnchor() {
+      openSheet(
+        "<h2>Add Anchor</h2><form id=\"add-anchor\">" +
+        formFields("", "", 60) +
+        '<div class="actions"><button class="primary" type="submit">Add Anchor</button>' +
+        '<button type="button" class="ghost" data-close>Cancel</button></div></form>'
+      );
+    }
+
+    function sheetEditAnchor(item) {
+      openSheet(
+        "<h2>Edit Anchor</h2><form id=\"edit-anchor\" data-id=\"" + esc(item.id) + "\">" +
+        formFields(item.name, item.start, item.duration_minutes) +
+        '<div class="actions"><button class="primary" type="submit">Update</button>' +
+        '<button type="button" class="ghost" data-close>Cancel</button>' +
+        '<button type="button" class="danger" data-remove="' + esc(item.id) + '">Remove</button></div></form>'
+      );
+    }
+
+    function sheetEditBound(which) {
+      const value = current.bounds[which];
+      const label = which === "wake" ? "Wake" : "Sleep";
+      openSheet(
+        "<h2>Edit " + label + "</h2><form id=\"edit-bounds\" data-which=\"" + which + "\">" +
+        "<label>" + label + ' <input name="clock" type="time" required value="' + esc(value) + '"></label>' +
+        '<div class="actions"><button class="primary" type="submit">Update</button>' +
+        '<button type="button" class="ghost" data-close>Cancel</button></div></form>'
+      );
+    }
+
+    async function mutate(path, payload) {
+      const response = await fetch(path, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      });
+      const session = await response.json();
+      closeSheet();
+      render(session);
+      return session;
+    }
+
     async function loadSession() {
       const response = await fetch("/api/session");
-      const session = await response.json();
-      render(session);
+      render(await response.json());
     }
+
+    document.getElementById("stamp-anchor").addEventListener("click", sheetAddAnchor);
+    document.getElementById("wake-cap").addEventListener("click", () => sheetEditBound("wake"));
+    document.getElementById("sleep-cap").addEventListener("click", () => sheetEditBound("sleep"));
+    document.getElementById("rail").addEventListener("click", event => {
+      const block = event.target.closest("[data-kind='anchor']");
+      if (!block || !current) return;
+      const item = current.anchors.find(anchor => anchor.id === block.dataset.id);
+      if (item) sheetEditAnchor(item);
+    });
+
+    document.getElementById("sheet-backdrop").addEventListener("click", event => {
+      if (event.target.id === "sheet-backdrop" || event.target.dataset.close !== undefined) {
+        closeSheet();
+      }
+    });
+
+    document.getElementById("sheet").addEventListener("click", async event => {
+      const removeId = event.target.dataset.remove;
+      if (removeId) {
+        event.preventDefault();
+        await mutate("/api/edit", { kind: "anchor", id: removeId, remove: true });
+      }
+    });
+
+    document.getElementById("sheet").addEventListener("submit", async event => {
+      event.preventDefault();
+      const form = event.target;
+      if (form.id === "add-anchor") {
+        await mutate("/api/add", {
+          kind: "anchor",
+          name: form.name.value,
+          start: clockValue(form.start),
+          duration_minutes: Number(form.duration_minutes.value)
+        });
+        return;
+      }
+      if (form.id === "edit-anchor") {
+        await mutate("/api/edit", {
+          kind: "anchor",
+          id: form.dataset.id,
+          name: form.name.value,
+          start: clockValue(form.start),
+          duration_minutes: Number(form.duration_minutes.value)
+        });
+        return;
+      }
+      if (form.id === "edit-bounds") {
+        const payload = { kind: "bounds" };
+        payload[form.dataset.which] = clockValue(form.clock);
+        await mutate("/api/edit", payload);
+      }
+    });
+
+    document.addEventListener("keydown", event => {
+      if (event.key === "Escape" && sheetOpen) closeSheet();
+    });
 
     document.getElementById("submit").addEventListener("click", async () => {
       const response = await fetch("/api/submit", { method: "POST" });
       if (response.status === 409) {
         render(await response.json());
-        return;
       }
     });
 

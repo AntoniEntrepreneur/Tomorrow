@@ -116,10 +116,21 @@ def _stop_server(server, thread) -> None:
     thread.join(timeout=2)
 
 
-def _http(method: str, path: str, *, timeout: float = 2) -> tuple[int, bytes]:
+def _http(
+    method: str,
+    path: str,
+    *,
+    payload: dict | None = None,
+    timeout: float = 2,
+) -> tuple[int, bytes]:
     conn = HTTPConnection(SESSION_HOST, SESSION_PORT, timeout=timeout)
     try:
-        conn.request(method, path)
+        body = None
+        headers = {}
+        if payload is not None:
+            body = json.dumps(payload)
+            headers["Content-Type"] = "application/json"
+        conn.request(method, path, body=body, headers=headers)
         response = conn.getresponse()
         return response.status, response.read()
     finally:
@@ -292,3 +303,85 @@ def test_ctrl_c_stops_without_writing_a_plan(
     run_session(tmp_path, now=datetime(2026, 8, 10, 22, 0))
 
     assert list((tmp_path / "plans").iterdir()) == []
+
+
+def test_add_anchor_over_http_returns_session_without_undo_stacks(
+    tmp_path: Path,
+) -> None:
+    _write_defaults(tmp_path)
+    server, thread = _start_server(tmp_path)
+    try:
+        status, body = _http(
+            "POST",
+            "/api/add",
+            payload={
+                "kind": "anchor",
+                "name": "Gym",
+                "start": "18:00",
+                "duration_minutes": 90,
+            },
+        )
+    finally:
+        _stop_server(server, thread)
+
+    payload = json.loads(body)
+    assert status == 200
+    assert "undo" not in payload
+    assert payload["can_undo"] is True
+    assert len(payload["anchors"]) == 1
+    assert payload["anchors"][0]["name"] == "Gym"
+    assert payload["anchors"][0]["start"] == "18:00"
+    assert payload["anchors"][0]["duration_minutes"] == 90
+    assert payload["anchors"][0]["id"]
+
+
+def test_edit_anchor_and_bounds_over_http(tmp_path: Path) -> None:
+    _write_defaults(tmp_path)
+    server, thread = _start_server(tmp_path)
+    try:
+        _, added_body = _http(
+            "POST",
+            "/api/add",
+            payload={
+                "kind": "anchor",
+                "name": "Gym",
+                "start": "18:00",
+                "duration_minutes": 90,
+            },
+        )
+        item_id = json.loads(added_body)["anchors"][0]["id"]
+        status, edited_body = _http(
+            "POST",
+            "/api/edit",
+            payload={
+                "kind": "anchor",
+                "id": item_id,
+                "name": "Weights",
+                "start": "19:00",
+                "duration_minutes": 60,
+            },
+        )
+        bounds_status, bounds_body = _http(
+            "POST",
+            "/api/edit",
+            payload={"kind": "bounds", "wake": "07:00", "sleep": "22:00"},
+        )
+        remove_status, removed_body = _http(
+            "POST",
+            "/api/edit",
+            payload={"kind": "anchor", "id": item_id, "remove": True},
+        )
+    finally:
+        _stop_server(server, thread)
+
+    edited = json.loads(edited_body)
+    bounds = json.loads(bounds_body)
+    removed = json.loads(removed_body)
+    assert status == 200
+    assert edited["anchors"][0]["name"] == "Weights"
+    assert edited["anchors"][0]["start"] == "19:00"
+    assert "undo" not in edited
+    assert bounds_status == 200
+    assert bounds["bounds"] == {"wake": "07:00", "sleep": "22:00"}
+    assert remove_status == 200
+    assert removed["anchors"] == []
