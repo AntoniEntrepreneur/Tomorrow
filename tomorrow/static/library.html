@@ -19,11 +19,17 @@
     .entry { display: flex; justify-content: space-between; align-items: center; padding: 0.4rem 0; border-bottom: 1px solid #232a3a; gap: 0.5rem; }
     .entry:last-child { border-bottom: none; }
     .entry .meta { font-size: 0.8rem; color: #8b93a7; }
+    .entry .actions { display: flex; gap: 0.4rem; }
     button { background: #1a2030; color: #e6e1d4; border: 1px solid #2a3142; border-radius: 0.35rem; padding: 0.3rem 0.6rem; cursor: pointer; }
     button.danger { color: #e07a6a; }
     form { display: grid; gap: 0.4rem; margin-top: 0.6rem; }
     input, select { background: #1a2030; color: #e6e1d4; border: 1px solid #2a3142; border-radius: 0.35rem; padding: 0.4rem; }
     .hint { font-size: 0.75rem; color: #8b93a7; }
+    .row-list { display: grid; gap: 0.5rem; }
+    .entry-row { border: 1px solid #2a3142; border-radius: 0.4rem; padding: 0.5rem; display: grid; gap: 0.35rem; }
+    .entry-row-header { display: flex; justify-content: space-between; align-items: center; gap: 0.4rem; }
+    .entry-row-fields { display: grid; gap: 0.35rem; }
+    .entry-row-fields[hidden], .entry-row-fields .field[hidden] { display: none; }
   </style>
 </head>
 <body>
@@ -62,8 +68,11 @@
         <input name="id" placeholder="id (e.g. travel-day)" required>
         <input name="name" placeholder="Name" required>
         <input name="weekday" placeholder="Default weekday (optional, e.g. tuesday)">
-        <span class="hint">Anchor/Flex entries: edit the TOML file directly for now.</span>
+        <span class="hint">Entries</span>
+        <div id="day-template-entries" class="row-list"></div>
+        <button type="button" id="day-template-add-entry">+ Add entry</button>
         <button type="submit">Save Day Template</button>
+        <button type="button" id="day-template-cancel-edit" hidden>Cancel edit</button>
       </form>
     </section>
   </div>
@@ -74,13 +83,24 @@
       return response.json();
     }
 
-    function renderList(el, entries, kind) {
+    let currentActivityOptions = [];
+    let currentChecklistOptions = [];
+
+    function renderList(el, entries, kind, onEdit) {
       el.innerHTML = "";
       for (const entry of entries) {
         const row = document.createElement("div");
         row.className = "entry";
         const label = document.createElement("span");
         label.textContent = entry.name + " (" + entry.id + ")";
+        const actions = document.createElement("div");
+        actions.className = "actions";
+        if (onEdit) {
+          const edit = document.createElement("button");
+          edit.textContent = "Edit";
+          edit.onclick = () => onEdit(entry);
+          actions.appendChild(edit);
+        }
         const del = document.createElement("button");
         del.className = "danger";
         del.textContent = "Delete";
@@ -92,17 +112,25 @@
           });
           load();
         };
+        actions.appendChild(del);
         row.appendChild(label);
-        row.appendChild(del);
+        row.appendChild(actions);
         el.appendChild(row);
       }
     }
 
     async function load() {
       const data = await api("/api/library");
+      currentActivityOptions = data.activity_templates;
+      currentChecklistOptions = data.checklists;
       renderList(document.getElementById("checklist-list"), data.checklists, "checklist");
       renderList(document.getElementById("activity-list"), data.activity_templates, "activity-template");
-      renderList(document.getElementById("day-template-list"), data.day_templates, "day-template");
+      renderList(
+        document.getElementById("day-template-list"),
+        data.day_templates,
+        "day-template",
+        editDayTemplate
+      );
     }
 
     document.getElementById("checklist-form").addEventListener("submit", async (event) => {
@@ -140,20 +168,150 @@
       load();
     });
 
-    document.getElementById("day-template-form").addEventListener("submit", async (event) => {
+    function optionsHtml(options, selected) {
+      let html = '<option value="">-- none --</option>';
+      for (const option of options) {
+        const isSelected = option.id === selected ? " selected" : "";
+        html += `<option value="${option.id}"${isSelected}>${option.name} (${option.id})</option>`;
+      }
+      return html;
+    }
+
+    function buildEntryRow(entry) {
+      entry = entry || {};
+      const isActivityRef = entry.activity != null;
+      const isFlex = !isActivityRef && entry.start == null;
+      const type = isActivityRef ? "activity" : isFlex ? "flex" : "anchor";
+
+      const row = document.createElement("div");
+      row.className = "entry-row";
+      row.innerHTML = `
+        <div class="entry-row-header">
+          <select class="entry-type">
+            <option value="anchor">Anchor (fixed start)</option>
+            <option value="flex">Flex (duration only)</option>
+            <option value="activity">Activity Template reference</option>
+          </select>
+          <button type="button" class="danger remove-entry-row">Remove</button>
+        </div>
+        <div class="entry-row-fields inline-fields">
+          <input class="entry-name" placeholder="Name" value="${entry.name || ""}">
+          <input class="entry-start" placeholder="Start HH:MM (Anchor only)" value="${entry.start || ""}">
+          <input class="entry-duration" type="number" placeholder="Duration (minutes)" value="${entry.duration != null ? entry.duration : ""}">
+          <select class="entry-checklist"></select>
+        </div>
+        <div class="entry-row-fields activity-fields" hidden>
+          <select class="entry-activity"></select>
+        </div>
+      `;
+      row.querySelector(".entry-type").value = type;
+      row.querySelector(".entry-checklist").innerHTML = optionsHtml(
+        currentChecklistOptions,
+        entry.checklist || ""
+      );
+      row.querySelector(".entry-activity").innerHTML = optionsHtml(
+        currentActivityOptions,
+        entry.activity || ""
+      );
+
+      const startField = row.querySelector(".entry-start");
+      const inlineFields = row.querySelector(".inline-fields");
+      const activityFields = row.querySelector(".activity-fields");
+      function applyType() {
+        const value = row.querySelector(".entry-type").value;
+        activityFields.hidden = value !== "activity";
+        inlineFields.hidden = value === "activity";
+        startField.hidden = value === "flex";
+      }
+      row.querySelector(".entry-type").addEventListener("change", applyType);
+      applyType();
+
+      row.querySelector(".remove-entry-row").onclick = () => row.remove();
+      return row;
+    }
+
+    function entryRowsToPayload(container) {
+      const anchors = [];
+      const flexes = [];
+      for (const row of container.children) {
+        const type = row.querySelector(".entry-type").value;
+        if (type === "activity") {
+          const activityId = row.querySelector(".entry-activity").value;
+          if (!activityId) continue;
+          const activity = currentActivityOptions.find((option) => option.id === activityId);
+          if (activity && activity.is_anchor_shaped) {
+            anchors.push({ activity: activityId });
+          } else {
+            flexes.push({ activity: activityId });
+          }
+          continue;
+        }
+        const name = row.querySelector(".entry-name").value.trim();
+        if (!name) continue;
+        const duration = Number(row.querySelector(".entry-duration").value);
+        if (!Number.isFinite(duration) || duration <= 0) continue;
+        const checklist = row.querySelector(".entry-checklist").value || null;
+        if (type === "anchor") {
+          const start = row.querySelector(".entry-start").value.trim();
+          if (!start) continue;
+          anchors.push({ name, start, duration, checklist });
+        } else {
+          flexes.push({ name, duration, checklist });
+        }
+      }
+      return { anchors, flexes };
+    }
+
+    const dayTemplateForm = document.getElementById("day-template-form");
+    const dayTemplateEntries = document.getElementById("day-template-entries");
+    const dayTemplateCancelEdit = document.getElementById("day-template-cancel-edit");
+
+    document.getElementById("day-template-add-entry").addEventListener("click", () => {
+      dayTemplateEntries.appendChild(buildEntryRow());
+    });
+
+    function resetDayTemplateForm() {
+      dayTemplateForm.reset();
+      dayTemplateEntries.innerHTML = "";
+      dayTemplateForm.elements.id.disabled = false;
+      dayTemplateCancelEdit.hidden = true;
+    }
+
+    function editDayTemplate(entry) {
+      dayTemplateForm.elements.id.value = entry.id;
+      dayTemplateForm.elements.id.disabled = true;
+      dayTemplateForm.elements.name.value = entry.name;
+      dayTemplateForm.elements.weekday.value = entry.weekday || "";
+      dayTemplateEntries.innerHTML = "";
+      for (const anchor of entry.anchors || []) {
+        dayTemplateEntries.appendChild(buildEntryRow(anchor));
+      }
+      for (const flex of entry.flexes || []) {
+        dayTemplateEntries.appendChild(buildEntryRow(flex));
+      }
+      dayTemplateCancelEdit.hidden = false;
+      dayTemplateForm.scrollIntoView({ behavior: "smooth", block: "center" });
+    }
+
+    dayTemplateCancelEdit.addEventListener("click", resetDayTemplateForm);
+
+    dayTemplateForm.addEventListener("submit", async (event) => {
       event.preventDefault();
       const form = new FormData(event.target);
+      const { anchors, flexes } = entryRowsToPayload(dayTemplateEntries);
       await api("/api/library/day-template", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           action: "save",
-          id: form.get("id"),
+          id: form.get("id") || dayTemplateForm.elements.id.value,
           name: form.get("name"),
           weekday: form.get("weekday") || null,
+          anchors,
+          flexes,
         }),
       });
-      event.target.reset();
+      resetDayTemplateForm();
       load();
     });
 

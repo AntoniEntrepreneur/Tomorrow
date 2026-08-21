@@ -34,6 +34,7 @@ from tomorrow.domain import (
 from tomorrow.day_templates import (
     default_day_template_path,
     load_day_template,
+    load_day_template_entries,
     load_day_template_name,
     named_day_template_path,
 )
@@ -834,13 +835,21 @@ class SessionHandler(BaseHTTPRequestHandler):
                 for checklist_id, checklist in load_checklist_library(data_dir).items()
             ],
             "activity_templates": [
-                {"id": activity_id, "name": activity.name}
+                {
+                    "id": activity_id,
+                    "name": activity.name,
+                    "is_anchor_shaped": activity.start is not None,
+                }
                 for activity_id, activity in load_activity_template_library(
                     data_dir
                 ).items()
             ],
             "day_templates": [
-                {"id": path.stem, "name": load_day_template_name(path)}
+                {
+                    "id": path.stem,
+                    "name": load_day_template_name(path),
+                    **load_day_template_entries(path),
+                }
                 for path in day_templates
             ],
         }

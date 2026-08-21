@@ -64,6 +64,24 @@ def load_day_template_name(path: Path) -> str:
     return str(name) if name is not None else path.stem
 
 
+def load_day_template_entries(path: Path) -> dict[str, object]:
+    """Return a Day Template's raw `weekday`/anchor/flex entry dicts, unresolved.
+
+    Unlike `load_day_template`, `activity` references are left as-is (not
+    resolved against an Activity Template library) so callers can round-trip
+    the entries back through `library.save_day_template` for editing.
+    """
+
+    if not path.exists():
+        return {"weekday": None, "anchors": [], "flexes": []}
+    data = tomllib.loads(path.read_text(encoding="utf-8"))
+    return {
+        "weekday": data.get("weekday"),
+        "anchors": list(data.get("anchor", ())),
+        "flexes": list(data.get("flex", ())),
+    }
+
+
 def load_day_template(
     path: Path,
     activity_library: dict[str, ActivityTemplate] | None = None,

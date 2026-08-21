@@ -8,6 +8,7 @@ from tomorrow.day_templates import (
     day_template_path,
     default_day_template_path,
     load_day_template,
+    load_day_template_entries,
     load_day_template_name,
 )
 
@@ -171,6 +172,54 @@ def test_default_day_template_path_falls_back_to_legacy_weekday_filename(
     path = default_day_template_path(tmp_path, date(2026, 8, 11))
 
     assert path == templates / "tuesday.toml"
+
+
+def test_load_day_template_entries_returns_empty_shape_when_file_missing(
+    tmp_path: Path,
+) -> None:
+    entries = load_day_template_entries(tmp_path / "missing.toml")
+
+    assert entries == {"weekday": None, "anchors": [], "flexes": []}
+
+
+def test_load_day_template_entries_returns_raw_entry_dicts(tmp_path: Path) -> None:
+    template_file = tmp_path / "tuesday.toml"
+    template_file.write_text(
+        """
+name = "Tuesday"
+weekday = "tuesday"
+
+[[anchor]]
+name = "Standup"
+start = "07:00"
+duration = 15
+checklist = "gym-bag"
+
+[[anchor]]
+activity = "therapy"
+
+[[flex]]
+name = "Sauna"
+duration = 30
+""".strip(),
+        encoding="utf-8",
+    )
+
+    entries = load_day_template_entries(template_file)
+
+    assert entries == {
+        "weekday": "tuesday",
+        "anchors": [
+            {
+                "name": "Standup",
+                "start": "07:00",
+                "duration": 15,
+                "checklist": "gym-bag",
+            },
+            {"activity": "therapy"},
+        ],
+        "flexes": [{"name": "Sauna", "duration": 30}],
+    }
 
 
 def test_default_day_template_path_prefers_weekday_field_over_filename(
