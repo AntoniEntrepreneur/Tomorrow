@@ -352,7 +352,8 @@
       return hours * 60 + minutes;
     }
 
-    function toClock(minutes) {
+    function toClock(minutesRaw) {
+      const minutes = ((minutesRaw % 1440) + 1440) % 1440;
       const hours = Math.floor(minutes / 60);
       const mins = minutes % 60;
       return String(hours).padStart(2, "0") + ":" + String(mins).padStart(2, "0");
@@ -360,6 +361,21 @@
 
     function endClock(start, durationMin) {
       return toClock(toMin(start) + Number(durationMin));
+    }
+
+    // Wake-relative offset, mirroring tomorrow.domain.minutes_since_wake:
+    // a clock time earlier than wake is "tomorrow, early morning" rather
+    // than "today, very early" (see docs/adr/0003).
+    function toWakeMin(clock, wake) {
+      return (((toMin(clock) - toMin(wake)) % 1440) + 1440) % 1440;
+    }
+
+    function isNextDay(clock, wake) {
+      return toMin(clock) < toMin(wake);
+    }
+
+    function clockLabel(clock, wake) {
+      return clock + (isNextDay(clock, wake) ? " +1" : "");
     }
 
     function fmtDur(minutes) {
@@ -423,8 +439,8 @@
     }
 
     function railRows(session) {
-      const wake = toMin(session.bounds.wake);
-      const sleep = toMin(session.bounds.sleep);
+      const wakeClock = session.bounds.wake;
+      const sleep = toWakeMin(session.bounds.sleep, wakeClock);
       const occupied = (session.anchors || []).map(item => ({
         kind: "anchor",
         id: item.id,
@@ -441,27 +457,27 @@
         durationMin: item.duration_minutes,
         end: endClock(item.start, item.duration_minutes),
         checklist: item.checklist
-      }))).sort((a, b) => toMin(a.start) - toMin(b.start));
+      }))).sort((a, b) => toWakeMin(a.start, wakeClock) - toWakeMin(b.start, wakeClock));
       const rows = [];
-      let cursor = wake;
+      let cursor = 0;
       for (const item of occupied) {
-        const start = toMin(item.start);
+        const start = toWakeMin(item.start, wakeClock);
         if (start > cursor) {
           rows.push({
             kind: "gap",
-            start: toClock(cursor),
+            start: toClock(toMin(wakeClock) + cursor),
             end: item.start,
             durationMin: start - cursor
           });
         }
         rows.push(item);
-        cursor = Math.max(cursor, toMin(item.end));
+        cursor = Math.max(cursor, toWakeMin(item.end, wakeClock));
       }
       if (sleep > cursor) {
         rows.push({
           kind: "gap",
-          start: toClock(cursor),
-          end: toClock(sleep),
+          start: toClock(toMin(wakeClock) + cursor),
+          end: session.bounds.sleep,
           durationMin: sleep - cursor
         });
       }
@@ -481,25 +497,28 @@
     }
 
     function renderRail(session) {
-      const total = Math.max(1, toMin(session.bounds.sleep) - toMin(session.bounds.wake));
+      const wakeClock = session.bounds.wake;
+      const total = Math.max(1, toWakeMin(session.bounds.sleep, wakeClock));
       document.getElementById("rail").innerHTML = railRows(session).map(row => {
+        const startLabel = clockLabel(row.start, wakeClock);
+        const endLabel = row.end ? clockLabel(row.end, wakeClock) : row.end;
         if (row.kind === "gap") {
           const armed = armedFlexId ? " armed" : "";
           const cta = armedFlexId ? "Place here" : "Place Flex";
           return '<button type="button" class="gap' + armed + '" data-kind="gap" data-start="' +
             esc(row.start) + '" data-end="' + esc(row.end) + '" style="min-height:' +
             heightPx(row.durationMin, total, 40) + 'px">' +
-            '<span class="time-tag">' + esc(row.start) + "</span>" +
+            '<span class="time-tag">' + esc(startLabel) + "</span>" +
             "<span>Gap · " + esc(fmtDur(row.durationMin)) + "</span>" +
             '<span class="cta">' + cta + "</span></button>";
         }
         const checklistLabel = checklistName(row.checklist);
         return '<button type="button" class="block ' + row.kind + '" data-kind="' + row.kind +
           '" data-id="' + esc(row.id) + '" style="min-height:' + heightPx(row.durationMin, total, 52) + 'px">' +
-          '<span class="time-tag">' + esc(row.start) + "</span>" +
+          '<span class="time-tag">' + esc(startLabel) + "</span>" +
           '<div class="block-title">' + esc(row.name) + "</div>" +
           (checklistLabel ? '<div class="block-checklist">' + esc(checklistLabel) + "</div>" : "") +
-          '<div class="block-range">' + esc(row.start) + "–" + esc(row.end) +
+          '<div class="block-range">' + esc(startLabel) + "–" + esc(endLabel) +
           " · " + esc(fmtDur(row.durationMin)) + "</div></button>";
       }).join("");
     }
@@ -569,7 +588,8 @@
       document.getElementById("weather").innerHTML = weatherBits.join(" · ");
       document.getElementById("blockers").textContent = (session.blockers || []).join(" ");
       document.getElementById("wake-cap").textContent = "↑ " + session.bounds.wake + " wake";
-      document.getElementById("sleep-cap").textContent = session.bounds.sleep + " sleep ↓";
+      document.getElementById("sleep-cap").textContent =
+        clockLabel(session.bounds.sleep, session.bounds.wake) + " sleep ↓";
       renderTemplateOffer(session);
       renderRail(session);
       renderDrafts(session);
@@ -643,7 +663,7 @@
 
     function resolveDurationMinutes(form) {
       if (form.dataset.durationMode === "end") {
-        const diff = toMin(clockValue(form.end)) - toMin(clockValue(form.start));
+        const diff = toWakeMin(clockValue(form.end), clockValue(form.start));
         if (!(diff > 0)) {
           document.getElementById("end-error").hidden = false;
           return null;

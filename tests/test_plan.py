@@ -128,6 +128,20 @@ def test_render_plan_shows_flex_gaps_and_complete_timeline() -> None:
     assert "07:45" in html
 
 
+def test_render_plan_marks_anchor_and_sleep_after_midnight() -> None:
+    late_snack = Anchor(name="Snack", start=time(0, 30), duration=timedelta(minutes=15))
+
+    html = render_plan(
+        plan_date=date(2026, 8, 11),
+        bounds=DayBounds(wake="07:00", sleep="01:00"),
+        anchors=[late_snack],
+    )
+
+    assert "00:30 +1" in html
+    assert "01:00 +1 sleep ↓" in html
+    assert "Sleep 01:00 +1" in html
+
+
 def test_render_plan_shows_prep_accordion_for_attached_checklists() -> None:
     gym = Anchor(
         name="Gym",

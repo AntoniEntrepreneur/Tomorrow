@@ -52,7 +52,7 @@ A Plan item with a known duration but no fixed start; it must be placed into a f
 _Avoid_: Soft task, duration task, floating block
 
 **Day bounds**:
-The wake time and sleep time that define the Plan's temporal envelope for that day. Pre-filled from Defaults when a Session starts; editable on the Session. Changing them does not rewrite Defaults.
+The wake time and sleep time that define the Plan's temporal envelope for that day. Pre-filled from Defaults when a Session starts; editable on the Session. Changing them does not rewrite Defaults. Sleep at or before wake (clock-time) is a same-day-name for a time that falls after midnight: the envelope always runs wake → wake+24h, never wake → midnight. Wake equal to sleep is invalid (zero-length day) and blocks Submit. An Anchor may likewise fall after midnight; its position is judged by the same wake-relative offset, not by raw clock time.
 _Avoid_: Availability, working hours, confirmed bounds
 
 **Gap**:

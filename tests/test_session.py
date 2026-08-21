@@ -683,6 +683,57 @@ def test_gaps_update_when_bounds_change(tmp_path: Path) -> None:
     ]
 
 
+def test_gaps_span_midnight_when_sleep_is_before_wake(tmp_path: Path) -> None:
+    _write_defaults(tmp_path)
+    now = datetime(2026, 8, 10, 22, 0)
+    edit_bounds(tmp_path, wake="07:00", sleep="01:00", now=now)
+
+    view = add_anchor(
+        tmp_path, name="Dinner", start="19:00", duration_minutes=60, now=now
+    )
+
+    assert view["bounds"] == {
+        "wake": "07:00",
+        "sleep": "01:00",
+        "sleep_is_next_day": True,
+    }
+    assert view["gaps"] == [
+        {"start": "07:00", "end": "19:00", "duration_minutes": 720},
+        {
+            "start": "20:00",
+            "end": "01:00",
+            "duration_minutes": 300,
+            "end_is_next_day": True,
+        },
+    ]
+
+
+def test_flex_placed_in_gap_after_midnight_is_not_a_blocker(tmp_path: Path) -> None:
+    _write_defaults(tmp_path)
+    now = datetime(2026, 8, 10, 22, 0)
+    edit_bounds(tmp_path, wake="07:00", sleep="01:00", now=now)
+    added = add_flex(tmp_path, name="Read", duration_minutes=30, now=now)
+    flex_id = added["flexes"][0]["id"]
+
+    view = place_flex(tmp_path, item_id=flex_id, start="00:15", now=now)
+
+    assert view["blockers"] == []
+
+
+def test_submit_blocks_when_wake_equals_sleep(tmp_path: Path) -> None:
+    _write_defaults(tmp_path)
+    now = datetime(2026, 8, 10, 22, 0)
+    edit_bounds(tmp_path, wake="07:00", sleep="07:00", now=now)
+
+    view = edit_bounds(tmp_path, sleep="07:00", now=now)
+
+    assert view["blockers"] == [
+        "Wake and sleep are both 07:00, leaving a zero-length day."
+    ]
+    with pytest.raises(PlanBlockedError):
+        submit_session(tmp_path, now=now)
+
+
 def test_anchor_outside_new_bounds_is_a_live_blocker(tmp_path: Path) -> None:
     _write_defaults(tmp_path)
     now = datetime(2026, 8, 10, 22, 0)
