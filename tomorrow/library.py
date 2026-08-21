@@ -22,19 +22,24 @@ def _toml_string(value: str) -> str:
     return f'"{escaped}"'
 
 
+def _write_toml_lines(directory: Path, slug: str, lines: list[str]) -> None:
+    """Create `directory` if needed and write `lines` to `directory/{slug}.toml`."""
+
+    directory.mkdir(parents=True, exist_ok=True)
+    (directory / f"{slug}.toml").write_text("\n".join(lines).rstrip() + "\n", encoding="utf-8")
+
+
 # --- Checklists -----------------------------------------------------------
 
 
 def save_checklist(repo_root: Path, *, checklist_id: str, name: str, items: list[str]) -> str:
     """Write a Checklist TOML file, creating or overwriting `checklist_id`."""
 
-    directory = checklists_dir(repo_root / "data")
-    directory.mkdir(parents=True, exist_ok=True)
     slug = checklist_id or _slugify(name)
     lines = [f"name = {_toml_string(name)}"]
     items_repr = ", ".join(_toml_string(item) for item in items)
     lines.append(f"items = [{items_repr}]")
-    (directory / f"{slug}.toml").write_text("\n".join(lines) + "\n", encoding="utf-8")
+    _write_toml_lines(checklists_dir(repo_root / "data"), slug, lines)
     return slug
 
 
@@ -55,15 +60,13 @@ def save_activity_template(
     start: str | None = None,
     checklist: str | None = None,
 ) -> str:
-    directory = activity_templates_dir(repo_root / "data")
-    directory.mkdir(parents=True, exist_ok=True)
     slug = activity_id or _slugify(name)
     lines = [f"name = {_toml_string(name)}", f"duration = {int(duration_minutes)}"]
     if start is not None:
         lines.append(f"start = {_toml_string(start)}")
     if checklist is not None:
         lines.append(f"checklist = {_toml_string(checklist)}")
-    (directory / f"{slug}.toml").write_text("\n".join(lines) + "\n", encoding="utf-8")
+    _write_toml_lines(activity_templates_dir(repo_root / "data"), slug, lines)
     return slug
 
 
@@ -128,7 +131,7 @@ def save_day_template(
         lines.extend(_entry_lines(flex))
         lines.append("")
 
-    (directory / f"{slug}.toml").write_text("\n".join(lines).rstrip() + "\n", encoding="utf-8")
+    _write_toml_lines(directory, slug, lines)
     return slug
 
 

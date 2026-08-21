@@ -783,6 +783,98 @@ def _optional_checklist(payload: dict) -> str | None | object:
     return payload.get("checklist")
 
 
+def _list_checklists(data_dir: Path) -> list[dict]:
+    return [
+        {"id": checklist_id, "name": checklist.name}
+        for checklist_id, checklist in load_checklist_library(data_dir).items()
+    ]
+
+
+def _list_activity_templates(data_dir: Path) -> list[dict]:
+    return [
+        {"id": activity_id, "name": activity.name}
+        for activity_id, activity in load_activity_template_library(data_dir).items()
+    ]
+
+
+def _list_day_templates(data_dir: Path) -> list[dict]:
+    templates_dir = data_dir / "templates"
+    paths = sorted(templates_dir.glob("*.toml")) if templates_dir.is_dir() else []
+    return [{"id": path.stem, "name": load_day_template_name(path)} for path in paths]
+
+
+_LIBRARY_VIEW_SECTIONS: dict[str, Callable[[Path], list[dict]]] = {
+    "checklists": _list_checklists,
+    "activity_templates": _list_activity_templates,
+    "day_templates": _list_day_templates,
+}
+
+
+class _LibraryEntityOps:
+    """Save/delete callbacks for one `/api/library/<entity>` kind."""
+
+    def __init__(
+        self,
+        save: Callable[[Path, dict], None],
+        delete: Callable[[Path, dict], None],
+    ) -> None:
+        self.save = save
+        self.delete = delete
+
+
+def _save_checklist_entity(repo_root: Path, payload: dict) -> None:
+    save_checklist(
+        repo_root,
+        checklist_id=payload["id"],
+        name=payload["name"],
+        items=list(payload.get("items", [])),
+    )
+
+
+def _save_activity_template_entity(repo_root: Path, payload: dict) -> None:
+    save_activity_template(
+        repo_root,
+        activity_id=payload["id"],
+        name=payload["name"],
+        duration_minutes=int(payload["duration_minutes"]),
+        start=payload.get("start") or None,
+        checklist=payload.get("checklist") or None,
+    )
+
+
+def _save_day_template_entity(repo_root: Path, payload: dict) -> None:
+    save_day_template(
+        repo_root,
+        template_id=payload["id"],
+        name=payload["name"],
+        anchors=payload.get("anchors"),
+        flexes=payload.get("flexes"),
+        weekday=payload.get("weekday") or None,
+    )
+
+
+_LIBRARY_ENTITY_OPS: dict[str, _LibraryEntityOps] = {
+    "checklist": _LibraryEntityOps(
+        save=_save_checklist_entity,
+        delete=lambda repo_root, payload: delete_checklist(
+            repo_root, checklist_id=payload["id"]
+        ),
+    ),
+    "activity-template": _LibraryEntityOps(
+        save=_save_activity_template_entity,
+        delete=lambda repo_root, payload: delete_activity_template(
+            repo_root, activity_id=payload["id"]
+        ),
+    ),
+    "day-template": _LibraryEntityOps(
+        save=_save_day_template_entity,
+        delete=lambda repo_root, payload: delete_day_template(
+            repo_root, template_id=payload["id"]
+        ),
+    ),
+}
+
+
 class SessionHTTPServer(ThreadingHTTPServer):
     allow_reuse_address = True
     daemon_threads = True
@@ -824,25 +916,8 @@ class SessionHandler(BaseHTTPRequestHandler):
 
     def _library_view(self) -> dict:
         data_dir = self.server.repo_root / "data"
-        templates_dir = data_dir / "templates"
-        day_templates = (
-            sorted(templates_dir.glob("*.toml")) if templates_dir.is_dir() else []
-        )
         return {
-            "checklists": [
-                {"id": checklist_id, "name": checklist.name}
-                for checklist_id, checklist in load_checklist_library(data_dir).items()
-            ],
-            "activity_templates": [
-                {"id": activity_id, "name": activity.name}
-                for activity_id, activity in load_activity_template_library(
-                    data_dir
-                ).items()
-            ],
-            "day_templates": [
-                {"id": path.stem, "name": load_day_template_name(path)}
-                for path in day_templates
-            ],
+            key: lister(data_dir) for key, lister in _LIBRARY_VIEW_SECTIONS.items()
         }
 
     def do_POST(self) -> None:
@@ -1039,50 +1114,15 @@ class SessionHandler(BaseHTTPRequestHandler):
     def _handle_library_post(self, entity: str) -> None:
         payload = self._read_json()
         action = payload.get("action")
+        ops = _LIBRARY_ENTITY_OPS.get(entity)
+        if ops is None:
+            self.send_error(404)
+            return
         repo_root = self.server.repo_root
-        if entity == "checklist":
-            if action == "save":
-                save_checklist(
-                    repo_root,
-                    checklist_id=payload["id"],
-                    name=payload["name"],
-                    items=list(payload.get("items", [])),
-                )
-            elif action == "delete":
-                delete_checklist(repo_root, checklist_id=payload["id"])
-            else:
-                self.send_error(404)
-                return
-        elif entity == "activity-template":
-            if action == "save":
-                save_activity_template(
-                    repo_root,
-                    activity_id=payload["id"],
-                    name=payload["name"],
-                    duration_minutes=int(payload["duration_minutes"]),
-                    start=payload.get("start") or None,
-                    checklist=payload.get("checklist") or None,
-                )
-            elif action == "delete":
-                delete_activity_template(repo_root, activity_id=payload["id"])
-            else:
-                self.send_error(404)
-                return
-        elif entity == "day-template":
-            if action == "save":
-                save_day_template(
-                    repo_root,
-                    template_id=payload["id"],
-                    name=payload["name"],
-                    anchors=payload.get("anchors"),
-                    flexes=payload.get("flexes"),
-                    weekday=payload.get("weekday") or None,
-                )
-            elif action == "delete":
-                delete_day_template(repo_root, template_id=payload["id"])
-            else:
-                self.send_error(404)
-                return
+        if action == "save":
+            ops.save(repo_root, payload)
+        elif action == "delete":
+            ops.delete(repo_root, payload)
         else:
             self.send_error(404)
             return
