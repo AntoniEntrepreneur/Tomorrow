@@ -1019,7 +1019,25 @@
       }
       const key = event.key.toLowerCase();
       const modifier = event.metaKey || event.ctrlKey;
-      if (!modifier) return;
+      if (!modifier) {
+        if (sheetOpen) return;
+        const typingBare = event.target && (
+          event.target.tagName === "INPUT" ||
+          event.target.tagName === "TEXTAREA"
+        );
+        if (typingBare) return;
+        if (key === "a") {
+          event.preventDefault();
+          sheetAddAnchor();
+        } else if (key === "f") {
+          event.preventDefault();
+          sheetAddFlex();
+        } else if (key === "d") {
+          event.preventDefault();
+          sheetAddDraft();
+        }
+        return;
+      }
       const redo = (key === "z" && event.shiftKey) || (key === "y" && event.ctrlKey);
       if (key !== "z" && !(key === "y" && event.ctrlKey)) return;
       const typing = event.target && (
