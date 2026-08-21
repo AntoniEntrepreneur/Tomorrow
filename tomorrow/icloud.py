@@ -142,6 +142,26 @@ def _calendars_of_type(store: object, entity_type: object) -> list:
     return list(store.calendarsForEntityType_(entity_type))
 
 
+def _request_access(store: object) -> None:
+    """Trigger the macOS permission prompts for Calendar and Reminders access.
+
+    EventKit only shows the system dialog the first time these are called; it
+    never appears just from enumerating calendars. Blocks until the user
+    responds (or times out), since callers need calendars to be readable
+    immediately after.
+    """
+
+    for request in (
+        getattr(store, "requestFullAccessToEventsWithCompletion_", None),
+        getattr(store, "requestFullAccessToRemindersWithCompletion_", None),
+    ):
+        if request is None:
+            continue
+        done = threading.Event()
+        request(lambda granted, error, done=done: done.set())
+        done.wait(timeout=30)
+
+
 def _fetch_from_eventkit(config: IcloudConfig, plan_date: date) -> tuple[list[RawEvent], list[RawReminder]]:
     """Talk to macOS EventKit for the given Plan date. Not itself under test."""
 
@@ -152,6 +172,7 @@ def _fetch_from_eventkit(config: IcloudConfig, plan_date: date) -> tuple[list[Ra
     )
 
     store = EKEventStore.alloc().init()
+    _request_access(store)
 
     calendars = [
         calendar
@@ -246,6 +267,7 @@ def list_available_calendars(
         )
 
         store = EKEventStore.alloc().init()
+        _request_access(store)
         calendars = sorted(
             str(calendar.title()) for calendar in _calendars_of_type(store, EKEntityTypeEvent)
         )
