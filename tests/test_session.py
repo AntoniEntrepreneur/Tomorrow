@@ -107,6 +107,68 @@ def test_missing_session_file_opens_as_blank_session(tmp_path: Path) -> None:
     assert not (tmp_path / "data" / "session.json").exists()
 
 
+def test_blank_session_seeds_icloud_anchors_and_drafts(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from tomorrow.icloud import ClassifiedIcloudItems, ImportedItem
+    from datetime import time as _time
+
+    _write_defaults(tmp_path)
+    seen_calls = []
+
+    def fake_import(data_dir, plan_date, *, existing_anchors):
+        seen_calls.append((data_dir, plan_date))
+        return ClassifiedIcloudItems(
+            anchors=[
+                ImportedItem(name="Standup", start=_time(9, 0), duration_minutes=15)
+            ],
+            drafts=[ImportedItem(name="Call dentist")],
+        )
+
+    monkeypatch.setattr("tomorrow.session.try_import_icloud_items", fake_import)
+
+    document = load_session(tmp_path, now=datetime(2026, 8, 10, 22, 0))
+
+    assert len(seen_calls) == 1
+    assert document["anchors"][0]["name"] == "Standup"
+    assert document["anchors"][0]["source"] == "icloud"
+    assert document["drafts"][0]["name"] == "Call dentist"
+    assert document["drafts"][0]["source"] == "icloud"
+
+
+def test_dropped_icloud_draft_does_not_return_after_undo_or_reset(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from tomorrow.icloud import ClassifiedIcloudItems, ImportedItem
+
+    _write_defaults(tmp_path)
+    call_count = 0
+
+    def fake_import(data_dir, plan_date, *, existing_anchors):
+        nonlocal call_count
+        call_count += 1
+        return ClassifiedIcloudItems(
+            anchors=[], drafts=[ImportedItem(name="Call dentist")]
+        )
+
+    monkeypatch.setattr("tomorrow.session.try_import_icloud_items", fake_import)
+
+    seeded = session_view(tmp_path, now=datetime(2026, 8, 10, 22, 0))
+    draft_id = seeded["drafts"][0]["id"]
+    dropped = drop_draft(tmp_path, item_id=draft_id, now=datetime(2026, 8, 10, 22, 0))
+    undone = undo_session(tmp_path, now=datetime(2026, 8, 10, 22, 0))
+
+    assert dropped["drafts"] == []
+    assert undone["drafts"] == [seeded["drafts"][0]]
+
+    redone = redo_session(tmp_path, now=datetime(2026, 8, 10, 22, 0))
+    assert redone["drafts"] == []
+
+    reset = reset_session(tmp_path, now=datetime(2026, 8, 10, 22, 0))
+    assert reset["drafts"] == []
+    assert call_count == 1
+
+
 def test_unfinished_session_resumes_with_its_own_bounds(tmp_path: Path) -> None:
     _write_defaults(tmp_path)
     saved = {

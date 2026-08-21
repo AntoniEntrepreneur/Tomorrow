@@ -186,6 +186,7 @@
     .block .time-tag { top: 0.65rem; }
     .block-title { font-weight: 600; font-size: 0.95rem; }
     .block-checklist { font-size: 0.72rem; color: var(--muted); margin-top: 0.12rem; }
+    .icloud-tag { font-size: 0.7rem; color: var(--muted); margin-left: 0.35rem; }
     .block-range { font-family: "IBM Plex Mono", monospace; font-size: 0.7rem; opacity: 0.6; margin-top: 0.12rem; }
     .gap {
       position: relative;
@@ -432,7 +433,8 @@
         start: item.start,
         durationMin: item.duration_minutes,
         end: endClock(item.start, item.duration_minutes),
-        checklist: item.checklist
+        checklist: item.checklist,
+        source: item.source
       })).concat((session.flexes || []).filter(item => item.start).map(item => ({
         kind: "flex",
         id: item.id,
@@ -440,7 +442,8 @@
         start: item.start,
         durationMin: item.duration_minutes,
         end: endClock(item.start, item.duration_minutes),
-        checklist: item.checklist
+        checklist: item.checklist,
+        source: item.source
       }))).sort((a, b) => toMin(a.start) - toMin(b.start));
       const rows = [];
       let cursor = wake;
@@ -494,10 +497,11 @@
             '<span class="cta">' + cta + "</span></button>";
         }
         const checklistLabel = checklistName(row.checklist);
+        const icloudTag = row.source === "icloud" ? '<span class="icloud-tag">📅 iCloud</span>' : "";
         return '<button type="button" class="block ' + row.kind + '" data-kind="' + row.kind +
           '" data-id="' + esc(row.id) + '" style="min-height:' + heightPx(row.durationMin, total, 52) + 'px">' +
           '<span class="time-tag">' + esc(row.start) + "</span>" +
-          '<div class="block-title">' + esc(row.name) + "</div>" +
+          '<div class="block-title">' + esc(row.name) + icloudTag + "</div>" +
           (checklistLabel ? '<div class="block-checklist">' + esc(checklistLabel) + "</div>" : "") +
           '<div class="block-range">' + esc(row.start) + "–" + esc(row.end) +
           " · " + esc(fmtDur(row.durationMin)) + "</div></button>";
@@ -544,7 +548,9 @@
         '<div class="drafts-label">Drafts</div>' +
         drafts.map(item =>
           '<div class="draft-chip">' +
-          "<span>" + esc(item.name) + "</span>" +
+          "<span>" + esc(item.name) +
+          (item.source === "icloud" ? ' <span class="icloud-tag">📅 iCloud</span>' : "") +
+          "</span>" +
           '<button type="button" data-promote="' + esc(item.id) + '">Promote</button>' +
           '<button type="button" data-drop-draft="' + esc(item.id) + '">Drop</button>' +
           "</div>"

@@ -46,6 +46,7 @@ from tomorrow.library import (
     save_checklist,
     save_day_template,
 )
+from tomorrow.icloud import try_import_icloud_items
 from tomorrow.plan import default_plan_date, format_plan_date, write_finalized_plan
 from tomorrow.weather import load_weather_name, try_fetch_weather
 
@@ -80,6 +81,38 @@ def _blank_session(repo_root: Path, *, now: datetime | None = None) -> dict:
     }
 
 
+def _seed_icloud_items(repo_root: Path, document: dict) -> None:
+    plan_date = date.fromisoformat(document["plan_date"])
+    imported = try_import_icloud_items(repo_root / "data", plan_date, existing_anchors=[])
+    document["anchors"].extend(
+        {
+            "id": uuid.uuid4().hex,
+            "name": item.name,
+            "start": item.start.strftime("%H:%M"),
+            "duration_minutes": item.duration_minutes,
+            "checklist": None,
+            "source": item.source,
+        }
+        for item in imported.anchors
+    )
+    document["drafts"].extend(
+        {"id": uuid.uuid4().hex, "name": item.name, "source": item.source}
+        for item in imported.drafts
+    )
+
+
+def _new_session_document(repo_root: Path, *, now: datetime | None = None) -> dict:
+    """Build a brand-new Session document for the current Plan date.
+
+    This is the one place the iCloud fetch runs: at Session creation. Reset,
+    Undo, and Redo all reuse `_blank_session` directly and never call this.
+    """
+
+    document = _blank_session(repo_root, now=now)
+    _seed_icloud_items(repo_root, document)
+    return document
+
+
 def save_session(repo_root: Path, document: dict) -> None:
     for draft in document.get("drafts", []):
         draft.pop("checklist", None)
@@ -107,11 +140,18 @@ def load_session(repo_root: Path, *, now: datetime | None = None) -> dict:
     blank = _blank_session(repo_root, now=now)
     path = _session_path(repo_root)
     if not path.is_file():
-        return blank
+        document = _new_session_document(repo_root, now=now)
+        # Persist immediately only if there is something to keep stable: an
+        # icloud import ran and produced items. A truly empty Session is left
+        # unwritten until the first real mutation, as before.
+        if _session_has_items(document):
+            save_session(repo_root, document)
+        return document
     document = json.loads(path.read_text(encoding="utf-8"))
     if document.get("plan_date") != blank["plan_date"]:
-        save_session(repo_root, blank)
-        return blank
+        document = _new_session_document(repo_root, now=now)
+        save_session(repo_root, document)
+        return document
     for draft in document.get("drafts", []):
         draft.pop("checklist", None)
     return document
@@ -624,13 +664,16 @@ def _unpack(document: dict) -> tuple[DayBounds, list[Draft], list[Anchor], list[
         wake=document["bounds"]["wake"],
         sleep=document["bounds"]["sleep"],
     )
-    drafts = [Draft(name=item["name"]) for item in document["drafts"]]
+    drafts = [
+        Draft(name=item["name"], source=item.get("source")) for item in document["drafts"]
+    ]
     anchors = [
         Anchor(
             name=item["name"],
             start=parse_clock(item["start"]),
             duration=timedelta(minutes=item["duration_minutes"]),
             checklist=item.get("checklist"),
+            source=item.get("source"),
         )
         for item in document["anchors"]
     ]

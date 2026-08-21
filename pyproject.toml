@@ -6,6 +6,8 @@ readme = "CONTEXT.md"
 requires-python = ">=3.11"
 dependencies = [
     "jinja2>=3.1",
+    "pyobjc-framework-EventKit>=10.0; sys_platform == 'darwin'",
+    "pyobjc-framework-Cocoa>=10.0; sys_platform == 'darwin'",
 ]
 
 [project.scripts]
