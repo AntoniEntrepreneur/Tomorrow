@@ -285,6 +285,8 @@
     }
     .sheet .hint { font-size: 0.8rem; color: var(--muted); margin-bottom: 0.6rem; }
     .sheet .danger { background: var(--danger); color: #fff; margin-left: auto; }
+    .sheet .duration-toggle { background: transparent; border: none; color: var(--muted); text-decoration: underline; padding: 0.2rem 0; margin-bottom: 0.4rem; }
+    .sheet .field-error { font-size: 0.8rem; color: var(--danger); margin-bottom: 0.6rem; }
   </style>
 </head>
 <body>
@@ -601,12 +603,59 @@
       setChromeEnabled();
     }
 
+    function durationFields(start, durationMin, startLabelId) {
+      return '<div class="row">' +
+        '<label' + (startLabelId ? ' id="' + startLabelId + '"' : "") + '>Start <input name="start" type="time" required value="' + esc(start || "") + '"></label>' +
+        '<label id="duration-label">Duration (min) <input name="duration_minutes" type="number" min="1" required value="' +
+        esc(durationMin || "") + '"></label>' +
+        '<label id="end-label" hidden>Ends at <input name="end" type="time"></label>' +
+        "</div>" +
+        '<button type="button" class="duration-toggle" data-toggle-duration-mode>Use end time instead</button>' +
+        '<p class="field-error" id="end-error" hidden>End must be after start.</p>';
+    }
+
+    function setDurationMode(form, mode) {
+      const asEnd = mode === "end";
+      form.dataset.durationMode = mode;
+      document.getElementById("duration-label").hidden = asEnd;
+      document.getElementById("end-label").hidden = !asEnd;
+      form.duration_minutes.required = !asEnd;
+      form.end.required = asEnd;
+      document.getElementById("end-error").hidden = true;
+      const toggleBtn = form.querySelector("[data-toggle-duration-mode]");
+      if (toggleBtn) toggleBtn.textContent = asEnd ? "Use duration instead" : "Use end time instead";
+    }
+
+    function initDurationToggle(form) {
+      setDurationMode(form, "duration");
+      const toggleBtn = form.querySelector("[data-toggle-duration-mode]");
+      if (toggleBtn) {
+        toggleBtn.addEventListener("click", () => {
+          setDurationMode(form, form.dataset.durationMode === "end" ? "duration" : "end");
+        });
+      }
+      form.addEventListener("input", event => {
+        if (event.target.name === "start" || event.target.name === "end") {
+          document.getElementById("end-error").hidden = true;
+        }
+      });
+    }
+
+    function resolveDurationMinutes(form) {
+      if (form.dataset.durationMode === "end") {
+        const diff = toMin(clockValue(form.end)) - toMin(clockValue(form.start));
+        if (!(diff > 0)) {
+          document.getElementById("end-error").hidden = false;
+          return null;
+        }
+        return diff;
+      }
+      return Number(form.duration_minutes.value);
+    }
+
     function formFields(name, start, durationMin) {
       return '<label>Name <input name="name" required value="' + esc(name || "") + '"></label>' +
-        '<div class="row">' +
-        '<label>Start <input name="start" type="time" required value="' + esc(start || "") + '"></label>' +
-        '<label>Duration (min) <input name="duration_minutes" type="number" min="1" required value="' +
-        esc(durationMin || "") + '"></label></div>';
+        durationFields(start, durationMin);
     }
 
     function findFlex(itemId) {
@@ -655,17 +704,17 @@
         '<option value="anchor">Anchor</option>' +
         '<option value="flex">Flex</option>' +
         "</select></label>" +
-        '<div class="row">' +
-        '<label id="promote-start-label">Start <input name="start" type="time" required value="09:00"></label>' +
-        '<label>Duration (min) <input name="duration_minutes" type="number" min="1" required value="30"></label></div>' +
+        durationFields("09:00", 30, "promote-start-label") +
         '<p class="hint" id="promote-flex-hint" hidden>Flex lands unplaced in the tray. Place it whenever you notice a Gap.</p>' +
         '<div class="actions"><button class="primary" type="submit">Promote</button>' +
         '<button type="button" class="ghost" data-close>Cancel</button>' +
         '<button type="button" class="danger" data-drop-draft="' + esc(item.id) + '">Drop</button></div></form>'
       );
       const form = document.getElementById("promote-draft");
+      initDurationToggle(form);
       const kind = form.querySelector('[name="kind"]');
       kind.addEventListener("change", () => syncPromoteFields(form));
+      syncPromoteFields(form);
     }
 
     function syncPromoteFields(form) {
@@ -673,6 +722,9 @@
       form.start.required = !asFlex;
       document.getElementById("promote-start-label").hidden = asFlex;
       document.getElementById("promote-flex-hint").hidden = !asFlex;
+      const toggleBtn = form.querySelector("[data-toggle-duration-mode]");
+      if (toggleBtn) toggleBtn.hidden = asFlex;
+      if (asFlex && form.dataset.durationMode === "end") setDurationMode(form, "duration");
     }
 
     function sheetPlace(item) {
@@ -746,6 +798,7 @@
         '<button type="button" class="ghost" data-close>Cancel</button></div></form>',
         "stamp"
       );
+      initDurationToggle(document.getElementById("add-anchor"));
       maybeSuggestChecklist(document.getElementById("add-anchor"));
     }
 
@@ -758,6 +811,7 @@
         '<button type="button" class="ghost" data-close>Cancel</button>' +
         '<button type="button" class="danger" data-remove="' + esc(item.id) + '">Remove</button></div></form>'
       );
+      initDurationToggle(document.getElementById("edit-anchor"));
       maybeSuggestChecklist(document.getElementById("edit-anchor"));
     }
 
@@ -938,11 +992,13 @@
       event.preventDefault();
       const form = event.target;
       if (form.id === "add-anchor") {
+        const duration = resolveDurationMinutes(form);
+        if (duration === null) return;
         await mutate("/api/add", {
           kind: "anchor",
           name: form.name.value,
           start: clockValue(form.start),
-          duration_minutes: Number(form.duration_minutes.value),
+          duration_minutes: duration,
           checklist: checklistPayload(form)
         });
         return;
@@ -964,10 +1020,12 @@
         return;
       }
       if (form.id === "promote-draft") {
+        const duration = resolveDurationMinutes(form);
+        if (duration === null) return;
         const payload = {
           id: form.dataset.id,
           kind: form.kind.value,
-          duration_minutes: Number(form.duration_minutes.value)
+          duration_minutes: duration
         };
         if (form.kind.value === "anchor") payload.start = clockValue(form.start);
         await mutate("/api/promote", payload);
@@ -985,12 +1043,14 @@
         return;
       }
       if (form.id === "edit-anchor") {
+        const duration = resolveDurationMinutes(form);
+        if (duration === null) return;
         await mutate("/api/edit", {
           kind: "anchor",
           id: form.dataset.id,
           name: form.name.value,
           start: clockValue(form.start),
-          duration_minutes: Number(form.duration_minutes.value),
+          duration_minutes: duration,
           checklist: checklistPayload(form)
         });
         return;
