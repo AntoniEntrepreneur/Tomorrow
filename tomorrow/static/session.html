@@ -327,7 +327,7 @@
   </div>
 
   <div class="tray empty" id="tray">
-    <div class="tray-label">Unplaced Flex — Place / Shrink / Drop any time</div>
+    <div class="tray-label">Unplaced Flex — Place / Change Duration / Drop any time</div>
     <div>No unplaced Flex.</div>
   </div>
 
@@ -510,13 +510,13 @@
       if (!unplaced.length) {
         tray.classList.add("empty");
         tray.innerHTML =
-          '<div class="tray-label">Unplaced Flex — Place / Shrink / Drop any time</div>' +
+          '<div class="tray-label">Unplaced Flex — Place / Change Duration / Drop any time</div>' +
           "<div>No unplaced Flex.</div>";
         return;
       }
       tray.classList.remove("empty");
       tray.innerHTML =
-        '<div class="tray-label">Unplaced Flex — Place / Shrink / Drop any time</div>' +
+        '<div class="tray-label">Unplaced Flex — Place / Change Duration / Drop any time</div>' +
         '<div class="tray-chips">' + unplaced.map(item =>
           '<div class="flex-chip' + (armedFlexId === item.id ? " armed" : "") +
           '" data-arm="' + esc(item.id) + '">' +
@@ -525,7 +525,7 @@
           '<div class="ops">' +
           '<button type="button" data-edit-flex="' + esc(item.id) + '">Edit</button>' +
           '<button type="button" data-place="' + esc(item.id) + '">Place</button>' +
-          '<button type="button" data-shrink="' + esc(item.id) + '">Shrink</button>' +
+          '<button type="button" data-change-duration="' + esc(item.id) + '">Change Duration</button>' +
           '<button type="button" data-drop="' + esc(item.id) + '">Drop</button>' +
           "</div></div>"
         ).join("") + "</div>";
@@ -743,13 +743,13 @@
       );
     }
 
-    function sheetShrink(item) {
+    function sheetChangeDuration(item) {
       openSheet(
-        "<h2>Shrink Flex · " + esc(item.name) + "</h2>" +
-        '<form id="shrink-flex" data-id="' + esc(item.id) + '">' +
+        "<h2>Change Duration · " + esc(item.name) + "</h2>" +
+        '<form id="change-duration-flex" data-id="' + esc(item.id) + '">' +
         '<label>New duration (min) <input name="duration_minutes" type="number" min="1" required value="' +
         esc(item.duration_minutes) + '"></label>' +
-        '<div class="actions"><button class="primary" type="submit">Shrink</button>' +
+        '<div class="actions"><button class="primary" type="submit">Change Duration</button>' +
         '<button type="button" class="ghost" data-close>Cancel</button></div></form>'
       );
     }
@@ -782,7 +782,7 @@
         checklistField(item.checklist) +
         '<div class="actions"><button class="primary" type="submit">Update</button>' +
         '<button type="button" class="ghost" data-place="' + esc(item.id) + '">Place</button>' +
-        '<button type="button" class="ghost" data-shrink="' + esc(item.id) + '">Shrink</button>' +
+        '<button type="button" class="ghost" data-change-duration="' + esc(item.id) + '">Change Duration</button>' +
         '<button type="button" class="ghost" data-close>Cancel</button>' +
         '<button type="button" class="danger" data-drop="' + esc(item.id) + '">Drop</button></div></form>'
       );
@@ -912,11 +912,11 @@
         if (item) sheetPlace(item);
         return;
       }
-      const shrinkId = event.target.dataset.shrink;
-      if (shrinkId) {
+      const changeDurationId = event.target.dataset.changeDuration;
+      if (changeDurationId) {
         event.stopPropagation();
-        const item = findFlex(shrinkId);
-        if (item) sheetShrink(item);
+        const item = findFlex(changeDurationId);
+        if (item) sheetChangeDuration(item);
         return;
       }
       const editId = event.target.dataset.editFlex;
@@ -970,11 +970,11 @@
         if (item) sheetPlace(item);
         return;
       }
-      const shrinkId = event.target.dataset.shrink;
-      if (shrinkId) {
+      const changeDurationId = event.target.dataset.changeDuration;
+      if (changeDurationId) {
         event.preventDefault();
-        const item = findFlex(shrinkId);
-        if (item) sheetShrink(item);
+        const item = findFlex(changeDurationId);
+        if (item) sheetChangeDuration(item);
       }
     });
 
@@ -1035,8 +1035,8 @@
         await placeFlexAt(form.dataset.id, clockValue(form.start));
         return;
       }
-      if (form.id === "shrink-flex") {
-        await mutate("/api/shrink", {
+      if (form.id === "change-duration-flex") {
+        await mutate("/api/change-duration", {
           id: form.dataset.id,
           duration_minutes: Number(form.duration_minutes.value)
         });

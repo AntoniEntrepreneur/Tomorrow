@@ -174,7 +174,7 @@ def test_snap_to_gap_start_produces_a_valid_placement() -> None:
     )
 
 
-def test_shrink_then_placed_flex_fits() -> None:
+def test_change_duration_then_placed_flex_fits() -> None:
     standup = Anchor(name="Standup", start=time(7, 0), duration=timedelta(minutes=15))
     lunch = Anchor(name="Lunch", start=time(12, 0), duration=timedelta(minutes=60))
     shrunk = Flex(
