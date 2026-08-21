@@ -62,9 +62,36 @@ def test_main_finds_clone_data_when_cwd_is_elsewhere(
         seen["repo_root"] = repo_root
 
     monkeypatch.setattr("tomorrow.cli.run_session", fake_run_session)
-    main()
+    main(argv=[])
 
     assert (seen["repo_root"] / "data" / "defaults.toml").is_file()
+
+
+def test_calendars_command_lists_names_from_eventkit(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setattr(
+        "tomorrow.cli.list_available_calendars",
+        lambda: (["Work", "Personal"], ["Errands"]),
+    )
+
+    main(argv=["calendars"])
+
+    output = capsys.readouterr().out
+    assert "Work" in output
+    assert "Personal" in output
+    assert "Errands" in output
+
+
+def test_calendars_command_reports_when_access_unavailable(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setattr("tomorrow.cli.list_available_calendars", lambda: None)
+
+    main(argv=["calendars"])
+
+    output = capsys.readouterr().out
+    assert "not available" in output.lower()
 
 
 def test_run_session_prints_plan_date_url_and_instruction(

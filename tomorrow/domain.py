@@ -20,6 +20,7 @@ class Draft:
     """Something captured this session that is not yet an Anchor or Flex."""
 
     name: str
+    source: str | None = None
 
 
 @dataclass(frozen=True)
@@ -30,6 +31,7 @@ class Anchor:
     start: time
     duration: timedelta
     checklist: str | None = None
+    source: str | None = None
 
     @property
     def end(self) -> time:
