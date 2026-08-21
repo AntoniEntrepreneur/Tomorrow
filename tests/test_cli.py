@@ -452,7 +452,7 @@ def test_edit_anchor_and_bounds_over_http(tmp_path: Path) -> None:
     assert removed["anchors"] == []
 
 
-def test_add_place_shrink_and_drop_flex_over_http(tmp_path: Path) -> None:
+def test_add_place_change_duration_and_drop_flex_over_http(tmp_path: Path) -> None:
     _write_defaults(tmp_path)
     server, thread = _start_server(tmp_path)
     try:
@@ -467,9 +467,9 @@ def test_add_place_shrink_and_drop_flex_over_http(tmp_path: Path) -> None:
             "/api/place",
             payload={"id": item_id, "start": "22:00"},
         )
-        shrink_status, shrunk_body = _http(
+        change_duration_status, changed_duration_body = _http(
             "POST",
-            "/api/shrink",
+            "/api/change-duration",
             payload={"id": item_id, "duration_minutes": 45},
         )
         drop_status, dropped_body = _http(
@@ -482,7 +482,7 @@ def test_add_place_shrink_and_drop_flex_over_http(tmp_path: Path) -> None:
 
     added = json.loads(added_body)
     placed = json.loads(placed_body)
-    shrunk = json.loads(shrunk_body)
+    changed_duration = json.loads(changed_duration_body)
     dropped = json.loads(dropped_body)
     flushed = json.loads((tmp_path / "data" / "session.json").read_text(encoding="utf-8"))
     assert add_status == 200
@@ -492,9 +492,9 @@ def test_add_place_shrink_and_drop_flex_over_http(tmp_path: Path) -> None:
     assert place_status == 200
     assert placed["flexes"][0]["start"] == "22:00"
     assert "undo" not in placed
-    assert shrink_status == 200
-    assert shrunk["flexes"][0]["duration_minutes"] == 45
-    assert "undo" not in shrunk
+    assert change_duration_status == 200
+    assert changed_duration["flexes"][0]["duration_minutes"] == 45
+    assert "undo" not in changed_duration
     assert drop_status == 200
     assert dropped["flexes"] == []
     assert "undo" not in dropped

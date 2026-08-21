@@ -344,7 +344,7 @@ def place_flex(
     return _commit(repo_root, document, mutate, now=now, opener=opener)
 
 
-def shrink_flex(
+def change_flex_duration(
     repo_root: Path,
     *,
     item_id: str,
@@ -1022,9 +1022,9 @@ class SessionHandler(BaseHTTPRequestHandler):
             )
             self._send_json(200, view)
             return
-        if path == "/api/shrink":
+        if path == "/api/change-duration":
             payload = self._read_json()
-            view = shrink_flex(
+            view = change_flex_duration(
                 self.server.repo_root,
                 item_id=payload["id"],
                 duration_minutes=int(payload["duration_minutes"]),
