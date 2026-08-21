@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Library</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      min-height: 100dvh;
+      background: #12161f;
+      color: #e6e1d4;
+      font-family: system-ui, sans-serif;
+    }
+    .shell { max-width: 34rem; margin: 0 auto; padding: 1.25rem 1.1rem 4rem; }
+    h1 { font-size: 1.4rem; margin-bottom: 1rem; }
+    h2 { font-size: 1.05rem; margin: 1.5rem 0 0.5rem; color: #e0a84a; }
+    section { border: 1px solid #2a3142; border-radius: 0.5rem; padding: 0.8rem; margin-bottom: 1rem; }
+    .entry { display: flex; justify-content: space-between; align-items: center; padding: 0.4rem 0; border-bottom: 1px solid #232a3a; gap: 0.5rem; }
+    .entry:last-child { border-bottom: none; }
+    .entry .meta { font-size: 0.8rem; color: #8b93a7; }
+    button { background: #1a2030; color: #e6e1d4; border: 1px solid #2a3142; border-radius: 0.35rem; padding: 0.3rem 0.6rem; cursor: pointer; }
+    button.danger { color: #e07a6a; }
+    form { display: grid; gap: 0.4rem; margin-top: 0.6rem; }
+    input, select { background: #1a2030; color: #e6e1d4; border: 1px solid #2a3142; border-radius: 0.35rem; padding: 0.4rem; }
+    .hint { font-size: 0.75rem; color: #8b93a7; }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <h1>Library</h1>
+    <p class="hint">Checklists, Day Templates, and Activity Templates live here. This page is separate from tonight's Session.</p>
+
+    <section>
+      <h2>Checklists</h2>
+      <div id="checklist-list"></div>
+      <form id="checklist-form">
+        <input name="id" placeholder="id (e.g. gym-bag)" required>
+        <input name="name" placeholder="Name" required>
+        <input name="items" placeholder="Items, comma separated">
+        <button type="submit">Save Checklist</button>
+      </form>
+    </section>
+
+    <section>
+      <h2>Activity Templates</h2>
+      <div id="activity-list"></div>
+      <form id="activity-form">
+        <input name="id" placeholder="id (e.g. deep-work)" required>
+        <input name="name" placeholder="Name" required>
+        <input name="duration_minutes" type="number" placeholder="Duration (minutes)" required>
+        <input name="start" placeholder="Start HH:MM (leave blank for Flex)">
+        <input name="checklist" placeholder="Checklist id (optional)">
+        <button type="submit">Save Activity Template</button>
+      </form>
+    </section>
+
+    <section>
+      <h2>Day Templates</h2>
+      <div id="day-template-list"></div>
+      <form id="day-template-form">
+        <input name="id" placeholder="id (e.g. travel-day)" required>
+        <input name="name" placeholder="Name" required>
+        <input name="weekday" placeholder="Default weekday (optional, e.g. tuesday)">
+        <span class="hint">Anchor/Flex entries: edit the TOML file directly for now.</span>
+        <button type="submit">Save Day Template</button>
+      </form>
+    </section>
+  </div>
+
+  <script>
+    async function api(path, options) {
+      const response = await fetch(path, options);
+      return response.json();
+    }
+
+    function renderList(el, entries, kind) {
+      el.innerHTML = "";
+      for (const entry of entries) {
+        const row = document.createElement("div");
+        row.className = "entry";
+        const label = document.createElement("span");
+        label.textContent = entry.name + " (" + entry.id + ")";
+        const del = document.createElement("button");
+        del.className = "danger";
+        del.textContent = "Delete";
+        del.onclick = async () => {
+          await api("/api/library/" + kind, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ action: "delete", id: entry.id }),
+          });
+          load();
+        };
+        row.appendChild(label);
+        row.appendChild(del);
+        el.appendChild(row);
+      }
+    }
+
+    async function load() {
+      const data = await api("/api/library");
+      renderList(document.getElementById("checklist-list"), data.checklists, "checklist");
+      renderList(document.getElementById("activity-list"), data.activity_templates, "activity-template");
+      renderList(document.getElementById("day-template-list"), data.day_templates, "day-template");
+    }
+
+    document.getElementById("checklist-form").addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const form = new FormData(event.target);
+      const items = String(form.get("items") || "")
+        .split(",")
+        .map((item) => item.trim())
+        .filter(Boolean);
+      await api("/api/library/checklist", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "save", id: form.get("id"), name: form.get("name"), items }),
+      });
+      event.target.reset();
+      load();
+    });
+
+    document.getElementById("activity-form").addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const form = new FormData(event.target);
+      await api("/api/library/activity-template", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "save",
+          id: form.get("id"),
+          name: form.get("name"),
+          duration_minutes: Number(form.get("duration_minutes")),
+          start: form.get("start") || null,
+          checklist: form.get("checklist") || null,
+        }),
+      });
+      event.target.reset();
+      load();
+    });
+
+    document.getElementById("day-template-form").addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const form = new FormData(event.target);
+      await api("/api/library/day-template", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "save",
+          id: form.get("id"),
+          name: form.get("name"),
+          weekday: form.get("weekday") || null,
+        }),
+      });
+      event.target.reset();
+      load();
+    });
+
+    load();
+  </script>
+</body>
+</html>
