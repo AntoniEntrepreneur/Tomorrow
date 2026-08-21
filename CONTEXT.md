@@ -63,12 +63,16 @@ _Avoid_: Slot, window, free block
 Something captured during a Session that is not yet an Anchor or Flex. A Plan is not finished while any Draft remains.
 _Avoid_: Inbox item, untimed task, note
 
-**Template**:
-A reusable seed of Anchors and/or Flex for a weekday (or named routine), copied into tonight's Session as a starting point. It does not place Flex into Gaps. Entries may include which Checklist to attach.
-_Avoid_: Default plan, preset schedule
+**Day Template**:
+A reusable seed of Anchors and/or Flex for a whole Plan date, copied into tonight's Session as a starting point. It does not place Flex into Gaps. A Day Template may be assigned as the default for one weekday (at most one Day Template per weekday) or left unassigned, reachable only by manually choosing it. Applying a Day Template — by weekday default or manual choice — is only possible on a blank Session; it seeds, it does not merge. Entries may define a Checklist to attach, or reference an Activity Template.
+_Avoid_: Template (ambiguous with Activity Template), default plan, preset schedule, routine
+
+**Activity Template**:
+A single reusable Anchor-shaped or Flex-shaped Plan item — name, a fixed start or a duration, and an optional Checklist — that can be inserted into a Session on its own, independent of any Day Template. Reachable by browsing a picker, or by autocomplete: a typed Draft/Anchor/Flex name that matches an Activity Template suggests the whole bundle (start or duration, plus Checklist) and takes precedence over a bare Checklist name match.
+_Avoid_: Routine, preset item, snippet
 
 **Checklist**:
-A named reusable list of things to bring or do, attached to a Plan item and shown with that item on the finished Plan. On the finished Plan, rows can be checked off during the day. A Template entry may pre-attach a Checklist.
+A named reusable list of things to bring or do, attached to a Plan item and shown with that item on the finished Plan. On the finished Plan, rows can be checked off during the day. A Day Template entry or an Activity Template may pre-attach a Checklist. Deleting a Checklist or Activity Template still referenced by a Day Template entry, or still attached to an item in an in-progress Session, is allowed — the reference goes stale rather than blocking the deletion.
 _Avoid_: Packing list, subtasks (unless they are literally checklist rows)
 
 **Drop**:
