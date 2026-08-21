@@ -1012,6 +1012,10 @@
       }
     });
 
+    function isTypingTarget(target) {
+      return !!(target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA"));
+    }
+
     document.addEventListener("keydown", event => {
       if (event.key === "Escape" && sheetOpen) {
         closeSheet();
@@ -1019,14 +1023,24 @@
       }
       const key = event.key.toLowerCase();
       const modifier = event.metaKey || event.ctrlKey;
-      if (!modifier) return;
+      if (!modifier) {
+        if (sheetOpen) return;
+        if (isTypingTarget(event.target)) return;
+        if (key === "a") {
+          event.preventDefault();
+          sheetAddAnchor();
+        } else if (key === "f") {
+          event.preventDefault();
+          sheetAddFlex();
+        } else if (key === "d") {
+          event.preventDefault();
+          sheetAddDraft();
+        }
+        return;
+      }
       const redo = (key === "z" && event.shiftKey) || (key === "y" && event.ctrlKey);
       if (key !== "z" && !(key === "y" && event.ctrlKey)) return;
-      const typing = event.target && (
-        event.target.tagName === "INPUT" ||
-        event.target.tagName === "TEXTAREA"
-      );
-      if (typing && key === "z" && !event.shiftKey) return;
+      if (isTypingTarget(event.target) && key === "z" && !event.shiftKey) return;
       if (sessionUndoBlocked()) return;
       if (redo) {
         if (!current || !current.can_redo) return;
