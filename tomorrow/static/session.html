@@ -1012,6 +1012,10 @@
       }
     });
 
+    function isTypingTarget(target) {
+      return !!(target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA"));
+    }
+
     document.addEventListener("keydown", event => {
       if (event.key === "Escape" && sheetOpen) {
         closeSheet();
@@ -1021,11 +1025,7 @@
       const modifier = event.metaKey || event.ctrlKey;
       if (!modifier) {
         if (sheetOpen) return;
-        const typingBare = event.target && (
-          event.target.tagName === "INPUT" ||
-          event.target.tagName === "TEXTAREA"
-        );
-        if (typingBare) return;
+        if (isTypingTarget(event.target)) return;
         if (key === "a") {
           event.preventDefault();
           sheetAddAnchor();
@@ -1040,11 +1040,7 @@
       }
       const redo = (key === "z" && event.shiftKey) || (key === "y" && event.ctrlKey);
       if (key !== "z" && !(key === "y" && event.ctrlKey)) return;
-      const typing = event.target && (
-        event.target.tagName === "INPUT" ||
-        event.target.tagName === "TEXTAREA"
-      );
-      if (typing && key === "z" && !event.shiftKey) return;
+      if (isTypingTarget(event.target) && key === "z" && !event.shiftKey) return;
       if (sessionUndoBlocked()) return;
       if (redo) {
         if (!current || !current.can_redo) return;
