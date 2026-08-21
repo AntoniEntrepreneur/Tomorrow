@@ -13,6 +13,10 @@ import threading
 import uuid
 import webbrowser
 
+from tomorrow.activity_templates import (
+    load_activity_template_library,
+    suggest_activity_template,
+)
 from tomorrow.checklists import load_checklist_library, suggest_checklist
 from tomorrow.defaults import DayBounds, load_defaults
 from tomorrow.domain import (
@@ -27,14 +31,27 @@ from tomorrow.domain import (
     minutes_between,
     parse_clock,
 )
+from tomorrow.day_templates import (
+    default_day_template_path,
+    load_day_template,
+    named_day_template_path,
+)
+from tomorrow.library import (
+    delete_activity_template,
+    delete_checklist,
+    delete_day_template,
+    save_activity_template,
+    save_checklist,
+    save_day_template,
+)
 from tomorrow.plan import default_plan_date, format_plan_date, write_finalized_plan
 from tomorrow.weather import load_weather_name, try_fetch_weather
-from tomorrow.weekday_template import load_weekday_template, weekday_template_path
 
 SESSION_HOST = "127.0.0.1"
 SESSION_PORT = 8765
 SESSION_URL = f"http://{SESSION_HOST}:{SESSION_PORT}"
 _PAGE_PATH = Path(__file__).parent / "static" / "session.html"
+_LIBRARY_PAGE_PATH = Path(__file__).parent / "static" / "library.html"
 _WEATHER_TIMEOUT_SECONDS = 5
 _UNSET = object()
 
@@ -98,8 +115,8 @@ def load_session(repo_root: Path, *, now: datetime | None = None) -> dict:
     return document
 
 
-def _weekday_template_file(repo_root: Path, document: dict) -> Path:
-    return weekday_template_path(
+def _default_day_template_file(repo_root: Path, document: dict) -> Path:
+    return default_day_template_path(
         repo_root / "data", date.fromisoformat(document["plan_date"])
     )
 
@@ -111,7 +128,7 @@ def _session_has_items(document: dict) -> bool:
 def _show_template_offer(repo_root: Path, document: dict) -> bool:
     if document["template_offer"] != "pending" or _session_has_items(document):
         return False
-    return _weekday_template_file(repo_root, document).is_file()
+    return _default_day_template_file(repo_root, document).is_file()
 
 
 def _snapshot_without_undo(document: dict) -> dict:
@@ -200,6 +217,81 @@ def add_flex(
         )
 
     return _commit(repo_root, document, mutate, now=now, opener=opener)
+
+
+def insert_activity_template(
+    repo_root: Path,
+    *,
+    activity_id: str,
+    now: datetime | None = None,
+    opener: Callable[[Request], object] = _default_opener,
+) -> dict:
+    """Insert a single Activity Template into the Session as a new Anchor or Flex.
+
+    Independent of Day Template state: usable at any point in the Session,
+    not only when it is blank.
+    """
+
+    document = load_session(repo_root, now=now)
+    library = load_activity_template_library(repo_root / "data")
+    activity = library.get(activity_id)
+    if activity is None:
+        return session_view(repo_root, now=now, opener=opener)
+
+    def mutate(current: dict) -> None:
+        if activity.start is not None:
+            current["anchors"].append(
+                {
+                    "id": uuid.uuid4().hex,
+                    "name": activity.name,
+                    "start": activity.start.strftime("%H:%M"),
+                    "duration_minutes": int(activity.duration.total_seconds() // 60),
+                    "checklist": activity.checklist,
+                }
+            )
+        else:
+            current["flexes"].append(
+                {
+                    "id": uuid.uuid4().hex,
+                    "name": activity.name,
+                    "duration_minutes": int(activity.duration.total_seconds() // 60),
+                    "start": None,
+                    "checklist": activity.checklist,
+                }
+            )
+
+    return _commit(repo_root, document, mutate, now=now, opener=opener)
+
+
+def suggest_activity(
+    repo_root: Path, item_name: str
+) -> dict | None:
+    """Suggest a bundle (start-or-duration plus Checklist) for a typed name.
+
+    Checks the Activity Template library first; an Activity Template match
+    takes precedence over the older bare-Checklist-name-match suggestion.
+    Falls back to `suggest_checklist` when no Activity Template matches, so
+    Checklist-only matching keeps working.
+    """
+
+    data_dir = repo_root / "data"
+    activity_library = load_activity_template_library(data_dir)
+    activity_id = suggest_activity_template(item_name, activity_library)
+    if activity_id is not None:
+        activity = activity_library[activity_id]
+        return {
+            "kind": "activity",
+            "activity_id": activity_id,
+            "name": activity.name,
+            "start": activity.start.strftime("%H:%M") if activity.start else None,
+            "duration_minutes": int(activity.duration.total_seconds() // 60),
+            "checklist": activity.checklist,
+        }
+
+    checklist_id = suggest_checklist(item_name, load_checklist_library(data_dir))
+    if checklist_id is not None:
+        return {"kind": "checklist", "checklist_id": checklist_id}
+    return None
 
 
 def _item_by_id(items: list, item_id: str) -> dict:
@@ -338,21 +430,7 @@ def promote_draft(
     return _commit(repo_root, document, mutate, now=now, opener=opener)
 
 
-def apply_template(
-    repo_root: Path,
-    *,
-    now: datetime | None = None,
-    opener: Callable[[Request], object] = _default_opener,
-) -> dict:
-    document = load_session(repo_root, now=now)
-    seed = load_weekday_template(_weekday_template_file(repo_root, document))
-    if (
-        seed is None
-        or document["template_offer"] != "pending"
-        or _session_has_items(document)
-    ):
-        return session_view(repo_root, now=now, opener=opener)
-
+def _seed_mutation(seed) -> Callable[[dict], None]:
     def mutate(current: dict) -> None:
         current["anchors"].extend(
             {
@@ -376,7 +454,56 @@ def apply_template(
         )
         current["template_offer"] = "accepted"
 
-    return _commit(repo_root, document, mutate, now=now, opener=opener)
+    return mutate
+
+
+def apply_template(
+    repo_root: Path,
+    *,
+    now: datetime | None = None,
+    opener: Callable[[Request], object] = _default_opener,
+) -> dict:
+    document = load_session(repo_root, now=now)
+    activity_library = load_activity_template_library(repo_root / "data")
+    seed = load_day_template(
+        _default_day_template_file(repo_root, document), activity_library
+    )
+    if (
+        seed is None
+        or document["template_offer"] != "pending"
+        or _session_has_items(document)
+    ):
+        return session_view(repo_root, now=now, opener=opener)
+
+    return _commit(repo_root, document, _seed_mutation(seed), now=now, opener=opener)
+
+
+def apply_named_day_template(
+    repo_root: Path,
+    *,
+    template_id: str,
+    now: datetime | None = None,
+    opener: Callable[[Request], object] = _default_opener,
+) -> dict:
+    """Manually seed the Session from a specific Day Template by id.
+
+    Reuses the blank-Session-only guard used by the weekday auto-offer: a
+    Day Template can only ever seed a blank Session, whether chosen
+    automatically or picked by name.
+    """
+
+    document = load_session(repo_root, now=now)
+    if _session_has_items(document):
+        return session_view(repo_root, now=now, opener=opener)
+
+    activity_library = load_activity_template_library(repo_root / "data")
+    seed = load_day_template(
+        named_day_template_path(repo_root / "data", template_id), activity_library
+    )
+    if seed is None:
+        return session_view(repo_root, now=now, opener=opener)
+
+    return _commit(repo_root, document, _seed_mutation(seed), now=now, opener=opener)
 
 
 def decline_template(
@@ -685,7 +812,36 @@ class SessionHandler(BaseHTTPRequestHandler):
         if path == "/api/session":
             self._send_json(200, session_view(self.server.repo_root, **self._view_args()))
             return
+        if path in {"/library", "/library.html"}:
+            body = _LIBRARY_PAGE_PATH.read_bytes()
+            self._send(200, "text/html; charset=utf-8", body)
+            return
+        if path == "/api/library":
+            self._send_json(200, self._library_view())
+            return
         self.send_error(404)
+
+    def _library_view(self) -> dict:
+        data_dir = self.server.repo_root / "data"
+        templates_dir = data_dir / "templates"
+        day_templates = (
+            sorted(templates_dir.glob("*.toml")) if templates_dir.is_dir() else []
+        )
+        return {
+            "checklists": [
+                {"id": checklist_id, "name": checklist.name}
+                for checklist_id, checklist in load_checklist_library(data_dir).items()
+            ],
+            "activity_templates": [
+                {"id": activity_id, "name": activity.name}
+                for activity_id, activity in load_activity_template_library(
+                    data_dir
+                ).items()
+            ],
+            "day_templates": [
+                {"id": path.stem, "name": path.stem} for path in day_templates
+            ],
+        }
 
     def do_POST(self) -> None:
         path = urlparse(self.path).path
@@ -827,11 +983,36 @@ class SessionHandler(BaseHTTPRequestHandler):
                 view = apply_template(self.server.repo_root, **self._view_args())
                 self._send_json(200, view)
                 return
+            if action == "apply_named":
+                view = apply_named_day_template(
+                    self.server.repo_root,
+                    template_id=payload["template_id"],
+                    **self._view_args(),
+                )
+                self._send_json(200, view)
+                return
             if action == "decline":
                 view = decline_template(self.server.repo_root, **self._view_args())
                 self._send_json(200, view)
                 return
             self.send_error(404)
+            return
+        if path == "/api/activity-template/insert":
+            payload = self._read_json()
+            view = insert_activity_template(
+                self.server.repo_root,
+                activity_id=payload["activity_id"],
+                **self._view_args(),
+            )
+            self._send_json(200, view)
+            return
+        if path == "/api/suggest-activity":
+            payload = self._read_json()
+            suggestion = suggest_activity(self.server.repo_root, payload.get("name", ""))
+            self._send_json(200, {"suggestion": suggestion})
+            return
+        if path.startswith("/api/library/"):
+            self._handle_library_post(path[len("/api/library/") :])
             return
         if path == "/api/undo":
             view = undo_session(self.server.repo_root, **self._view_args())
@@ -852,6 +1033,58 @@ class SessionHandler(BaseHTTPRequestHandler):
         self.server.submitted_path = plan_path
         self._send_json(200, {"ok": True, "path": str(plan_path)})
         threading.Thread(target=self.server.shutdown, daemon=True).start()
+
+    def _handle_library_post(self, entity: str) -> None:
+        payload = self._read_json()
+        action = payload.get("action")
+        repo_root = self.server.repo_root
+        if entity == "checklist":
+            if action == "save":
+                save_checklist(
+                    repo_root,
+                    checklist_id=payload["id"],
+                    name=payload["name"],
+                    items=list(payload.get("items", [])),
+                )
+            elif action == "delete":
+                delete_checklist(repo_root, checklist_id=payload["id"])
+            else:
+                self.send_error(404)
+                return
+        elif entity == "activity-template":
+            if action == "save":
+                save_activity_template(
+                    repo_root,
+                    activity_id=payload["id"],
+                    name=payload["name"],
+                    duration_minutes=int(payload["duration_minutes"]),
+                    start=payload.get("start") or None,
+                    checklist=payload.get("checklist") or None,
+                )
+            elif action == "delete":
+                delete_activity_template(repo_root, activity_id=payload["id"])
+            else:
+                self.send_error(404)
+                return
+        elif entity == "day-template":
+            if action == "save":
+                save_day_template(
+                    repo_root,
+                    template_id=payload["id"],
+                    name=payload["name"],
+                    anchors=payload.get("anchors"),
+                    flexes=payload.get("flexes"),
+                    weekday=payload.get("weekday") or None,
+                )
+            elif action == "delete":
+                delete_day_template(repo_root, template_id=payload["id"])
+            else:
+                self.send_error(404)
+                return
+        else:
+            self.send_error(404)
+            return
+        self._send_json(200, self._library_view())
 
     def _read_json(self) -> dict:
         length = int(self.headers.get("Content-Length", "0"))

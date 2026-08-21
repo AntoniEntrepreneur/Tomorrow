@@ -20,6 +20,7 @@ from tomorrow.session import (
     add_anchor,
     add_draft,
     add_flex,
+    apply_named_day_template,
     apply_template,
     decline_template,
     edit_anchor,
@@ -27,7 +28,9 @@ from tomorrow.session import (
     drop_draft,
     edit_flex,
     drop_flex,
+    insert_activity_template,
     load_session,
+    suggest_activity,
     place_flex,
     promote_draft,
     reset_session,
@@ -1852,3 +1855,160 @@ def test_undo_stack_survives_same_night_resume(tmp_path: Path) -> None:
     assert len(resumed["undo"]["past"]) >= 1
     assert view["flexes"][0]["id"] == added["flexes"][0]["id"]
     assert view["plan_date"] == "2026-08-11"
+
+
+def _write_named_day_template(tmp_path: Path, template_id: str) -> None:
+    templates = tmp_path / "data" / "templates"
+    templates.mkdir(parents=True, exist_ok=True)
+    (templates / f"{template_id}.toml").write_text(
+        """
+[[anchor]]
+name = "Travel prep"
+start = "06:00"
+duration = 30
+
+[[flex]]
+name = "Pack"
+duration = 20
+""".strip()
+        + "\n",
+        encoding="utf-8",
+    )
+
+
+def _write_activity_template(
+    tmp_path: Path, activity_id: str, *, name: str, duration: int, start: str | None = None
+) -> None:
+    directory = tmp_path / "data" / "activity-templates"
+    directory.mkdir(parents=True, exist_ok=True)
+    lines = [f'name = "{name}"', f"duration = {duration}"]
+    if start is not None:
+        lines.append(f'start = "{start}"')
+    (directory / f"{activity_id}.toml").write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def test_apply_named_day_template_seeds_a_blank_session(tmp_path: Path) -> None:
+    _write_defaults(tmp_path)
+    _write_named_day_template(tmp_path, "travel-day")
+    now = datetime(2026, 8, 10, 22, 0)
+
+    view = apply_named_day_template(tmp_path, template_id="travel-day", now=now)
+
+    assert [anchor["name"] for anchor in view["anchors"]] == ["Travel prep"]
+    assert [flex["name"] for flex in view["flexes"]] == ["Pack"]
+    assert view["template_offer"] == "accepted"
+
+
+def test_apply_named_day_template_is_a_no_op_when_session_has_items(
+    tmp_path: Path,
+) -> None:
+    _write_defaults(tmp_path)
+    _write_named_day_template(tmp_path, "travel-day")
+    now = datetime(2026, 8, 10, 22, 0)
+    added = add_flex(tmp_path, name="Walk", duration_minutes=30, now=now)
+
+    view = apply_named_day_template(tmp_path, template_id="travel-day", now=now)
+
+    assert [flex["name"] for flex in view["flexes"]] == ["Walk"]
+    assert view["flexes"][0]["id"] == added["flexes"][0]["id"]
+
+
+def test_apply_named_day_template_is_a_no_op_when_template_is_missing(
+    tmp_path: Path,
+) -> None:
+    _write_defaults(tmp_path)
+    now = datetime(2026, 8, 10, 22, 0)
+
+    view = apply_named_day_template(tmp_path, template_id="does-not-exist", now=now)
+
+    assert view["anchors"] == []
+    assert view["flexes"] == []
+
+
+def test_insert_activity_template_adds_an_anchor_and_flushes(tmp_path: Path) -> None:
+    _write_defaults(tmp_path)
+    _write_activity_template(tmp_path, "therapy", name="Therapy", duration=50, start="16:00")
+    now = datetime(2026, 8, 10, 22, 0)
+
+    view = insert_activity_template(tmp_path, activity_id="therapy", now=now)
+    document = json.loads(
+        (tmp_path / "data" / "session.json").read_text(encoding="utf-8")
+    )
+
+    assert len(view["anchors"]) == 1
+    assert view["anchors"][0]["name"] == "Therapy"
+    assert view["anchors"][0]["start"] == "16:00"
+    assert view["anchors"][0]["duration_minutes"] == 50
+    assert view["anchors"][0]["id"]
+    assert document["anchors"] == view["anchors"]
+
+
+def test_insert_activity_template_adds_a_flex_when_no_start(tmp_path: Path) -> None:
+    _write_defaults(tmp_path)
+    _write_activity_template(tmp_path, "deep-work", name="Deep work", duration=90)
+    now = datetime(2026, 8, 10, 22, 0)
+
+    view = insert_activity_template(tmp_path, activity_id="deep-work", now=now)
+
+    assert len(view["flexes"]) == 1
+    assert view["flexes"][0]["name"] == "Deep work"
+    assert view["flexes"][0]["start"] is None
+    assert view["flexes"][0]["duration_minutes"] == 90
+    assert view["flexes"][0]["id"]
+
+
+def test_insert_activity_template_works_when_session_already_has_items(
+    tmp_path: Path,
+) -> None:
+    _write_defaults(tmp_path)
+    _write_activity_template(tmp_path, "deep-work", name="Deep work", duration=90)
+    now = datetime(2026, 8, 10, 22, 0)
+    add_flex(tmp_path, name="Walk", duration_minutes=30, now=now)
+
+    view = insert_activity_template(tmp_path, activity_id="deep-work", now=now)
+
+    assert {flex["name"] for flex in view["flexes"]} == {"Walk", "Deep work"}
+
+
+def test_insert_activity_template_is_a_no_op_when_missing(tmp_path: Path) -> None:
+    _write_defaults(tmp_path)
+    now = datetime(2026, 8, 10, 22, 0)
+
+    view = insert_activity_template(tmp_path, activity_id="does-not-exist", now=now)
+
+    assert view["anchors"] == []
+    assert view["flexes"] == []
+
+
+def test_suggest_activity_takes_precedence_over_bare_checklist_match(
+    tmp_path: Path,
+) -> None:
+    _write_defaults(tmp_path)
+    _write_checklist_library(tmp_path)
+    _write_activity_template(tmp_path, "gym", name="Gym", duration=60, start="18:00")
+
+    suggestion = suggest_activity(tmp_path, "Gym")
+
+    assert suggestion == {
+        "kind": "activity",
+        "activity_id": "gym",
+        "name": "Gym",
+        "start": "18:00",
+        "duration_minutes": 60,
+        "checklist": None,
+    }
+
+
+def test_suggest_activity_falls_back_to_bare_checklist_match(tmp_path: Path) -> None:
+    _write_defaults(tmp_path)
+    _write_checklist_library(tmp_path)
+
+    suggestion = suggest_activity(tmp_path, "Sauna kit")
+
+    assert suggestion == {"kind": "checklist", "checklist_id": "sauna-kit"}
+
+
+def test_suggest_activity_returns_none_when_nothing_matches(tmp_path: Path) -> None:
+    _write_defaults(tmp_path)
+
+    assert suggest_activity(tmp_path, "Nothing here") is None
