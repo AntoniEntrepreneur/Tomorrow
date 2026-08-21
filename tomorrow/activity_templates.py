@@ -8,6 +8,7 @@ from pathlib import Path
 import tomllib
 
 from tomorrow.domain import parse_clock
+from tomorrow.library_base import load_toml_library, suggest_by_name
 
 
 @dataclass(frozen=True)
@@ -27,14 +28,7 @@ def activity_templates_dir(data_dir: Path) -> Path:
 def load_activity_template_library(data_dir: Path) -> dict[str, ActivityTemplate]:
     """Load every *.toml file in data/activity-templates/, keyed by filename stem."""
 
-    directory = activity_templates_dir(data_dir)
-    if not directory.is_dir():
-        return {}
-
-    library: dict[str, ActivityTemplate] = {}
-    for path in sorted(directory.glob("*.toml")):
-        library[path.stem] = _parse_activity_template(path)
-    return library
+    return load_toml_library(activity_templates_dir(data_dir), _parse_activity_template)
 
 
 def _parse_activity_template(path: Path) -> ActivityTemplate:
@@ -50,25 +44,9 @@ def _parse_activity_template(path: Path) -> ActivityTemplate:
     )
 
 
-def _normalize(value: str) -> str:
-    return "".join(ch for ch in value.lower() if ch.isalnum())
-
-
 def suggest_activity_template(
     item_name: str, library: dict[str, ActivityTemplate]
 ) -> str | None:
     """Return a library key when the item name resembles an Activity Template id or name."""
 
-    needle = _normalize(item_name)
-    if not needle:
-        return None
-
-    matches: list[str] = []
-    for template_id, template in library.items():
-        candidates = (_normalize(template_id), _normalize(template.name))
-        if any(needle in candidate or candidate in needle for candidate in candidates if candidate):
-            matches.append(template_id)
-
-    if len(matches) == 1:
-        return matches[0]
-    return None
+    return suggest_by_name(item_name, library, name_of=lambda template: template.name)
