@@ -28,7 +28,8 @@ from tomorrow.domain import (
     compute_gaps,
     describe_blocker,
     finalize_plan,
-    minutes_between,
+    is_next_day,
+    minutes_since_wake,
     parse_clock,
 )
 from tomorrow.day_templates import (
@@ -384,7 +385,7 @@ def place_flex(
     return _commit(repo_root, document, mutate, now=now, opener=opener)
 
 
-def shrink_flex(
+def change_flex_duration(
     repo_root: Path,
     *,
     item_id: str,
@@ -708,18 +709,27 @@ def session_view(
     undo = document.get("undo", {"past": [], "future": []})
     plan_date = date.fromisoformat(document["plan_date"])
     data_dir = repo_root / "data"
-    gaps = [
-        {
+    wake_time = parse_clock(bounds.wake)
+    gaps = []
+    for gap in compute_gaps(bounds=bounds, anchors=anchors):
+        gap_view = {
             "start": gap.start.strftime("%H:%M"),
             "end": gap.end.strftime("%H:%M"),
-            "duration_minutes": minutes_between(gap.start, gap.end),
+            "duration_minutes": minutes_since_wake(gap.end, wake=wake_time)
+            - minutes_since_wake(gap.start, wake=wake_time),
         }
-        for gap in compute_gaps(bounds=bounds, anchors=anchors)
-    ]
+        if is_next_day(gap.start, wake=wake_time):
+            gap_view["start_is_next_day"] = True
+        if is_next_day(gap.end, wake=wake_time):
+            gap_view["end_is_next_day"] = True
+        gaps.append(gap_view)
+    bounds_view = dict(document["bounds"])
+    if is_next_day(parse_clock(bounds.sleep), wake=wake_time):
+        bounds_view["sleep_is_next_day"] = True
     return {
         "plan_date": document["plan_date"],
         "plan_date_label": format_plan_date(plan_date),
-        "bounds": document["bounds"],
+        "bounds": bounds_view,
         "template_offer": document["template_offer"],
         "show_template_offer": _show_template_offer(repo_root, document),
         "drafts": [
@@ -1065,9 +1075,9 @@ class SessionHandler(BaseHTTPRequestHandler):
             )
             self._send_json(200, view)
             return
-        if path == "/api/shrink":
+        if path == "/api/change-duration":
             payload = self._read_json()
-            view = shrink_flex(
+            view = change_flex_duration(
                 self.server.repo_root,
                 item_id=payload["id"],
                 duration_minutes=int(payload["duration_minutes"]),

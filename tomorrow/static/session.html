@@ -328,7 +328,7 @@
   </div>
 
   <div class="tray empty" id="tray">
-    <div class="tray-label">Unplaced Flex — Place / Shrink / Drop any time</div>
+    <div class="tray-label">Unplaced Flex — Place / Change Duration / Drop any time</div>
     <div>No unplaced Flex.</div>
   </div>
 
@@ -353,7 +353,8 @@
       return hours * 60 + minutes;
     }
 
-    function toClock(minutes) {
+    function toClock(minutesRaw) {
+      const minutes = ((minutesRaw % 1440) + 1440) % 1440;
       const hours = Math.floor(minutes / 60);
       const mins = minutes % 60;
       return String(hours).padStart(2, "0") + ":" + String(mins).padStart(2, "0");
@@ -361,6 +362,21 @@
 
     function endClock(start, durationMin) {
       return toClock(toMin(start) + Number(durationMin));
+    }
+
+    // Wake-relative offset, mirroring tomorrow.domain.minutes_since_wake:
+    // a clock time earlier than wake is "tomorrow, early morning" rather
+    // than "today, very early" (see docs/adr/0003).
+    function toWakeMin(clock, wake) {
+      return (((toMin(clock) - toMin(wake)) % 1440) + 1440) % 1440;
+    }
+
+    function isNextDay(clock, wake) {
+      return toMin(clock) < toMin(wake);
+    }
+
+    function clockLabel(clock, wake) {
+      return clock + (isNextDay(clock, wake) ? " +1" : "");
     }
 
     function fmtDur(minutes) {
@@ -424,8 +440,8 @@
     }
 
     function railRows(session) {
-      const wake = toMin(session.bounds.wake);
-      const sleep = toMin(session.bounds.sleep);
+      const wakeClock = session.bounds.wake;
+      const sleep = toWakeMin(session.bounds.sleep, wakeClock);
       const occupied = (session.anchors || []).map(item => ({
         kind: "anchor",
         id: item.id,
@@ -444,27 +460,27 @@
         end: endClock(item.start, item.duration_minutes),
         checklist: item.checklist,
         source: item.source
-      }))).sort((a, b) => toMin(a.start) - toMin(b.start));
+      }))).sort((a, b) => toWakeMin(a.start, wakeClock) - toWakeMin(b.start, wakeClock));
       const rows = [];
-      let cursor = wake;
+      let cursor = 0;
       for (const item of occupied) {
-        const start = toMin(item.start);
+        const start = toWakeMin(item.start, wakeClock);
         if (start > cursor) {
           rows.push({
             kind: "gap",
-            start: toClock(cursor),
+            start: toClock(toMin(wakeClock) + cursor),
             end: item.start,
             durationMin: start - cursor
           });
         }
         rows.push(item);
-        cursor = Math.max(cursor, toMin(item.end));
+        cursor = Math.max(cursor, toWakeMin(item.end, wakeClock));
       }
       if (sleep > cursor) {
         rows.push({
           kind: "gap",
-          start: toClock(cursor),
-          end: toClock(sleep),
+          start: toClock(toMin(wakeClock) + cursor),
+          end: session.bounds.sleep,
           durationMin: sleep - cursor
         });
       }
@@ -484,15 +500,18 @@
     }
 
     function renderRail(session) {
-      const total = Math.max(1, toMin(session.bounds.sleep) - toMin(session.bounds.wake));
+      const wakeClock = session.bounds.wake;
+      const total = Math.max(1, toWakeMin(session.bounds.sleep, wakeClock));
       document.getElementById("rail").innerHTML = railRows(session).map(row => {
+        const startLabel = clockLabel(row.start, wakeClock);
+        const endLabel = row.end ? clockLabel(row.end, wakeClock) : row.end;
         if (row.kind === "gap") {
           const armed = armedFlexId ? " armed" : "";
           const cta = armedFlexId ? "Place here" : "Place Flex";
           return '<button type="button" class="gap' + armed + '" data-kind="gap" data-start="' +
             esc(row.start) + '" data-end="' + esc(row.end) + '" style="min-height:' +
             heightPx(row.durationMin, total, 40) + 'px">' +
-            '<span class="time-tag">' + esc(row.start) + "</span>" +
+            '<span class="time-tag">' + esc(startLabel) + "</span>" +
             "<span>Gap · " + esc(fmtDur(row.durationMin)) + "</span>" +
             '<span class="cta">' + cta + "</span></button>";
         }
@@ -500,10 +519,10 @@
         const icloudTag = row.source === "icloud" ? '<span class="icloud-tag">📅 iCloud</span>' : "";
         return '<button type="button" class="block ' + row.kind + '" data-kind="' + row.kind +
           '" data-id="' + esc(row.id) + '" style="min-height:' + heightPx(row.durationMin, total, 52) + 'px">' +
-          '<span class="time-tag">' + esc(row.start) + "</span>" +
+          '<span class="time-tag">' + esc(startLabel) + "</span>" +
           '<div class="block-title">' + esc(row.name) + icloudTag + "</div>" +
           (checklistLabel ? '<div class="block-checklist">' + esc(checklistLabel) + "</div>" : "") +
-          '<div class="block-range">' + esc(row.start) + "–" + esc(row.end) +
+          '<div class="block-range">' + esc(startLabel) + "–" + esc(endLabel) +
           " · " + esc(fmtDur(row.durationMin)) + "</div></button>";
       }).join("");
     }
@@ -514,13 +533,13 @@
       if (!unplaced.length) {
         tray.classList.add("empty");
         tray.innerHTML =
-          '<div class="tray-label">Unplaced Flex — Place / Shrink / Drop any time</div>' +
+          '<div class="tray-label">Unplaced Flex — Place / Change Duration / Drop any time</div>' +
           "<div>No unplaced Flex.</div>";
         return;
       }
       tray.classList.remove("empty");
       tray.innerHTML =
-        '<div class="tray-label">Unplaced Flex — Place / Shrink / Drop any time</div>' +
+        '<div class="tray-label">Unplaced Flex — Place / Change Duration / Drop any time</div>' +
         '<div class="tray-chips">' + unplaced.map(item =>
           '<div class="flex-chip' + (armedFlexId === item.id ? " armed" : "") +
           '" data-arm="' + esc(item.id) + '">' +
@@ -529,7 +548,7 @@
           '<div class="ops">' +
           '<button type="button" data-edit-flex="' + esc(item.id) + '">Edit</button>' +
           '<button type="button" data-place="' + esc(item.id) + '">Place</button>' +
-          '<button type="button" data-shrink="' + esc(item.id) + '">Shrink</button>' +
+          '<button type="button" data-change-duration="' + esc(item.id) + '">Change Duration</button>' +
           '<button type="button" data-drop="' + esc(item.id) + '">Drop</button>' +
           "</div></div>"
         ).join("") + "</div>";
@@ -575,7 +594,8 @@
       document.getElementById("weather").innerHTML = weatherBits.join(" · ");
       document.getElementById("blockers").textContent = (session.blockers || []).join(" ");
       document.getElementById("wake-cap").textContent = "↑ " + session.bounds.wake + " wake";
-      document.getElementById("sleep-cap").textContent = session.bounds.sleep + " sleep ↓";
+      document.getElementById("sleep-cap").textContent =
+        clockLabel(session.bounds.sleep, session.bounds.wake) + " sleep ↓";
       renderTemplateOffer(session);
       renderRail(session);
       renderDrafts(session);
@@ -649,7 +669,7 @@
 
     function resolveDurationMinutes(form) {
       if (form.dataset.durationMode === "end") {
-        const diff = toMin(clockValue(form.end)) - toMin(clockValue(form.start));
+        const diff = toWakeMin(clockValue(form.end), clockValue(form.start));
         if (!(diff > 0)) {
           document.getElementById("end-error").hidden = false;
           return null;
@@ -749,13 +769,13 @@
       );
     }
 
-    function sheetShrink(item) {
+    function sheetChangeDuration(item) {
       openSheet(
-        "<h2>Shrink Flex · " + esc(item.name) + "</h2>" +
-        '<form id="shrink-flex" data-id="' + esc(item.id) + '">' +
+        "<h2>Change Duration · " + esc(item.name) + "</h2>" +
+        '<form id="change-duration-flex" data-id="' + esc(item.id) + '">' +
         '<label>New duration (min) <input name="duration_minutes" type="number" min="1" required value="' +
         esc(item.duration_minutes) + '"></label>' +
-        '<div class="actions"><button class="primary" type="submit">Shrink</button>' +
+        '<div class="actions"><button class="primary" type="submit">Change Duration</button>' +
         '<button type="button" class="ghost" data-close>Cancel</button></div></form>'
       );
     }
@@ -788,7 +808,7 @@
         checklistField(item.checklist) +
         '<div class="actions"><button class="primary" type="submit">Update</button>' +
         '<button type="button" class="ghost" data-place="' + esc(item.id) + '">Place</button>' +
-        '<button type="button" class="ghost" data-shrink="' + esc(item.id) + '">Shrink</button>' +
+        '<button type="button" class="ghost" data-change-duration="' + esc(item.id) + '">Change Duration</button>' +
         '<button type="button" class="ghost" data-close>Cancel</button>' +
         '<button type="button" class="danger" data-drop="' + esc(item.id) + '">Drop</button></div></form>'
       );
@@ -918,11 +938,11 @@
         if (item) sheetPlace(item);
         return;
       }
-      const shrinkId = event.target.dataset.shrink;
-      if (shrinkId) {
+      const changeDurationId = event.target.dataset.changeDuration;
+      if (changeDurationId) {
         event.stopPropagation();
-        const item = findFlex(shrinkId);
-        if (item) sheetShrink(item);
+        const item = findFlex(changeDurationId);
+        if (item) sheetChangeDuration(item);
         return;
       }
       const editId = event.target.dataset.editFlex;
@@ -976,11 +996,11 @@
         if (item) sheetPlace(item);
         return;
       }
-      const shrinkId = event.target.dataset.shrink;
-      if (shrinkId) {
+      const changeDurationId = event.target.dataset.changeDuration;
+      if (changeDurationId) {
         event.preventDefault();
-        const item = findFlex(shrinkId);
-        if (item) sheetShrink(item);
+        const item = findFlex(changeDurationId);
+        if (item) sheetChangeDuration(item);
       }
     });
 
@@ -1041,8 +1061,8 @@
         await placeFlexAt(form.dataset.id, clockValue(form.start));
         return;
       }
-      if (form.id === "shrink-flex") {
-        await mutate("/api/shrink", {
+      if (form.id === "change-duration-flex") {
+        await mutate("/api/change-duration", {
           id: form.dataset.id,
           duration_minutes: Number(form.duration_minutes.value)
         });

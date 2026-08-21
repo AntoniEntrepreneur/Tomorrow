@@ -8,6 +8,5 @@
 - Automatic free time blocks for the empty blocks
 - Connection to icloud calendar and including reminders suggetsions for adding
 - When I want to add sleep time past midnight, it weirdly stretches and doesn't work
-- Rename "shrink" to change duration (it can go both ways)
 - Templates for flex activities (i. e. deep work - 90min, morning routine - 70min, etc.)
 - Rendering the plans in a better format - I'm thinking maybe pdf would be better? I'm open to recommendations, maybe we should stay with this.

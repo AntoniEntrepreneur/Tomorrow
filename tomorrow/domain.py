@@ -116,12 +116,20 @@ class FlexDoesNotFitBlocker:
     flex: Flex
 
 
+@dataclass(frozen=True)
+class DegenerateDayBoundsBlocker:
+    """Wake equals sleep, collapsing the day's envelope to zero minutes."""
+
+    bounds: DayBounds
+
+
 Blocker = Union[
     DraftUnfinishedBlocker,
     AnchorOverlapBlocker,
     AnchorOutOfBoundsBlocker,
     FlexUnplacedBlocker,
     FlexDoesNotFitBlocker,
+    DegenerateDayBoundsBlocker,
 ]
 
 
@@ -163,6 +171,23 @@ def minutes_since_midnight(value: time) -> int:
     return value.hour * 60 + value.minute
 
 
+def minutes_since_wake(value: time, *, wake: time) -> int:
+    """Offset in minutes from wake, wrapping past midnight into wake+24h.
+
+    This is the basis for all ordering, overlap, and bounds-checking:
+    a clock time earlier than wake is understood as "tomorrow, early
+    morning" rather than "today, very early" — see docs/adr/0003.
+    """
+
+    return (minutes_since_midnight(value) - minutes_since_midnight(wake)) % 1440
+
+
+def is_next_day(value: time, *, wake: time) -> bool:
+    """Whether `value` falls on the calendar day after `wake`, wake-relative."""
+
+    return minutes_since_midnight(value) < minutes_since_midnight(wake)
+
+
 def minutes_between(start: time, end: time) -> int:
     """Whole minutes from start to end. Raises if end is not after start."""
 
@@ -170,10 +195,6 @@ def minutes_between(start: time, end: time) -> int:
     if duration <= 0:
         raise ValueError("End time must be after start time.")
     return duration
-
-
-def _bound_minutes(value: str) -> int:
-    return minutes_since_midnight(parse_clock(value))
 
 
 def _occupied_minutes(duration: timedelta) -> int:
@@ -189,24 +210,24 @@ def compute_gaps(*, bounds: DayBounds, anchors: Sequence[Anchor]) -> tuple[Gap, 
 
     wake = parse_clock(bounds.wake)
     sleep = parse_clock(bounds.sleep)
-    ordered = sorted(anchors, key=lambda anchor: minutes_since_midnight(anchor.start))
+    ordered = sorted(anchors, key=lambda anchor: minutes_since_wake(anchor.start, wake=wake))
 
     gaps: list[Gap] = []
     cursor = wake
     for anchor in ordered:
-        if minutes_since_midnight(anchor.start) > minutes_since_midnight(cursor):
+        if minutes_since_wake(anchor.start, wake=wake) > minutes_since_wake(cursor, wake=wake):
             gaps.append(Gap(start=cursor, end=anchor.start))
         cursor = anchor.end
-    if minutes_since_midnight(sleep) > minutes_since_midnight(cursor):
+    if minutes_since_wake(sleep, wake=wake) > minutes_since_wake(cursor, wake=wake):
         gaps.append(Gap(start=cursor, end=sleep))
     return tuple(gaps)
 
 
-def _find_gap_for_start(gaps: Sequence[Gap], start: time) -> Gap | None:
-    start_minutes = minutes_since_midnight(start)
+def _find_gap_for_start(gaps: Sequence[Gap], start: time, *, wake: time) -> Gap | None:
+    start_minutes = minutes_since_wake(start, wake=wake)
     for gap in gaps:
-        gap_start = minutes_since_midnight(gap.start)
-        gap_end = minutes_since_midnight(gap.end)
+        gap_start = minutes_since_wake(gap.start, wake=wake)
+        gap_end = minutes_since_wake(gap.end, wake=wake)
         if gap_start <= start_minutes < gap_end:
             return gap
     return None
@@ -224,24 +245,25 @@ def validate_flex_placement(
     gaps: Sequence[Gap],
     anchors: Sequence[Anchor],
     other_flexes: Sequence[Flex],
+    wake: time,
 ) -> bool:
     """Return True when a placed Flex fits its Gap and does not overlap."""
 
     if flex.start is None or flex.end is None:
         return False
 
-    gap = _find_gap_for_start(gaps, flex.start)
+    gap = _find_gap_for_start(gaps, flex.start, wake=wake)
     if gap is None:
         return False
 
-    start_minutes = minutes_since_midnight(flex.start)
+    start_minutes = minutes_since_wake(flex.start, wake=wake)
     end_minutes = start_minutes + _occupied_minutes(flex.duration)
-    gap_end_minutes = minutes_since_midnight(gap.end)
+    gap_end_minutes = minutes_since_wake(gap.end, wake=wake)
     if end_minutes > gap_end_minutes:
         return False
 
     for anchor in anchors:
-        anchor_start = minutes_since_midnight(anchor.start)
+        anchor_start = minutes_since_wake(anchor.start, wake=wake)
         anchor_end = anchor_start + _anchor_occupied_minutes(anchor)
         if start_minutes < anchor_end and end_minutes > anchor_start:
             return False
@@ -249,7 +271,7 @@ def validate_flex_placement(
     for other in other_flexes:
         if other.start is None or other.end is None:
             continue
-        other_start = minutes_since_midnight(other.start)
+        other_start = minutes_since_wake(other.start, wake=wake)
         other_end = other_start + _occupied_minutes(other.duration)
         if start_minutes < other_end and end_minutes > other_start:
             return False
@@ -271,24 +293,29 @@ def finalize_plan(
     """
     blockers: list[Blocker] = [DraftUnfinishedBlocker(draft=draft) for draft in drafts]
 
-    wake_minutes = _bound_minutes(bounds.wake)
-    sleep_minutes = _bound_minutes(bounds.sleep)
+    wake = parse_clock(bounds.wake)
+    sleep = parse_clock(bounds.sleep)
+
+    if wake == sleep:
+        blockers.append(DegenerateDayBoundsBlocker(bounds=bounds))
+
+    sleep_minutes = minutes_since_wake(sleep, wake=wake)
 
     ordered_anchors = tuple(
-        sorted(anchors, key=lambda anchor: minutes_since_midnight(anchor.start))
+        sorted(anchors, key=lambda anchor: minutes_since_wake(anchor.start, wake=wake))
     )
 
     for anchor in ordered_anchors:
-        start_minutes = minutes_since_midnight(anchor.start)
+        start_minutes = minutes_since_wake(anchor.start, wake=wake)
         end_minutes = start_minutes + _anchor_occupied_minutes(anchor)
-        if start_minutes < wake_minutes or end_minutes > sleep_minutes:
+        if end_minutes > sleep_minutes:
             blockers.append(AnchorOutOfBoundsBlocker(anchor=anchor))
 
     for first, second in zip(ordered_anchors, ordered_anchors[1:]):
-        first_end_minutes = minutes_since_midnight(first.start) + _anchor_occupied_minutes(
-            first
-        )
-        second_start_minutes = minutes_since_midnight(second.start)
+        first_end_minutes = minutes_since_wake(
+            first.start, wake=wake
+        ) + _anchor_occupied_minutes(first)
+        second_start_minutes = minutes_since_wake(second.start, wake=wake)
         if second_start_minutes < first_end_minutes:
             blockers.append(AnchorOverlapBlocker(first=first, second=second))
 
@@ -300,7 +327,11 @@ def finalize_plan(
             blockers.append(FlexUnplacedBlocker(flex=flex))
             continue
         if not validate_flex_placement(
-            flex, gaps=gaps, anchors=ordered_anchors, other_flexes=placed_flexes
+            flex,
+            gaps=gaps,
+            anchors=ordered_anchors,
+            other_flexes=placed_flexes,
+            wake=wake,
         ):
             blockers.append(FlexDoesNotFitBlocker(flex=flex))
             continue
@@ -310,7 +341,7 @@ def finalize_plan(
         return FinalizeResult(plan=None, blockers=tuple(blockers))
 
     ordered_flexes = tuple(
-        sorted(placed_flexes, key=lambda flex: minutes_since_midnight(flex.start))
+        sorted(placed_flexes, key=lambda flex: minutes_since_wake(flex.start, wake=wake))
     )
     return FinalizeResult(
         plan=FinalizedPlan(bounds=bounds, anchors=ordered_anchors, flexes=ordered_flexes),
@@ -337,6 +368,10 @@ def describe_blocker(blocker: Blocker) -> str:
         )
     if isinstance(blocker, FlexUnplacedBlocker):
         return f"Flex '{blocker.flex.name}' is not yet placed in a Gap."
+    if isinstance(blocker, DegenerateDayBoundsBlocker):
+        return (
+            f"Wake and sleep are both {blocker.bounds.wake}, leaving a zero-length day."
+        )
     return (
         f"Flex '{blocker.flex.name}' "
         f"({blocker.flex.start:%H:%M}\u2013{blocker.flex.end:%H:%M}) "

@@ -35,7 +35,7 @@ from tomorrow.session import (
     promote_draft,
     reset_session,
     session_view,
-    shrink_flex,
+    change_flex_duration,
     submit_session,
     redo_session,
     undo_session,
@@ -745,6 +745,57 @@ def test_gaps_update_when_bounds_change(tmp_path: Path) -> None:
     ]
 
 
+def test_gaps_span_midnight_when_sleep_is_before_wake(tmp_path: Path) -> None:
+    _write_defaults(tmp_path)
+    now = datetime(2026, 8, 10, 22, 0)
+    edit_bounds(tmp_path, wake="07:00", sleep="01:00", now=now)
+
+    view = add_anchor(
+        tmp_path, name="Dinner", start="19:00", duration_minutes=60, now=now
+    )
+
+    assert view["bounds"] == {
+        "wake": "07:00",
+        "sleep": "01:00",
+        "sleep_is_next_day": True,
+    }
+    assert view["gaps"] == [
+        {"start": "07:00", "end": "19:00", "duration_minutes": 720},
+        {
+            "start": "20:00",
+            "end": "01:00",
+            "duration_minutes": 300,
+            "end_is_next_day": True,
+        },
+    ]
+
+
+def test_flex_placed_in_gap_after_midnight_is_not_a_blocker(tmp_path: Path) -> None:
+    _write_defaults(tmp_path)
+    now = datetime(2026, 8, 10, 22, 0)
+    edit_bounds(tmp_path, wake="07:00", sleep="01:00", now=now)
+    added = add_flex(tmp_path, name="Read", duration_minutes=30, now=now)
+    flex_id = added["flexes"][0]["id"]
+
+    view = place_flex(tmp_path, item_id=flex_id, start="00:15", now=now)
+
+    assert view["blockers"] == []
+
+
+def test_submit_blocks_when_wake_equals_sleep(tmp_path: Path) -> None:
+    _write_defaults(tmp_path)
+    now = datetime(2026, 8, 10, 22, 0)
+    edit_bounds(tmp_path, wake="07:00", sleep="07:00", now=now)
+
+    view = edit_bounds(tmp_path, sleep="07:00", now=now)
+
+    assert view["blockers"] == [
+        "Wake and sleep are both 07:00, leaving a zero-length day."
+    ]
+    with pytest.raises(PlanBlockedError):
+        submit_session(tmp_path, now=now)
+
+
 def test_anchor_outside_new_bounds_is_a_live_blocker(tmp_path: Path) -> None:
     _write_defaults(tmp_path)
     now = datetime(2026, 8, 10, 22, 0)
@@ -894,7 +945,7 @@ def test_placed_flex_that_does_not_fit_is_a_live_blocker(tmp_path: Path) -> None
     assert view["blockers"]
 
 
-def test_shrinking_flex_flushes_and_can_clear_a_does_not_fit_blocker(
+def test_changing_duration_flushes_and_can_clear_a_does_not_fit_blocker(
     tmp_path: Path,
 ) -> None:
     _write_defaults(tmp_path)
@@ -903,7 +954,7 @@ def test_shrinking_flex_flushes_and_can_clear_a_does_not_fit_blocker(
     item_id = added["flexes"][0]["id"]
     place_flex(tmp_path, item_id=item_id, start="22:00", now=now)
 
-    view = shrink_flex(tmp_path, item_id=item_id, duration_minutes=45, now=now)
+    view = change_flex_duration(tmp_path, item_id=item_id, duration_minutes=45, now=now)
     document = json.loads(
         (tmp_path / "data" / "session.json").read_text(encoding="utf-8")
     )
@@ -914,13 +965,13 @@ def test_shrinking_flex_flushes_and_can_clear_a_does_not_fit_blocker(
     assert view["blockers"] == []
 
 
-def test_shrinking_unplaced_flex_leaves_it_unplaced(tmp_path: Path) -> None:
+def test_changing_duration_unplaced_flex_leaves_it_unplaced(tmp_path: Path) -> None:
     _write_defaults(tmp_path)
     now = datetime(2026, 8, 10, 22, 0)
     added = add_flex(tmp_path, name="Walk", duration_minutes=45, now=now)
     item_id = added["flexes"][0]["id"]
 
-    view = shrink_flex(tmp_path, item_id=item_id, duration_minutes=20, now=now)
+    view = change_flex_duration(tmp_path, item_id=item_id, duration_minutes=20, now=now)
     document = json.loads(
         (tmp_path / "data" / "session.json").read_text(encoding="utf-8")
     )
@@ -1838,7 +1889,7 @@ def test_undo_of_template_apply_is_one_step(tmp_path: Path) -> None:
     assert view["can_redo"] is True
 
 
-def test_undo_restores_edits_drop_place_shrink_and_promote(
+def test_undo_restores_edits_drop_place_change_duration_and_promote(
     tmp_path: Path,
 ) -> None:
     _write_defaults(tmp_path)
@@ -1862,7 +1913,7 @@ def test_undo_restores_edits_drop_place_shrink_and_promote(
     undo_session(tmp_path, now=now)
     assert session_view(tmp_path, now=now)["flexes"][0]["start"] is None
 
-    shrink_flex(tmp_path, item_id=flex_id, duration_minutes=10, now=now)
+    change_flex_duration(tmp_path, item_id=flex_id, duration_minutes=10, now=now)
     undo_session(tmp_path, now=now)
     assert session_view(tmp_path, now=now)["flexes"][0]["duration_minutes"] == 30
 
