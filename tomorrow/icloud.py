@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 from datetime import date, datetime, time, timedelta
 from pathlib import Path
 from typing import Callable
+import threading
 import tomllib
 
 from tomorrow.domain import Anchor
@@ -94,6 +95,9 @@ def classify_icloud_items(
     plan_date: date,
     config: IcloudConfig,
 ) -> ClassifiedIcloudItems:
+    # `events` is already scoped to occurrences starting on `plan_date` by the
+    # fetch wrapper's date-bounded predicate, so a recurring event's other
+    # occurrences never reach this function.
     anchors: list[ImportedItem] = []
     drafts: list[ImportedItem] = []
     placed_anchors = list(existing_anchors)
@@ -134,6 +138,10 @@ def classify_icloud_items(
     return ClassifiedIcloudItems(anchors=anchors, drafts=drafts)
 
 
+def _calendars_of_type(store: object, entity_type: object) -> list:
+    return list(store.calendarsForEntityType_(entity_type))
+
+
 def _fetch_from_eventkit(config: IcloudConfig, plan_date: date) -> tuple[list[RawEvent], list[RawReminder]]:
     """Talk to macOS EventKit for the given Plan date. Not itself under test."""
 
@@ -147,12 +155,12 @@ def _fetch_from_eventkit(config: IcloudConfig, plan_date: date) -> tuple[list[Ra
 
     calendars = [
         calendar
-        for calendar in store.calendarsForEntityType_(EKEntityTypeEvent)
+        for calendar in _calendars_of_type(store, EKEntityTypeEvent)
         if calendar.title() in config.calendars
     ]
     reminder_calendars = [
         calendar
-        for calendar in store.calendarsForEntityType_(EKEntityTypeReminder)
+        for calendar in _calendars_of_type(store, EKEntityTypeReminder)
         if calendar.title() in config.reminder_lists
     ]
 
@@ -176,7 +184,7 @@ def _fetch_from_eventkit(config: IcloudConfig, plan_date: date) -> tuple[list[Ra
     reminders: list[RawReminder] = []
     if reminder_calendars:
         reminder_predicate = store.predicateForRemindersInCalendars_(reminder_calendars)
-        completion_event = __import__("threading").Event()
+        completion_event = threading.Event()
 
         def _handle(ek_reminders: object) -> None:
             for ek_reminder in ek_reminders or []:
@@ -239,12 +247,11 @@ def list_available_calendars(
 
         store = EKEventStore.alloc().init()
         calendars = sorted(
-            str(calendar.title())
-            for calendar in store.calendarsForEntityType_(EKEntityTypeEvent)
+            str(calendar.title()) for calendar in _calendars_of_type(store, EKEntityTypeEvent)
         )
         reminder_lists = sorted(
             str(calendar.title())
-            for calendar in store.calendarsForEntityType_(EKEntityTypeReminder)
+            for calendar in _calendars_of_type(store, EKEntityTypeReminder)
         )
         return calendars, reminder_lists
     except Exception:

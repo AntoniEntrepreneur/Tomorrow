@@ -163,6 +163,9 @@ def test_dropped_icloud_draft_does_not_return_after_undo_or_reset(
 
     redone = redo_session(tmp_path, now=datetime(2026, 8, 10, 22, 0))
     assert redone["drafts"] == []
+
+    reset = reset_session(tmp_path, now=datetime(2026, 8, 10, 22, 0))
+    assert reset["drafts"] == []
     assert call_count == 1
 
 
