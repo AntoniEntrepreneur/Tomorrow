@@ -23,11 +23,6 @@ def day_templates_dir(data_dir: Path) -> Path:
     return data_dir / "templates"
 
 
-# Backward-compatible alias for the old weekday-only entry point.
-def weekday_template_path(data_dir: Path, plan_date: date) -> Path:
-    return day_template_path(data_dir, plan_date)
-
-
 def day_template_path(data_dir: Path, plan_date: date) -> Path:
     weekday = plan_date.strftime("%A").lower()
     return day_templates_dir(data_dir) / f"{weekday}.toml"
@@ -59,11 +54,14 @@ def named_day_template_path(data_dir: Path, template_id: str) -> Path:
     return day_templates_dir(data_dir) / f"{template_id}.toml"
 
 
-def load_weekday_template(
-    path: Path,
-    activity_library: dict[str, ActivityTemplate] | None = None,
-) -> TemplateSeed | None:
-    return load_day_template(path, activity_library)
+def load_day_template_name(path: Path) -> str:
+    """Return the Day Template's `name` field, falling back to the filename stem."""
+
+    if not path.exists():
+        return path.stem
+    data = tomllib.loads(path.read_text(encoding="utf-8"))
+    name = data.get("name")
+    return str(name) if name is not None else path.stem
 
 
 def load_day_template(

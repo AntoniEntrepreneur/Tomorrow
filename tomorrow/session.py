@@ -34,6 +34,7 @@ from tomorrow.domain import (
 from tomorrow.day_templates import (
     default_day_template_path,
     load_day_template,
+    load_day_template_name,
     named_day_template_path,
 )
 from tomorrow.library import (
@@ -839,7 +840,8 @@ class SessionHandler(BaseHTTPRequestHandler):
                 ).items()
             ],
             "day_templates": [
-                {"id": path.stem, "name": path.stem} for path in day_templates
+                {"id": path.stem, "name": load_day_template_name(path)}
+                for path in day_templates
             ],
         }
 

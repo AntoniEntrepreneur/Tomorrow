@@ -8,6 +8,7 @@ from tomorrow.day_templates import (
     day_template_path,
     default_day_template_path,
     load_day_template,
+    load_day_template_name,
 )
 
 
@@ -130,6 +131,34 @@ duration = 30
         anchors=(),
         flexes=(Flex(name="Sauna", duration=timedelta(minutes=30)),),
     )
+
+
+def test_load_day_template_name_reads_name_field(tmp_path: Path) -> None:
+    template_file = tmp_path / "usual-tuesday.toml"
+    template_file.write_text('name = "Usual Tuesday"\n', encoding="utf-8")
+
+    assert load_day_template_name(template_file) == "Usual Tuesday"
+
+
+def test_load_day_template_name_falls_back_to_filename_stem(tmp_path: Path) -> None:
+    template_file = tmp_path / "tuesday.toml"
+    template_file.write_text(
+        """
+[[anchor]]
+name = "Standup"
+start = "07:00"
+duration = 15
+""".strip(),
+        encoding="utf-8",
+    )
+
+    assert load_day_template_name(template_file) == "tuesday"
+
+
+def test_load_day_template_name_falls_back_to_stem_when_file_missing(
+    tmp_path: Path,
+) -> None:
+    assert load_day_template_name(tmp_path / "missing.toml") == "missing"
 
 
 def test_default_day_template_path_falls_back_to_legacy_weekday_filename(
