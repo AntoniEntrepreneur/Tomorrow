@@ -11,6 +11,9 @@ from tomorrow.domain import Anchor
 
 ICLOUD_SOURCE = "icloud"
 
+# A reminder carries no duration, so a timed one is anchored at this length.
+REMINDER_ANCHOR_MINUTES = 30
+
 
 @dataclass(frozen=True)
 class IcloudConfig:
@@ -36,6 +39,8 @@ class RawReminder:
     title: str
     list_name: str
     due_date: date | None
+    due_time: time | None = None
+    completed: bool = False
 
 
 @dataclass(frozen=True)
@@ -129,13 +134,53 @@ def classify_icloud_items(
     for reminder in reminders:
         if reminder.list_name not in config.reminder_lists:
             continue
+        if reminder.completed:
+            continue
         if reminder.due_date is None:
             continue
         if reminder.due_date != plan_date:
             continue
-        drafts.append(ImportedItem(name=reminder.title))
+        # A reminder scheduled at a time of day is an Anchor, the same as a
+        # timed event; a date-only reminder has no place to sit, so it is a
+        # Draft. A timed reminder that collides with something already placed
+        # falls back to a Draft, again matching how events are handled.
+        if reminder.due_time is None:
+            drafts.append(ImportedItem(name=reminder.title))
+            continue
+        end_time = _anchor_end(reminder.due_time, REMINDER_ANCHOR_MINUTES)
+        if _overlaps_any(reminder.due_time, end_time, placed_anchors):
+            drafts.append(ImportedItem(name=reminder.title))
+            continue
+        anchors.append(
+            ImportedItem(
+                name=reminder.title,
+                start=reminder.due_time,
+                duration_minutes=REMINDER_ANCHOR_MINUTES,
+            )
+        )
+        placed_anchors.append(
+            Anchor(
+                name=reminder.title,
+                start=reminder.due_time,
+                duration=timedelta(minutes=REMINDER_ANCHOR_MINUTES),
+            )
+        )
 
     return ClassifiedIcloudItems(anchors=anchors, drafts=drafts)
+
+
+def _components_time(components: object) -> time | None:
+    """Read hour/minute off NSDateComponents, or None for a date-only reminder.
+
+    Unset components come back as NSNotFound (a huge sentinel, not 0), so the
+    values have to be range-checked rather than truth-tested.
+    """
+
+    hour = components.hour()
+    minute = components.minute()
+    if not (0 <= hour <= 23) or not (0 <= minute <= 59):
+        return None
+    return time(hour, minute)
 
 
 def _calendars_of_type(store: object, entity_type: object) -> list:
@@ -211,13 +256,17 @@ def _fetch_from_eventkit(config: IcloudConfig, plan_date: date) -> tuple[list[Ra
             for ek_reminder in ek_reminders or []:
                 due = ek_reminder.dueDateComponents()
                 due_date = None
+                due_time = None
                 if due is not None and due.year() and due.month() and due.day():
                     due_date = date(due.year(), due.month(), due.day())
+                    due_time = _components_time(due)
                 reminders.append(
                     RawReminder(
                         title=str(ek_reminder.title()),
                         list_name=str(ek_reminder.calendar().title()),
                         due_date=due_date,
+                        due_time=due_time,
+                        completed=bool(ek_reminder.isCompleted()),
                     )
                 )
             completion_event.set()

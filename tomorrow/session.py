@@ -79,27 +79,73 @@ def _blank_session(repo_root: Path, *, now: datetime | None = None) -> dict:
         "anchors": [],
         "flexes": [],
         "undo": {"past": [], "future": []},
+        "icloud_seen": [],
     }
 
 
-def _seed_icloud_items(repo_root: Path, document: dict) -> None:
+def _icloud_key(kind: str, item) -> str:
+    """Stable identity for an imported item, so a re-import never duplicates it."""
+    start = item.start.strftime("%H:%M") if item.start is not None else ""
+    return f"{kind}|{item.name}|{start}"
+
+
+def _seed_icloud_items(repo_root: Path, document: dict) -> bool:
+    """Import iCloud items into `document`, skipping anything imported before.
+
+    Returns True if anything was added. The `icloud_seen` ledger is what keeps a
+    re-import from resurrecting an item the user has since deleted.
+    """
+
     plan_date = date.fromisoformat(document["plan_date"])
-    imported = try_import_icloud_items(repo_root / "data", plan_date, existing_anchors=[])
-    document["anchors"].extend(
-        {
-            "id": uuid.uuid4().hex,
-            "name": item.name,
-            "start": item.start.strftime("%H:%M"),
-            "duration_minutes": item.duration_minutes,
-            "checklist": None,
-            "source": item.source,
-        }
-        for item in imported.anchors
+    existing_anchors = _unpack(document)[2]
+    imported = try_import_icloud_items(
+        repo_root / "data", plan_date, existing_anchors=existing_anchors
     )
-    document["drafts"].extend(
-        {"id": uuid.uuid4().hex, "name": item.name, "source": item.source}
-        for item in imported.drafts
-    )
+    seen = set(document.get("icloud_seen", []))
+    added = False
+
+    for item in imported.anchors:
+        key = _icloud_key("anchor", item)
+        if key in seen:
+            continue
+        seen.add(key)
+        document["anchors"].append(
+            {
+                "id": uuid.uuid4().hex,
+                "name": item.name,
+                "start": item.start.strftime("%H:%M"),
+                "duration_minutes": item.duration_minutes,
+                "checklist": None,
+                "source": item.source,
+            }
+        )
+        added = True
+
+    for item in imported.drafts:
+        key = _icloud_key("draft", item)
+        if key in seen:
+            continue
+        seen.add(key)
+        document["drafts"].append(
+            {"id": uuid.uuid4().hex, "name": item.name, "source": item.source}
+        )
+        added = True
+
+    document["icloud_seen"] = sorted(seen)
+    return added
+
+
+def refresh_icloud_items(repo_root: Path, *, now: datetime | None = None) -> dict:
+    """Re-run the iCloud import against the stored Session and persist new items.
+
+    Called once per process at startup, so events and reminders added to iCloud
+    since the Session was created show up on the next restart.
+    """
+
+    document = load_session(repo_root, now=now)
+    if _seed_icloud_items(repo_root, document):
+        save_session(repo_root, document)
+    return document
 
 
 def _new_session_document(repo_root: Path, *, now: datetime | None = None) -> dict:
@@ -1238,7 +1284,7 @@ def run_session(
             raise
         print(f"Port {SESSION_PORT} is already in use.")
         return
-    document = load_session(repo_root, now=now)
+    document = refresh_icloud_items(repo_root, now=now)
     plan_date = date.fromisoformat(document["plan_date"])
     print(f"Plan date: {format_plan_date(plan_date)}")
     print(SESSION_URL)

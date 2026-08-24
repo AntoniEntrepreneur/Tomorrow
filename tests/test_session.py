@@ -103,6 +103,7 @@ def test_missing_session_file_opens_as_blank_session(tmp_path: Path) -> None:
         "anchors": [],
         "flexes": [],
         "undo": {"past": [], "future": []},
+        "icloud_seen": [],
     }
     assert not (tmp_path / "data" / "session.json").exists()
 
@@ -232,6 +233,7 @@ def test_rolled_plan_date_replaces_session_with_blank_and_empty_undo(
         "anchors": [],
         "flexes": [],
         "undo": {"past": [], "future": []},
+        "icloud_seen": [],
     }
     assert document == blank
     assert flushed == blank
@@ -2125,3 +2127,59 @@ def test_suggest_activity_returns_none_when_nothing_matches(tmp_path: Path) -> N
     _write_defaults(tmp_path)
 
     assert suggest_activity(tmp_path, "Nothing here") is None
+
+
+def test_refresh_icloud_items_adds_new_items_to_an_existing_session(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A restart picks up items added to iCloud after the Session was created."""
+    from tomorrow.icloud import ClassifiedIcloudItems, ImportedItem
+    from tomorrow.session import refresh_icloud_items
+
+    _write_defaults(tmp_path)
+    batches = [
+        ClassifiedIcloudItems(drafts=[ImportedItem(name="Call dentist")]),
+        ClassifiedIcloudItems(
+            drafts=[ImportedItem(name="Call dentist"), ImportedItem(name="Wash bedsheets")]
+        ),
+    ]
+
+    def fake_import(data_dir, plan_date, *, existing_anchors):
+        return batches[min(len(seen), len(batches) - 1)]
+
+    seen: list[int] = []
+    monkeypatch.setattr("tomorrow.session.try_import_icloud_items", fake_import)
+
+    now = datetime(2026, 8, 10, 22, 0)
+    load_session(tmp_path, now=now)
+    seen.append(1)
+
+    document = refresh_icloud_items(tmp_path, now=now)
+
+    assert [draft["name"] for draft in document["drafts"]] == [
+        "Call dentist",
+        "Wash bedsheets",
+    ]
+
+
+def test_refresh_icloud_items_does_not_resurrect_a_deleted_item(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from tomorrow.icloud import ClassifiedIcloudItems, ImportedItem
+    from tomorrow.session import refresh_icloud_items, save_session
+
+    _write_defaults(tmp_path)
+
+    def fake_import(data_dir, plan_date, *, existing_anchors):
+        return ClassifiedIcloudItems(drafts=[ImportedItem(name="Call dentist")])
+
+    monkeypatch.setattr("tomorrow.session.try_import_icloud_items", fake_import)
+
+    now = datetime(2026, 8, 10, 22, 0)
+    document = load_session(tmp_path, now=now)
+    document["drafts"] = []
+    save_session(tmp_path, document)
+
+    refreshed = refresh_icloud_items(tmp_path, now=now)
+
+    assert refreshed["drafts"] == []

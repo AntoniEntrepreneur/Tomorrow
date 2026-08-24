@@ -6,6 +6,7 @@ from tomorrow.icloud import (
     ClassifiedIcloudItems,
     IcloudConfig,
     RawEvent,
+    REMINDER_ANCHOR_MINUTES,
     RawReminder,
     classify_icloud_items,
     load_icloud_config,
@@ -256,3 +257,71 @@ def test_try_import_icloud_items_fetches_and_classifies(tmp_path: Path) -> None:
 
     assert len(result.anchors) == 1
     assert result.anchors[0].name == "Standup"
+
+
+def test_completed_reminders_are_not_imported() -> None:
+    config = IcloudConfig(calendars=(), reminder_lists=("Reminders",))
+    result = classify_icloud_items(
+        existing_anchors=[],
+        events=[],
+        reminders=[
+            RawReminder(
+                title="Wash bedsheets",
+                list_name="Reminders",
+                due_date=date(2026, 8, 25),
+                completed=True,
+            ),
+            RawReminder(
+                title="Fryzjer",
+                list_name="Reminders",
+                due_date=date(2026, 8, 25),
+            ),
+        ],
+        plan_date=date(2026, 8, 25),
+        config=config,
+    )
+    assert [item.name for item in result.drafts] == ["Fryzjer"]
+
+
+def test_reminder_with_a_due_time_becomes_an_anchor() -> None:
+    config = IcloudConfig(calendars=(), reminder_lists=("Reminders",))
+    result = classify_icloud_items(
+        existing_anchors=[],
+        events=[],
+        reminders=[
+            RawReminder(
+                title="Fryzjer",
+                list_name="Reminders",
+                due_date=date(2026, 8, 25),
+                due_time=time(18, 0),
+            )
+        ],
+        plan_date=date(2026, 8, 25),
+        config=config,
+    )
+    assert result.drafts == []
+    assert [(a.name, a.start, a.duration_minutes) for a in result.anchors] == [
+        ("Fryzjer", time(18, 0), REMINDER_ANCHOR_MINUTES)
+    ]
+
+
+def test_timed_reminder_overlapping_an_anchor_falls_back_to_a_draft() -> None:
+    config = IcloudConfig(calendars=(), reminder_lists=("Reminders",))
+    result = classify_icloud_items(
+        existing_anchors=[
+            Anchor(name="Dinner", start=time(18, 0), duration=timedelta(minutes=60))
+        ],
+        events=[],
+        reminders=[
+            RawReminder(
+                title="Fryzjer",
+                list_name="Reminders",
+                due_date=date(2026, 8, 25),
+                due_time=time(18, 15),
+            )
+        ],
+        plan_date=date(2026, 8, 25),
+        config=config,
+    )
+    assert result.anchors == []
+    assert [item.name for item in result.drafts] == ["Fryzjer"]
