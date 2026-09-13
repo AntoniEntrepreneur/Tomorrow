@@ -32,6 +32,7 @@ from tomorrow.session import (
     edit_bounds,
     edit_todo,
     drop_draft,
+    edit_draft,
     edit_flex,
     drop_flex,
     insert_activity_template,
@@ -1282,6 +1283,271 @@ def test_promoting_a_draft_to_flex_mints_a_new_id_and_stays_unplaced(
     assert view["blockers"]
 
 
+def test_editing_a_draft_renames_it_and_flushes(tmp_path: Path) -> None:
+    _write_defaults(tmp_path)
+    now = datetime(2026, 8, 10, 22, 0)
+    added = add_draft(tmp_path, name="Call dentist", now=now)
+    draft_id = added["drafts"][0]["id"]
+
+    view = edit_draft(tmp_path, item_id=draft_id, name="Call dentist re: crown", now=now)
+    document = json.loads(
+        (tmp_path / "data" / "session.json").read_text(encoding="utf-8")
+    )
+
+    assert view["drafts"][0]["name"] == "Call dentist re: crown"
+    assert document["drafts"][0]["name"] == "Call dentist re: crown"
+    assert document["drafts"][0]["id"] == draft_id
+
+
+def test_editing_a_draft_trims_whitespace(tmp_path: Path) -> None:
+    _write_defaults(tmp_path)
+    now = datetime(2026, 8, 10, 22, 0)
+    added = add_draft(tmp_path, name="Call dentist", now=now)
+    draft_id = added["drafts"][0]["id"]
+
+    view = edit_draft(tmp_path, item_id=draft_id, name="  Trimmed  ", now=now)
+
+    assert view["drafts"][0]["name"] == "Trimmed"
+
+
+def test_editing_a_draft_to_blank_name_is_rejected_without_mutating(
+    tmp_path: Path,
+) -> None:
+    _write_defaults(tmp_path)
+    now = datetime(2026, 8, 10, 22, 0)
+    added = add_draft(tmp_path, name="Call dentist", now=now)
+    draft_id = added["drafts"][0]["id"]
+    before = json.loads(
+        (tmp_path / "data" / "session.json").read_text(encoding="utf-8")
+    )
+
+    with pytest.raises(ValueError):
+        edit_draft(tmp_path, item_id=draft_id, name="   ", now=now)
+
+    document = json.loads(
+        (tmp_path / "data" / "session.json").read_text(encoding="utf-8")
+    )
+    assert document["drafts"][0]["name"] == "Call dentist"
+    assert len(document["undo"]["past"]) == len(before["undo"]["past"])
+
+
+def test_editing_an_unknown_draft_raises_key_error(tmp_path: Path) -> None:
+    _write_defaults(tmp_path)
+    now = datetime(2026, 8, 10, 22, 0)
+    add_draft(tmp_path, name="Call dentist", now=now)
+
+    with pytest.raises(KeyError):
+        edit_draft(tmp_path, item_id="missing", name="New name", now=now)
+
+
+def test_editing_an_unknown_draft_with_a_blank_name_still_raises_key_error(
+    tmp_path: Path,
+) -> None:
+    _write_defaults(tmp_path)
+    now = datetime(2026, 8, 10, 22, 0)
+    add_draft(tmp_path, name="Call dentist", now=now)
+
+    with pytest.raises(KeyError):
+        edit_draft(tmp_path, item_id="missing", name="   ", now=now)
+
+
+def test_undo_and_redo_revert_and_reapply_a_draft_rename(tmp_path: Path) -> None:
+    _write_defaults(tmp_path)
+    now = datetime(2026, 8, 10, 22, 0)
+    added = add_draft(tmp_path, name="Call dentist", now=now)
+    draft_id = added["drafts"][0]["id"]
+    edit_draft(tmp_path, item_id=draft_id, name="Call dentist re: crown", now=now)
+
+    undone = undo_session(tmp_path, now=now)
+    assert undone["drafts"][0]["name"] == "Call dentist"
+
+    redone = redo_session(tmp_path, now=now)
+    assert redone["drafts"][0]["name"] == "Call dentist re: crown"
+
+
+def test_promoting_a_draft_with_a_new_name_carries_the_new_name(
+    tmp_path: Path,
+) -> None:
+    _write_defaults(tmp_path)
+    now = datetime(2026, 8, 10, 22, 0)
+    added = add_draft(tmp_path, name="Call dentist", now=now)
+    draft_id = added["drafts"][0]["id"]
+
+    view = promote_draft(
+        tmp_path,
+        item_id=draft_id,
+        kind="anchor",
+        start="09:00",
+        duration_minutes=30,
+        name="Call dentist re: crown",
+        now=now,
+    )
+
+    assert view["anchors"][0]["name"] == "Call dentist re: crown"
+
+
+def test_promoting_a_draft_with_a_blank_new_name_is_rejected_without_mutating(
+    tmp_path: Path,
+) -> None:
+    _write_defaults(tmp_path)
+    now = datetime(2026, 8, 10, 22, 0)
+    added = add_draft(tmp_path, name="Call dentist", now=now)
+    draft_id = added["drafts"][0]["id"]
+
+    with pytest.raises(ValueError):
+        promote_draft(
+            tmp_path,
+            item_id=draft_id,
+            kind="anchor",
+            start="09:00",
+            duration_minutes=30,
+            name="   ",
+            now=now,
+        )
+
+    document = json.loads(
+        (tmp_path / "data" / "session.json").read_text(encoding="utf-8")
+    )
+    assert document["drafts"][0]["name"] == "Call dentist"
+    assert document["anchors"] == []
+
+
+def test_promoting_an_icloud_draft_carries_its_source(tmp_path: Path) -> None:
+    from tomorrow.icloud import ClassifiedIcloudItems, ImportedItem
+
+    _write_defaults(tmp_path)
+    now = datetime(2026, 8, 10, 22, 0)
+    monkeypatch = pytest.MonkeyPatch()
+    try:
+        monkeypatch.setattr(
+            "tomorrow.session.try_import_icloud_items",
+            lambda data_dir, plan_date, *, existing_anchors: ClassifiedIcloudItems(
+                drafts=[ImportedItem(name="Call dentist")]
+            ),
+        )
+        seeded = load_session(tmp_path, now=now)
+    finally:
+        monkeypatch.undo()
+
+    draft_id = seeded["drafts"][0]["id"]
+    view = promote_draft(
+        tmp_path,
+        item_id=draft_id,
+        kind="anchor",
+        start="09:00",
+        duration_minutes=30,
+        name="Dentist re: crown",
+        now=now,
+    )
+
+    assert view["anchors"][0]["source"] == "icloud"
+    assert view["anchors"][0]["name"] == "Dentist re: crown"
+
+
+def test_promoting_a_typed_draft_carries_no_source(tmp_path: Path) -> None:
+    _write_defaults(tmp_path)
+    now = datetime(2026, 8, 10, 22, 0)
+    added = add_draft(tmp_path, name="Call dentist", now=now)
+    draft_id = added["drafts"][0]["id"]
+
+    view = promote_draft(
+        tmp_path,
+        item_id=draft_id,
+        kind="anchor",
+        start="09:00",
+        duration_minutes=30,
+        now=now,
+    )
+
+    assert "source" not in view["anchors"][0]
+
+
+def test_promoting_a_draft_with_explicit_checklist_attaches_it(tmp_path: Path) -> None:
+    _write_defaults(tmp_path)
+    _write_checklist_library(tmp_path)
+    now = datetime(2026, 8, 10, 22, 0)
+    added = add_draft(tmp_path, name="Call dentist", now=now)
+    draft_id = added["drafts"][0]["id"]
+
+    view = promote_draft(
+        tmp_path,
+        item_id=draft_id,
+        kind="flex",
+        duration_minutes=30,
+        checklist="gym-bag",
+        now=now,
+    )
+
+    assert view["flexes"][0]["checklist"] == "gym-bag"
+
+
+def test_promoting_a_draft_with_explicit_none_checklist_attaches_nothing(
+    tmp_path: Path,
+) -> None:
+    _write_defaults(tmp_path)
+    _write_checklist_library(tmp_path)
+    now = datetime(2026, 8, 10, 22, 0)
+    added = add_draft(tmp_path, name="Gym bag", now=now)
+    draft_id = added["drafts"][0]["id"]
+
+    view = promote_draft(
+        tmp_path,
+        item_id=draft_id,
+        kind="flex",
+        duration_minutes=30,
+        checklist=None,
+        now=now,
+    )
+
+    assert view["flexes"][0]["checklist"] is None
+
+
+def test_promoting_a_draft_suggests_checklist_from_renamed_name(
+    tmp_path: Path,
+) -> None:
+    _write_defaults(tmp_path)
+    _write_checklist_library(tmp_path)
+    now = datetime(2026, 8, 10, 22, 0)
+    added = add_draft(tmp_path, name="Errand", now=now)
+    draft_id = added["drafts"][0]["id"]
+
+    view = promote_draft(
+        tmp_path,
+        item_id=draft_id,
+        kind="flex",
+        duration_minutes=30,
+        name="Gym bag",
+        now=now,
+    )
+
+    assert view["flexes"][0]["checklist"] == "gym-bag"
+
+
+def test_undo_of_rename_during_promote_restores_the_original_draft(
+    tmp_path: Path,
+) -> None:
+    _write_defaults(tmp_path)
+    now = datetime(2026, 8, 10, 22, 0)
+    added = add_draft(tmp_path, name="Call dentist", now=now)
+    draft_id = added["drafts"][0]["id"]
+
+    promote_draft(
+        tmp_path,
+        item_id=draft_id,
+        kind="anchor",
+        start="09:00",
+        duration_minutes=30,
+        name="Call dentist re: crown",
+        now=now,
+    )
+
+    undone = undo_session(tmp_path, now=now)
+
+    assert undone["anchors"] == []
+    assert undone["drafts"][0]["id"] == draft_id
+    assert undone["drafts"][0]["name"] == "Call dentist"
+
+
 def test_submit_refuses_while_any_draft_remains_after_add(tmp_path: Path) -> None:
     _write_defaults(tmp_path)
     now = datetime(2026, 8, 10, 22, 0)
@@ -2355,3 +2621,27 @@ def test_submit_omits_todos_section_when_there_are_none(tmp_path: Path) -> None:
     content = plan_path.read_text(encoding="utf-8")
 
     assert "To-dos" not in content
+
+
+def test_renamed_imported_draft_keeps_its_new_name_across_a_reimport(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from tomorrow.icloud import ClassifiedIcloudItems, ImportedItem
+    from tomorrow.session import refresh_icloud_items
+
+    _write_defaults(tmp_path)
+
+    def fake_import(data_dir, plan_date, *, existing_anchors):
+        return ClassifiedIcloudItems(drafts=[ImportedItem(name="Call dentist")])
+
+    monkeypatch.setattr("tomorrow.session.try_import_icloud_items", fake_import)
+
+    now = datetime(2026, 8, 10, 22, 0)
+    seeded = load_session(tmp_path, now=now)
+    draft_id = seeded["drafts"][0]["id"]
+    edit_draft(tmp_path, item_id=draft_id, name="Dentist re: crown", now=now)
+
+    refreshed = refresh_icloud_items(tmp_path, now=now)
+
+    assert len(refreshed["drafts"]) == 1
+    assert refreshed["drafts"][0]["name"] == "Dentist re: crown"

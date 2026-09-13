@@ -640,6 +640,137 @@ def test_promote_draft_to_flex_over_http(tmp_path: Path) -> None:
     assert payload["flexes"][0]["id"] != draft_id
     assert "undo" not in payload
 
+
+def test_edit_draft_over_http_renames_it(tmp_path: Path) -> None:
+    _write_defaults(tmp_path)
+    server, thread = _start_server(tmp_path)
+    try:
+        _, added_body = _http(
+            "POST", "/api/add", payload={"kind": "draft", "name": "Call dentist"}
+        )
+        draft_id = json.loads(added_body)["drafts"][0]["id"]
+        status, body = _http(
+            "POST",
+            "/api/edit",
+            payload={"kind": "draft", "id": draft_id, "name": "  Dentist re: crown  "},
+        )
+    finally:
+        _stop_server(server, thread)
+
+    payload = json.loads(body)
+    flushed = json.loads((tmp_path / "data" / "session.json").read_text(encoding="utf-8"))
+    assert status == 200
+    assert payload["drafts"][0]["name"] == "Dentist re: crown"
+    assert "undo" not in payload
+    assert flushed["drafts"][0]["name"] == "Dentist re: crown"
+
+
+def test_edit_draft_over_http_rejects_a_blank_name(tmp_path: Path) -> None:
+    _write_defaults(tmp_path)
+    server, thread = _start_server(tmp_path)
+    try:
+        _, added_body = _http(
+            "POST", "/api/add", payload={"kind": "draft", "name": "Call dentist"}
+        )
+        draft_id = json.loads(added_body)["drafts"][0]["id"]
+        status, body = _http(
+            "POST",
+            "/api/edit",
+            payload={"kind": "draft", "id": draft_id, "name": "   "},
+        )
+    finally:
+        _stop_server(server, thread)
+
+    flushed = json.loads((tmp_path / "data" / "session.json").read_text(encoding="utf-8"))
+    assert status == 400
+    assert flushed["drafts"][0]["name"] == "Call dentist"
+
+
+def test_promote_over_http_with_new_name_and_explicit_checklist(
+    tmp_path: Path,
+) -> None:
+    _write_defaults(tmp_path)
+    _write_checklist_library(tmp_path)
+    server, thread = _start_server(tmp_path)
+    try:
+        _, added_body = _http(
+            "POST", "/api/add", payload={"kind": "draft", "name": "Errand"}
+        )
+        draft_id = json.loads(added_body)["drafts"][0]["id"]
+        status, body = _http(
+            "POST",
+            "/api/promote",
+            payload={
+                "id": draft_id,
+                "kind": "flex",
+                "duration_minutes": 30,
+                "name": "Gym bag",
+                "checklist": "sauna-kit",
+            },
+        )
+    finally:
+        _stop_server(server, thread)
+
+    payload = json.loads(body)
+    assert status == 200
+    assert payload["flexes"][0]["name"] == "Gym bag"
+    assert payload["flexes"][0]["checklist"] == "sauna-kit"
+
+
+def test_promote_over_http_suggests_checklist_from_name(tmp_path: Path) -> None:
+    _write_defaults(tmp_path)
+    _write_checklist_library(tmp_path)
+    server, thread = _start_server(tmp_path)
+    try:
+        _, added_body = _http(
+            "POST", "/api/add", payload={"kind": "draft", "name": "Errand"}
+        )
+        draft_id = json.loads(added_body)["drafts"][0]["id"]
+        status, body = _http(
+            "POST",
+            "/api/promote",
+            payload={
+                "id": draft_id,
+                "kind": "flex",
+                "duration_minutes": 30,
+                "name": "Gym bag",
+            },
+        )
+    finally:
+        _stop_server(server, thread)
+
+    payload = json.loads(body)
+    assert status == 200
+    assert payload["flexes"][0]["checklist"] == "gym-bag"
+
+
+def test_promote_over_http_rejects_a_blank_new_name(tmp_path: Path) -> None:
+    _write_defaults(tmp_path)
+    server, thread = _start_server(tmp_path)
+    try:
+        _, added_body = _http(
+            "POST", "/api/add", payload={"kind": "draft", "name": "Call dentist"}
+        )
+        draft_id = json.loads(added_body)["drafts"][0]["id"]
+        status, body = _http(
+            "POST",
+            "/api/promote",
+            payload={
+                "id": draft_id,
+                "kind": "flex",
+                "duration_minutes": 30,
+                "name": "   ",
+            },
+        )
+    finally:
+        _stop_server(server, thread)
+
+    flushed = json.loads((tmp_path / "data" / "session.json").read_text(encoding="utf-8"))
+    assert status == 400
+    assert flushed["drafts"][0]["name"] == "Call dentist"
+    assert flushed["flexes"] == []
+
+
 def test_apply_template_over_http(tmp_path: Path) -> None:
     _write_defaults(tmp_path)
     _write_tuesday_template(tmp_path)

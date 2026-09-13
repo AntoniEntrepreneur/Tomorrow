@@ -623,6 +623,27 @@ def drop_draft(
     return _commit(repo_root, document, mutate, now=now, opener=opener)
 
 
+def edit_draft(
+    repo_root: Path,
+    *,
+    item_id: str,
+    name: str,
+    now: datetime | None = None,
+    opener: Callable[[Request], object] = _default_opener,
+) -> dict:
+    document = load_session(repo_root, now=now)
+    _item_by_id(document["drafts"], item_id)
+    trimmed = name.strip()
+    if not trimmed:
+        raise ValueError("Draft name cannot be blank.")
+
+    def mutate(current: dict) -> None:
+        draft = _item_by_id(current["drafts"], item_id)
+        draft["name"] = trimmed
+
+    return _commit(repo_root, document, mutate, now=now, opener=opener)
+
+
 def promote_draft(
     repo_root: Path,
     *,
@@ -630,38 +651,41 @@ def promote_draft(
     kind: str,
     duration_minutes: int | None = None,
     start: str | None = None,
+    name: str | None = None,
+    checklist: str | None | object = _UNSET,
     now: datetime | None = None,
     opener: Callable[[Request], object] = _default_opener,
 ) -> dict:
     document = load_session(repo_root, now=now)
+    draft = _item_by_id(document["drafts"], item_id)
+    resolved_name = draft["name"] if name is None else name.strip()
+    if not resolved_name:
+        raise ValueError("Draft name cannot be blank.")
+    attached = _attached_checklist(repo_root, resolved_name, checklist)
+    source = draft.get("source")
 
     def mutate(current: dict) -> None:
-        draft = _drop_keyed(current, "drafts", item_id)
+        _drop_keyed(current, "drafts", item_id)
         new_id = uuid.uuid4().hex
         if kind == "todo":
-            current["todos"].append(_new_todo(draft["name"], draft.get("note") or ""))
+            current["todos"].append(_new_todo(resolved_name, draft.get("note") or ""))
             return
+        entry = {"id": new_id, "name": resolved_name}
         if kind == "anchor":
-            current["anchors"].append(
-                {
-                    "id": new_id,
-                    "name": draft["name"],
-                    "start": start,
-                    "duration_minutes": duration_minutes,
-                    "checklist": None,
-                }
-            )
+            entry["start"] = start
+            entry["duration_minutes"] = duration_minutes
+            entry["checklist"] = attached
+            if source is not None:
+                entry["source"] = source
+            current["anchors"].append(entry)
             return
         if kind == "flex":
-            current["flexes"].append(
-                {
-                    "id": new_id,
-                    "name": draft["name"],
-                    "duration_minutes": duration_minutes,
-                    "start": start,
-                    "checklist": None,
-                }
-            )
+            entry["duration_minutes"] = duration_minutes
+            entry["start"] = start
+            entry["checklist"] = attached
+            if source is not None:
+                entry["source"] = source
+            current["flexes"].append(entry)
             return
         raise ValueError(kind)
 
@@ -1243,6 +1267,19 @@ class SessionHandler(BaseHTTPRequestHandler):
         if path == "/api/edit":
             payload = self._read_json()
             kind = payload.get("kind")
+            if kind == "draft":
+                try:
+                    view = edit_draft(
+                        self.server.repo_root,
+                        item_id=payload["id"],
+                        name=payload["name"],
+                        **self._view_args(),
+                    )
+                except ValueError as exc:
+                    self._send_json(400, {"error": str(exc)})
+                    return
+                self._send_json(200, view)
+                return
             if kind == "bounds":
                 view = edit_bounds(
                     self.server.repo_root,
@@ -1342,14 +1379,20 @@ class SessionHandler(BaseHTTPRequestHandler):
         if path == "/api/promote":
             payload = self._read_json()
             duration = payload.get("duration_minutes")
-            view = promote_draft(
-                self.server.repo_root,
-                item_id=payload["id"],
-                kind=payload["kind"],
-                duration_minutes=int(duration) if duration is not None else None,
-                start=payload.get("start") or None,
-                **self._view_args(),
-            )
+            try:
+                view = promote_draft(
+                    self.server.repo_root,
+                    item_id=payload["id"],
+                    kind=payload["kind"],
+                    duration_minutes=int(duration) if duration is not None else None,
+                    start=payload.get("start") or None,
+                    name=payload.get("name"),
+                    checklist=_optional_checklist(payload),
+                    **self._view_args(),
+                )
+            except ValueError as exc:
+                self._send_json(400, {"error": str(exc)})
+                return
             self._send_json(200, view)
             return
         if path == "/api/convert":
