@@ -427,26 +427,10 @@
       return String(input.value || "").slice(0, 5);
     }
 
-    function normalizeName(value) {
-      return String(value).toLowerCase().replace(/[^a-z0-9]/g, "");
-    }
-
     function checklistName(checklistId) {
       if (!checklistId || !current) return "";
       const entry = (current.checklists || []).find(item => item.id === checklistId);
       return entry ? entry.name : "";
-    }
-
-    function suggestChecklist(itemName) {
-      const needle = normalizeName(itemName);
-      if (!needle || !current) return "";
-      const matches = (current.checklists || []).filter(entry => {
-        const id = normalizeName(entry.id);
-        const name = normalizeName(entry.name);
-        return (id && (needle.includes(id) || id.includes(needle))) ||
-          (name && (needle.includes(name) || name.includes(needle)));
-      });
-      return matches.length === 1 ? matches[0].id : "";
     }
 
     function checklistField(selectedId) {
@@ -461,10 +445,86 @@
         '<option value="">None</option>' + options + "</select></label>";
     }
 
-    function maybeSuggestChecklist(form) {
-      if (!form || !form.checklist) return;
-      if (form.checklist.dataset.touched === "1") return;
-      form.checklist.value = suggestChecklist(form.name && form.name.value);
+    const TIMING_FIELDS = ["start", "duration_minutes", "end"];
+    const SUGGESTIBLE_FIELDS = ["checklist"].concat(TIMING_FIELDS);
+
+    function markTouched(form, fieldNames) {
+      fieldNames.forEach(fieldName => {
+        if (form[fieldName]) form[fieldName].dataset.touched = "1";
+      });
+    }
+
+    function isTouched(form, fieldName) {
+      return Boolean(form[fieldName] && form[fieldName].dataset.touched === "1");
+    }
+
+    function untouchedField(form, fieldName) {
+      return form[fieldName] && !isTouched(form, fieldName) ? form[fieldName] : null;
+    }
+
+    // An autofilled field remembers its pre-suggestion value so it can be put
+    // back once the typed name stops matching an Activity Template.
+    function autofill(form, fieldName, value) {
+      const field = untouchedField(form, fieldName);
+      if (!field) return;
+      if (!("original" in field.dataset)) field.dataset.original = field.value;
+      field.value = value;
+    }
+
+    function restoreAutofilled(form, fieldNames) {
+      fieldNames.forEach(fieldName => {
+        const field = untouchedField(form, fieldName);
+        if (!field || !("original" in field.dataset)) return;
+        field.value = field.dataset.original;
+        delete field.dataset.original;
+      });
+    }
+
+    async function fetchActivitySuggestion(name) {
+      if (!name) return null;
+      const response = await fetch("/api/suggest-activity", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name })
+      });
+      if (!response.ok) throw new Error("suggest-activity failed: " + response.status);
+      return (await response.json()).suggestion;
+    }
+
+    // Activity Template autocomplete: a matching Activity Template pre-fills its
+    // start/duration and Checklist; otherwise a bare Checklist name match fills
+    // only the Checklist. Touched fields are never overridden.
+    function applyActivitySuggestion(form, suggestion) {
+      const checklist = untouchedField(form, "checklist");
+      if (!suggestion || suggestion.kind !== "activity") {
+        restoreAutofilled(form, TIMING_FIELDS);
+        if (checklist) checklist.value = (suggestion && suggestion.checklist_id) || "";
+        return;
+      }
+      if (checklist) checklist.value = suggestion.checklist || "";
+      const endMode = form.dataset.durationMode === "end";
+      if (suggestion.start && !(endMode && isTouched(form, "end"))) {
+        autofill(form, "start", suggestion.start);
+      }
+      autofill(form, "duration_minutes", suggestion.duration_minutes);
+      if (endMode && form.start && form.start.value) {
+        autofill(form, "end", endClock(clockValue(form.start), suggestion.duration_minutes));
+      }
+    }
+
+    let latestSuggestRequest = 0;
+    async function suggestFromName(form) {
+      if (!form || !form.name) return;
+      const request = ++latestSuggestRequest;
+      let suggestion;
+      try {
+        suggestion = await fetchActivitySuggestion(form.name.value.trim());
+      } catch (error) {
+        console.error(error);
+        return;
+      }
+      if (request !== latestSuggestRequest || !form.isConnected) return;
+      applyActivitySuggestion(form, suggestion);
     }
 
     function checklistPayload(form) {
@@ -777,7 +837,6 @@
         '<button type="button" class="ghost" data-close>Cancel</button></div></form>',
         "stamp"
       );
-      maybeSuggestChecklist(document.getElementById("add-flex"));
     }
 
     function sheetAddDraft() {
@@ -939,7 +998,8 @@
         '<button type="button" class="ghost" data-close>Cancel</button>' +
         '<button type="button" class="danger" data-drop="' + esc(item.id) + '">Drop</button></div></form>'
       );
-      maybeSuggestChecklist(document.getElementById("edit-flex"));
+      markTouched(document.getElementById("edit-flex"), TIMING_FIELDS);
+      suggestFromName(document.getElementById("edit-flex"));
     }
 
     function sheetAddAnchor() {
@@ -952,7 +1012,6 @@
         "stamp"
       );
       initDurationToggle(document.getElementById("add-anchor"));
-      maybeSuggestChecklist(document.getElementById("add-anchor"));
     }
 
     function sheetEditAnchor(item) {
@@ -965,7 +1024,8 @@
         '<button type="button" class="danger" data-remove="' + esc(item.id) + '">Remove</button></div></form>'
       );
       initDurationToggle(document.getElementById("edit-anchor"));
-      maybeSuggestChecklist(document.getElementById("edit-anchor"));
+      markTouched(document.getElementById("edit-anchor"), TIMING_FIELDS);
+      suggestFromName(document.getElementById("edit-anchor"));
     }
 
     function sheetEditBound(which) {
@@ -1202,11 +1262,11 @@
     document.getElementById("sheet").addEventListener("input", event => {
       const form = event.target.form;
       if (!form) return;
-      if (event.target.name === "checklist") {
-        event.target.dataset.touched = "1";
+      if (SUGGESTIBLE_FIELDS.includes(event.target.name)) {
+        markTouched(form, [event.target.name]);
         return;
       }
-      if (event.target.name === "name") maybeSuggestChecklist(form);
+      if (event.target.name === "name") suggestFromName(form);
     });
 
     document.getElementById("sheet").addEventListener("submit", async event => {
