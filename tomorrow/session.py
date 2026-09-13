@@ -113,8 +113,7 @@ def _seed_daily_activities(repo_root: Path, document: dict) -> bool:
     """Add an unplaced Flex for every Daily Activity Template, source="daily".
 
     Returns True if anything was added. Called both when a new Session
-    document is built and on every Reset (unlike iCloud import, which Reset
-    does not re-run).
+    document is built and on every Reset.
     """
 
     library = load_activity_template_library(repo_root / "data")
@@ -210,8 +209,8 @@ def refresh_icloud_items(repo_root: Path, *, now: datetime | None = None) -> dic
 def _new_session_document(repo_root: Path, *, now: datetime | None = None) -> dict:
     """Build a brand-new Session document for the current Plan date.
 
-    This is the one place the iCloud fetch runs: at Session creation. Reset,
-    Undo, and Redo all reuse `_blank_session` directly and never call this.
+    Undo and Redo never call this; Reset re-runs the same iCloud and daily
+    seeding inside its own undoable mutation.
     """
 
     document = _blank_session(repo_root, now=now)
@@ -1116,6 +1115,9 @@ def reset_session(
         current["anchors"] = []
         current["flexes"] = []
         current["todos"] = []
+        # Reset forgets what was imported, so dropped iCloud items come back.
+        current["icloud_seen"] = []
+        _seed_icloud_items(repo_root, current)
         _seed_daily_activities(repo_root, current)
 
     return _commit(repo_root, document, mutate, now=now, opener=opener)

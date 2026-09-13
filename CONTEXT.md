@@ -21,7 +21,7 @@ Writing a Plan from the current Session. Allowed only when no Draft remains, eve
 _Avoid_: Save, export, publish, write
 
 **Reset**:
-Discard the Session's contents to a blank Session for the same Plan date, then re-add every Daily Activity as an unplaced Flex, the same as a brand-new Session. Does not re-import iCloud items. Does not delete an existing Plan. A single undoable step, including the re-added daily Flex.
+Discard the Session's contents to a blank Session for the same Plan date, then re-import iCloud items and re-add every Daily Activity as an unplaced Flex, the same as a brand-new Session. Reset forgets which iCloud items were imported before, so an imported item you Dropped comes back. Does not delete an existing Plan. A single undoable step, including the re-imported items and re-added daily Flex.
 _Avoid_: Start over, clear, new session, discard (as the name of this act)
 
 **Undo**:

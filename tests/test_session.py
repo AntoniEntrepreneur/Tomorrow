@@ -146,7 +146,7 @@ def test_blank_session_seeds_icloud_anchors_and_drafts(
     assert document["drafts"][0]["source"] == "icloud"
 
 
-def test_dropped_icloud_draft_does_not_return_after_undo_or_reset(
+def test_dropped_icloud_draft_stays_dropped_through_undo_but_returns_on_reset(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from tomorrow.icloud import ClassifiedIcloudItems, ImportedItem
@@ -175,8 +175,12 @@ def test_dropped_icloud_draft_does_not_return_after_undo_or_reset(
     assert redone["drafts"] == []
 
     reset = reset_session(tmp_path, now=datetime(2026, 8, 10, 22, 0))
-    assert reset["drafts"] == []
-    assert call_count == 1
+    assert [draft["name"] for draft in reset["drafts"]] == ["Call dentist"]
+    assert reset["drafts"][0]["source"] == "icloud"
+    assert call_count == 2
+
+    undone_reset = undo_session(tmp_path, now=datetime(2026, 8, 10, 22, 0))
+    assert undone_reset["drafts"] == []
 
 
 def test_imported_draft_note_shows_in_session_and_becomes_todo_note_on_promotion(
