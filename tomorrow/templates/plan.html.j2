@@ -1,14 +1,52 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-theme="dark">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{{ plan_date_label }}</title>
+  <script>
+    try {
+      const savedTheme = localStorage.getItem("tomorrow-theme");
+      if (savedTheme === "light" || savedTheme === "dark") {
+        document.documentElement.dataset.theme = savedTheme;
+      }
+    } catch (_) {}
+  </script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=DM+Mono:ital,wght@0,400;0,500;1,400&family=Instrument+Serif:ital@0;1&family=Outfit:wght@400;500;600&display=swap" rel="stylesheet">
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      color-scheme: dark;
+      --bg: #1a1714;
+      --rail: #948877;
+      --ink: #ece4d8;
+      --anchor: #7fae8a;
+      --anchor-bg: #213027;
+      --flex: #b8987f;
+      --flex-bg: #2a241f;
+      --prep-bg: #221e1a;
+      --prep-border: #3a332c;
+      --gap-line: rgba(255,255,255,0.14);
+      --bundle-divider: #2e2823;
+    }
+    :root[data-theme="light"] {
+      color-scheme: light;
+      --bg: #f7f3ed;
+      --rail: #c4b5a0;
+      --ink: #2c2419;
+      --anchor: #3d5a45;
+      --anchor-bg: #e8f0ea;
+      --flex: #6b5344;
+      --flex-bg: #f0ebe4;
+      --prep-bg: #fff;
+      --prep-border: #ddd5c8;
+      --gap-line: rgba(0,0,0,0.12);
+      --bundle-divider: #f0ebe4;
+    }
+    html { background: var(--bg); }
 
     .plan-meta {
       display: flex;
@@ -31,7 +69,7 @@
       margin-top: 0.12rem;
       width: 1.05rem;
       height: 1.05rem;
-      accent-color: #3d5a45;
+      accent-color: var(--anchor);
       flex-shrink: 0;
     }
     .checklist label { cursor: pointer; }
@@ -45,15 +83,6 @@
     }
 
     .v-tl-base {
-      --bg: #f7f3ed;
-      --rail: #c4b5a0;
-      --ink: #2c2419;
-      --anchor: #3d5a45;
-      --anchor-bg: #e8f0ea;
-      --flex: #6b5344;
-      --flex-bg: #f0ebe4;
-      --prep-bg: #fff;
-      --prep-border: #ddd5c8;
       background: var(--bg);
       color: var(--ink);
       font-family: "Outfit", system-ui, sans-serif;
@@ -67,7 +96,27 @@
     @media (min-width: 768px) {
       .v-tl-base .shell { max-width: 36rem; padding: 2rem 1.5rem 3rem; }
     }
-    .v-tl-base .plan-header { margin-bottom: 1.75rem; font-size: 0.95rem; }
+    .v-tl-base .plan-header {
+      position: relative;
+      margin-bottom: 1.75rem;
+      padding-right: 2.5rem;
+      font-size: 0.95rem;
+    }
+    .v-tl-base .theme-toggle {
+      position: absolute;
+      top: 0;
+      right: 0;
+      width: 2rem;
+      height: 2rem;
+      border: 1px solid var(--prep-border);
+      border-radius: 999px;
+      background: var(--prep-bg);
+      color: var(--ink);
+      font-size: 0.95rem;
+      line-height: 1;
+      cursor: pointer;
+    }
+    .v-tl-base .theme-toggle:focus-visible { outline: 2px solid var(--anchor); outline-offset: 2px; }
     .v-tl-base .plan-date {
       font-family: "Instrument Serif", Georgia, serif;
       font-size: 1.65rem;
@@ -107,7 +156,7 @@
     .v-tl-base .block.gap-filler {
       background: transparent;
       border: none;
-      border-left: 1px dashed rgba(0,0,0,0.12);
+      border-left: 1px dashed var(--gap-line);
       font-size: 0.68rem;
       padding: 0.25rem 0.85rem;
       color: var(--rail);
@@ -198,7 +247,7 @@
     .v-tl-accordion .prep-bundle[open] summary::after { content: "−"; }
     .v-tl-accordion .prep-bundle .checklist {
       padding: 0 1rem 0.85rem;
-      border-top: 1px solid #f0ebe4;
+      border-top: 1px solid var(--bundle-divider);
     }
     .v-tl-accordion .bundle-sub {
       font-weight: 400;
@@ -222,6 +271,7 @@
   <div class="v-tl-base v-tl-accordion">
     <div class="shell">
       <header class="plan-header">
+        <button type="button" id="theme-toggle" class="theme-toggle"></button>
         <div class="plan-meta">
           <div class="plan-date">{{ plan_date_label }}</div>
           <div class="plan-bounds">Wake {{ wake }} · Sleep {{ sleep }}</div>
@@ -271,6 +321,29 @@
     </div>
   </div>
   <script>
+    const THEME_STORAGE_KEY = "tomorrow-theme";
+    const themeToggle = document.getElementById("theme-toggle");
+
+    function nextTheme() {
+      return document.documentElement.dataset.theme === "light" ? "dark" : "light";
+    }
+
+    function renderThemeToggle() {
+      const next = nextTheme();
+      themeToggle.textContent = next === "light" ? "☀" : "☾";
+      themeToggle.setAttribute("aria-label", `Switch to ${next} theme`);
+      themeToggle.title = `Switch to ${next} theme`;
+    }
+
+    themeToggle.addEventListener("click", () => {
+      const next = nextTheme();
+      document.documentElement.dataset.theme = next;
+      try { localStorage.setItem(THEME_STORAGE_KEY, next); } catch (_) {}
+      renderThemeToggle();
+    });
+
+    renderThemeToggle();
+
     const PLAN = {
       dateKey: {{ plan_date_key|tojson }},
       bundles: [
