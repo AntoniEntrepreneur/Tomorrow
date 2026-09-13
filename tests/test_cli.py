@@ -790,3 +790,43 @@ def test_undo_and_redo_over_http_omit_stacks_and_restore_ids(tmp_path: Path) -> 
     assert redone["drafts"][0]["id"] == added["drafts"][0]["id"]
     assert redone["can_undo"] is True
     assert redone["can_redo"] is False
+
+
+def test_suggest_activity_endpoint_returns_the_whole_bundle(tmp_path: Path) -> None:
+    _write_defaults(tmp_path)
+    directory = tmp_path / "data" / "activity-templates"
+    directory.mkdir()
+    (directory / "gym.toml").write_text(
+        'name = "Gym"\nduration = 60\nstart = "18:00"\nchecklist = "gym-bag"\n',
+        encoding="utf-8",
+    )
+    server, thread = _start_server(tmp_path)
+    try:
+        status, body = _http("POST", "/api/suggest-activity", payload={"name": "gym"})
+    finally:
+        _stop_server(server, thread)
+
+    assert status == 200
+    assert json.loads(body)["suggestion"] == {
+        "kind": "activity",
+        "activity_id": "gym",
+        "name": "Gym",
+        "start": "18:00",
+        "duration_minutes": 60,
+        "checklist": "gym-bag",
+    }
+
+
+def test_session_page_asks_for_activity_suggestions_from_name_fields(
+    tmp_path: Path,
+) -> None:
+    _write_defaults(tmp_path)
+    server, thread = _start_server(tmp_path)
+    try:
+        status, body = _http("GET", "/")
+    finally:
+        _stop_server(server, thread)
+
+    html = body.decode("utf-8")
+    assert status == 200
+    assert "/api/suggest-activity" in html
