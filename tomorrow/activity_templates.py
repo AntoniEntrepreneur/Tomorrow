@@ -19,6 +19,7 @@ class ActivityTemplate:
     duration: timedelta
     start: time | None = None
     checklist: str | None = None
+    daily: bool = False
 
 
 def activity_templates_dir(data_dir: Path) -> Path:
@@ -41,6 +42,7 @@ def _parse_activity_template(path: Path) -> ActivityTemplate:
         duration=duration,
         start=parse_clock(str(start_value)) if start_value is not None else None,
         checklist=str(checklist) if checklist is not None else None,
+        daily=bool(data.get("daily", False)),
     )
 
 

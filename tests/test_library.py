@@ -1,5 +1,7 @@
 from pathlib import Path
 
+import pytest
+
 from tomorrow.activity_templates import load_activity_template_library
 from tomorrow.checklists import load_checklist_library
 from tomorrow.day_templates import load_day_template, named_day_template_path
@@ -68,6 +70,57 @@ def test_save_activity_template_round_trips_flex_shaped_entry_with_checklist(
 
     assert library["deep-work"].start is None
     assert library["deep-work"].checklist == "focus-kit"
+
+
+def test_save_activity_template_daily_round_trips(tmp_path: Path) -> None:
+    save_activity_template(
+        tmp_path,
+        activity_id="yoga-nidra",
+        name="Yoga Nidra",
+        duration_minutes=20,
+        daily=True,
+    )
+
+    library = load_activity_template_library(tmp_path / "data")
+
+    assert library["yoga-nidra"].daily is True
+
+
+def test_activity_template_without_daily_field_loads_as_not_daily(tmp_path: Path) -> None:
+    save_activity_template(
+        tmp_path, activity_id="deep-work", name="Deep work", duration_minutes=90
+    )
+
+    library = load_activity_template_library(tmp_path / "data")
+
+    assert library["deep-work"].daily is False
+
+
+def test_save_activity_template_rejects_daily_with_a_start(tmp_path: Path) -> None:
+    with pytest.raises(ValueError):
+        save_activity_template(
+            tmp_path,
+            activity_id="therapy",
+            name="Therapy",
+            duration_minutes=50,
+            start="16:00",
+            daily=True,
+        )
+
+    assert load_activity_template_library(tmp_path / "data") == {}
+
+
+def test_unmarking_a_daily_activity_saves_it_as_not_daily(tmp_path: Path) -> None:
+    save_activity_template(
+        tmp_path, activity_id="yoga-nidra", name="Yoga Nidra", duration_minutes=20, daily=True
+    )
+
+    save_activity_template(
+        tmp_path, activity_id="yoga-nidra", name="Yoga Nidra", duration_minutes=20, daily=False
+    )
+
+    library = load_activity_template_library(tmp_path / "data")
+    assert library["yoga-nidra"].daily is False
 
 
 def test_delete_activity_template_removes_the_file(tmp_path: Path) -> None:

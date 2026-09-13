@@ -131,6 +131,7 @@ def _parse_anchor(
             start=activity.start,
             duration=activity.duration,
             checklist=activity.checklist,
+            activity_template_id=str(activity_name),
         )
     start = parse_clock(str(entry["start"]))
     duration = timedelta(minutes=_parse_duration_minutes(entry))
@@ -154,6 +155,7 @@ def _parse_flex(
             name=activity.name,
             duration=activity.duration,
             checklist=activity.checklist,
+            activity_template_id=str(activity_name),
         )
     return Flex(
         name=str(entry["name"]),

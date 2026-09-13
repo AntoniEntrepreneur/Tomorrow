@@ -100,13 +100,19 @@ activity = "deep-work"
 
     assert seed == TemplateSeed(
         anchors=(
-            Anchor(name="Therapy", start=time(16, 0), duration=timedelta(minutes=50)),
+            Anchor(
+                name="Therapy",
+                start=time(16, 0),
+                duration=timedelta(minutes=50),
+                activity_template_id="therapy",
+            ),
         ),
         flexes=(
             Flex(
                 name="Deep work",
                 duration=timedelta(minutes=90),
                 checklist="focus-kit",
+                activity_template_id="deep-work",
             ),
         ),
     )

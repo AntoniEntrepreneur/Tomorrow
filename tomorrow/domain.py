@@ -41,6 +41,7 @@ class Anchor:
     duration: timedelta
     checklist: str | None = None
     source: str | None = None
+    activity_template_id: str | None = None
 
     @property
     def end(self) -> time:
@@ -56,6 +57,8 @@ class Flex:
     duration: timedelta
     start: time | None = None
     checklist: str | None = None
+    source: str | None = None
+    activity_template_id: str | None = None
 
     @property
     def end(self) -> time | None:
@@ -70,6 +73,8 @@ class Flex:
             duration=duration,
             start=self.start,
             checklist=self.checklist,
+            source=self.source,
+            activity_template_id=self.activity_template_id,
         )
 
     def with_start(self, start: time) -> Flex:
@@ -78,6 +83,8 @@ class Flex:
             duration=self.duration,
             start=start,
             checklist=self.checklist,
+            source=self.source,
+            activity_template_id=self.activity_template_id,
         )
 
 

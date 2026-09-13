@@ -109,6 +109,34 @@ def _blank_session(repo_root: Path, *, now: datetime | None = None) -> dict:
     }
 
 
+def _seed_daily_activities(repo_root: Path, document: dict) -> bool:
+    """Add an unplaced Flex for every Daily Activity Template, source="daily".
+
+    Returns True if anything was added. Called both when a new Session
+    document is built and on every Reset (unlike iCloud import, which Reset
+    does not re-run).
+    """
+
+    library = load_activity_template_library(repo_root / "data")
+    added = False
+    for activity_id, activity in library.items():
+        if not activity.daily:
+            continue
+        document["flexes"].append(
+            {
+                "id": uuid.uuid4().hex,
+                "name": activity.name,
+                "duration_minutes": int(activity.duration.total_seconds() // 60),
+                "start": None,
+                "checklist": activity.checklist,
+                "source": "daily",
+                "activity_template_id": activity_id,
+            }
+        )
+        added = True
+    return added
+
+
 def _icloud_key(kind: str, item) -> str:
     """Stable identity for an imported item, so a re-import never duplicates it."""
     start = item.start.strftime("%H:%M") if item.start is not None else ""
@@ -188,6 +216,7 @@ def _new_session_document(repo_root: Path, *, now: datetime | None = None) -> di
 
     document = _blank_session(repo_root, now=now)
     _seed_icloud_items(repo_root, document)
+    _seed_daily_activities(repo_root, document)
     return document
 
 
@@ -206,9 +235,10 @@ def load_session(repo_root: Path, *, now: datetime | None = None) -> dict:
     if not path.is_file():
         document = _new_session_document(repo_root, now=now)
         # Persist immediately only if there is something to keep stable: an
-        # icloud import ran and produced items. A truly empty Session is left
+        # icloud import or daily seeding ran and produced items with ids that
+        # must stay put across reloads. A truly empty Session is left
         # unwritten until the first real mutation, as before.
-        if _session_has_items(document):
+        if _document_has_any_items(document):
             save_session(repo_root, document)
         return document
     document = json.loads(path.read_text(encoding="utf-8"))
@@ -228,11 +258,34 @@ def _default_day_template_file(repo_root: Path, document: dict) -> Path:
     )
 
 
-def _session_has_items(document: dict) -> bool:
+def _document_has_any_items(document: dict) -> bool:
     return bool(
         document["drafts"]
         or document["anchors"]
         or document["flexes"]
+        or document.get("todos")
+    )
+
+
+def _added_by_user(item: dict) -> bool:
+    """Whether an Anchor/Flex/Draft record was added by hand rather than
+    seeded automatically (daily or iCloud). Records with no `source` predate
+    this distinction and count as added by hand.
+    """
+
+    return not item.get("source")
+
+
+def _session_has_items(document: dict) -> bool:
+    """"Session has items" for Day Template purposes: automatically added
+    items (daily, iCloud) don't count, but To-dos and anything you added,
+    promoted, or inserted yourself still block the offer and both applies.
+    """
+
+    return bool(
+        any(_added_by_user(item) for item in document["drafts"])
+        or any(_added_by_user(item) for item in document["anchors"])
+        or any(_added_by_user(item) for item in document["flexes"])
         or document.get("todos")
     )
 
@@ -692,8 +745,33 @@ def promote_draft(
     return _commit(repo_root, document, mutate, now=now, opener=opener)
 
 
+def _is_duplicate_of_seed_entry(
+    flex: dict, *, entry_ids: set[str], entry_names: set[str]
+) -> bool:
+    if flex.get("source") != "daily":
+        return False
+    activity_id = flex.get("activity_template_id")
+    if activity_id and activity_id in entry_ids:
+        return True
+    return flex["name"].strip().lower() in entry_names
+
+
 def _seed_mutation(seed) -> Callable[[dict], None]:
+    entry_ids = {
+        entry.activity_template_id
+        for entry in (*seed.anchors, *seed.flexes)
+        if entry.activity_template_id
+    }
+    entry_names = {entry.name.strip().lower() for entry in (*seed.anchors, *seed.flexes)}
+
     def mutate(current: dict) -> None:
+        current["flexes"] = [
+            flex
+            for flex in current["flexes"]
+            if not _is_duplicate_of_seed_entry(
+                flex, entry_ids=entry_ids, entry_names=entry_names
+            )
+        ]
         current["anchors"].extend(
             {
                 "id": uuid.uuid4().hex,
@@ -906,6 +984,8 @@ def _unpack(
             duration=timedelta(minutes=item["duration_minutes"]),
             start=parse_clock(item["start"]) if item.get("start") else None,
             checklist=item.get("checklist"),
+            source=item.get("source"),
+            activity_template_id=item.get("activity_template_id"),
         )
         for item in document["flexes"]
     ]
@@ -1036,6 +1116,7 @@ def reset_session(
         current["anchors"] = []
         current["flexes"] = []
         current["todos"] = []
+        _seed_daily_activities(repo_root, current)
 
     return _commit(repo_root, document, mutate, now=now, opener=opener)
 
@@ -1080,6 +1161,7 @@ def _list_activity_templates(data_dir: Path) -> list[dict]:
             "id": activity_id,
             "name": activity.name,
             "is_anchor_shaped": activity.start is not None,
+            "daily": activity.daily,
         }
         for activity_id, activity in load_activity_template_library(data_dir).items()
     ]
@@ -1134,6 +1216,7 @@ def _save_activity_template_entity(repo_root: Path, payload: dict) -> None:
         duration_minutes=int(payload["duration_minutes"]),
         start=payload.get("start") or None,
         checklist=payload.get("checklist") or None,
+        daily=bool(payload.get("daily", False)),
     )
 
 
@@ -1494,7 +1577,11 @@ class SessionHandler(BaseHTTPRequestHandler):
             return
         repo_root = self.server.repo_root
         if action == "save":
-            ops.save(repo_root, payload)
+            try:
+                ops.save(repo_root, payload)
+            except ValueError as exc:
+                self._send_json(400, {"error": str(exc)})
+                return
         elif action == "delete":
             ops.delete(repo_root, payload)
         else:

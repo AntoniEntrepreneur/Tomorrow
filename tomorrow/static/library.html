@@ -55,8 +55,9 @@
         <input name="id" placeholder="id (e.g. deep-work)" required>
         <input name="name" placeholder="Name" required>
         <input name="duration_minutes" type="number" placeholder="Duration (minutes)" required>
-        <input name="start" placeholder="Start HH:MM (leave blank for Flex)">
+        <input name="start" id="activity-start" placeholder="Start HH:MM (leave blank for Flex)">
         <input name="checklist" placeholder="Checklist id (optional)">
+        <label><input type="checkbox" name="daily" id="activity-daily"> Daily</label>
         <button type="submit">Save Activity Template</button>
       </form>
     </section>
@@ -149,10 +150,27 @@
       load();
     });
 
+    const activityStartInput = document.getElementById("activity-start");
+    const activityDailyInput = document.getElementById("activity-daily");
+    activityStartInput.addEventListener("input", () => {
+      if (activityStartInput.value.trim()) {
+        activityDailyInput.checked = false;
+        activityDailyInput.disabled = true;
+      } else {
+        activityDailyInput.disabled = false;
+      }
+    });
+
     document.getElementById("activity-form").addEventListener("submit", async (event) => {
       event.preventDefault();
       const form = new FormData(event.target);
-      await api("/api/library/activity-template", {
+      const start = form.get("start") || null;
+      const daily = form.get("daily") === "on";
+      if (daily && start) {
+        alert("A Daily Activity cannot have a fixed start.");
+        return;
+      }
+      const result = await api("/api/library/activity-template", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -160,11 +178,17 @@
           id: form.get("id"),
           name: form.get("name"),
           duration_minutes: Number(form.get("duration_minutes")),
-          start: form.get("start") || null,
+          start,
           checklist: form.get("checklist") || null,
+          daily,
         }),
       });
+      if (result && result.error) {
+        alert(result.error);
+        return;
+      }
       event.target.reset();
+      activityDailyInput.disabled = false;
       load();
     });
 
