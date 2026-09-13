@@ -13,7 +13,7 @@ The calendar day a Session is constructing a Plan for. If local time is before D
 _Avoid_: Target date, session date, schedule date
 
 **Session**:
-The mutable night-before construction of a Plan for one Plan date: day bounds, Drafts, Anchors, Flex, and To-dos. One Session per Plan date. Submit does not end it; Reset blanks it; when the Plan date rolls, an unfinished Session is gone.
+The mutable night-before construction of a Plan for one Plan date: day bounds, Drafts, Anchors, Flex, and To-dos. One Session per Plan date. Submit does not end it; Reset blanks it; when the Plan date rolls, an unfinished Session is gone. An Anchor, Flex, or Draft added automatically (a Daily Activity, or an item imported from iCloud) carries that origin; an item with no origin is one you added, promoted, or inserted yourself. Only items you added yourself, and To-dos, count toward "the Session has items" for Day Template purposes.
 _Avoid_: Wizard, editor, draft (as the name of the whole)
 
 **Submit**:
@@ -21,7 +21,7 @@ Writing a Plan from the current Session. Allowed only when no Draft remains, eve
 _Avoid_: Save, export, publish, write
 
 **Reset**:
-Discard the Session's contents to a blank Session for the same Plan date. Does not delete an existing Plan. Undoable.
+Discard the Session's contents to a blank Session for the same Plan date, then re-add every Daily Activity as an unplaced Flex, the same as a brand-new Session. Does not re-import iCloud items. Does not delete an existing Plan. A single undoable step, including the re-added daily Flex.
 _Avoid_: Start over, clear, new session, discard (as the name of this act)
 
 **Undo**:
@@ -57,12 +57,16 @@ A named thing to do sometime tomorrow, with an optional multi-line note, that ha
 _Avoid_: Task, errand, reminder (reminder means the iCloud source)
 
 **Day Template**:
-A reusable seed of Anchors and/or Flex for a whole Plan date, copied into tonight's Session as a starting point. It does not place Flex into Gaps. A Day Template may be assigned as the default for one weekday (at most one Day Template per weekday) or left unassigned, reachable only by manually choosing it. Applying a Day Template — by weekday default or manual choice — is only possible on a blank Session; it seeds, it does not merge. Entries may define a Checklist to attach, or reference an Activity Template.
+A reusable seed of Anchors and/or Flex for a whole Plan date, copied into tonight's Session as a starting point. It does not place Flex into Gaps. A Day Template may be assigned as the default for one weekday (at most one Day Template per weekday) or left unassigned, reachable only by manually choosing it. Applying a Day Template — by weekday default or manual choice — is only possible when the Session holds nothing you added yourself (Daily Activities and imported iCloud items don't block it); it seeds, it does not merge with what you added. Before seeding, it removes every Daily Activity it duplicates — by Activity Template reference, or by name ignoring letter case, whether the duplicating entry is an Anchor or a Flex — even one already placed or resized; the Day Template's version wins. Only the duplicates are removed; other Daily Activities stay. Removal and seeding are one undoable step. Entries may define a Checklist to attach, or reference an Activity Template.
 _Avoid_: Template (ambiguous with Activity Template), default plan, preset schedule, routine
 
 **Activity Template**:
-A single reusable Anchor-shaped or Flex-shaped Plan item — name, a fixed start or a duration, and an optional Checklist — that can be inserted into a Session on its own, independent of any Day Template. Reachable by browsing a picker, or by autocomplete: a typed Draft/Anchor/Flex name that matches an Activity Template suggests the whole bundle (start or duration, plus Checklist) and takes precedence over a bare Checklist name match.
+A single reusable Anchor-shaped or Flex-shaped Plan item — name, a fixed start or a duration, and an optional Checklist — that can be inserted into a Session on its own, independent of any Day Template. Reachable by browsing a picker, or by autocomplete: a typed Draft/Anchor/Flex name that matches an Activity Template suggests the whole bundle (start or duration, plus Checklist) and takes precedence over a bare Checklist name match. A Flex-shaped Activity Template can be marked daily, making it a Daily Activity; an Anchor-shaped one (with a fixed start) cannot.
 _Avoid_: Routine, preset item, snippet
+
+**Daily Activity**:
+An Activity Template marked daily. Added to every new Session, and re-added on every Reset, as an unplaced Flex carrying its name, duration, and Checklist. Always Flex-shaped — a fixed start is rejected. Library edits to a Daily Activity never change a Session already holding a copy of it; the edit takes effect the next time a Session is built or Reset. Dropping a daily Flex is undoable like any other Drop, and leaves no trace or memory of the Drop. Inserting a Daily Activity by hand adds another copy that counts as one you added yourself, not as a Daily Activity.
+_Avoid_: Habit, routine, required
 
 **Checklist**:
 A named reusable list of things to bring or do, attached to a Plan item and shown with that item on the finished Plan. On the finished Plan, rows can be checked off during the day. A Day Template entry or an Activity Template may pre-attach a Checklist. Deleting a Checklist or Activity Template still referenced by a Day Template entry, or still attached to an item in an in-progress Session, is allowed — the reference goes stale rather than blocking the deletion.

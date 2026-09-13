@@ -193,6 +193,7 @@
     .block-title { font-weight: 600; font-size: 0.95rem; }
     .block-checklist { font-size: 0.72rem; color: var(--muted); margin-top: 0.12rem; }
     .icloud-tag { font-size: 0.7rem; color: var(--muted); margin-left: 0.35rem; }
+    .daily-tag { font-size: 0.7rem; color: var(--muted); margin-left: 0.35rem; }
     .block-range { font-family: "IBM Plex Mono", monospace; font-size: 0.7rem; opacity: 0.6; margin-top: 0.12rem; }
     .gap {
       position: relative;
@@ -614,10 +615,11 @@
         }
         const checklistLabel = checklistName(row.checklist);
         const icloudTag = row.source === "icloud" ? '<span class="icloud-tag">📅 iCloud</span>' : "";
+        const dailyTag = row.source === "daily" ? '<span class="daily-tag">🔁 daily</span>' : "";
         return '<button type="button" class="block ' + row.kind + '" data-kind="' + row.kind +
           '" data-id="' + esc(row.id) + '" style="min-height:' + heightPx(row.durationMin, total, 52) + 'px">' +
           '<span class="time-tag">' + esc(startLabel) + "</span>" +
-          '<div class="block-title">' + esc(row.name) + icloudTag + "</div>" +
+          '<div class="block-title">' + esc(row.name) + icloudTag + dailyTag + "</div>" +
           (checklistLabel ? '<div class="block-checklist">' + esc(checklistLabel) + "</div>" : "") +
           '<div class="block-range">' + esc(startLabel) + "–" + esc(endLabel) +
           " · " + esc(fmtDur(row.durationMin)) + "</div></button>";
@@ -640,7 +642,8 @@
         '<div class="tray-chips">' + unplaced.map(item =>
           '<div class="flex-chip' + (armedFlexId === item.id ? " armed" : "") +
           '" data-arm="' + esc(item.id) + '">' +
-          '<span class="name">' + esc(item.name) + "</span>" +
+          '<span class="name">' + esc(item.name) +
+          (item.source === "daily" ? '<span class="daily-tag">🔁 daily</span>' : "") + "</span>" +
           '<span class="meta">' + esc(fmtDur(item.duration_minutes)) + " · unplaced</span>" +
           '<div class="ops">' +
           '<button type="button" data-edit-flex="' + esc(item.id) + '">Edit</button>' +

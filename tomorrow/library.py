@@ -59,13 +59,18 @@ def save_activity_template(
     duration_minutes: int,
     start: str | None = None,
     checklist: str | None = None,
+    daily: bool = False,
 ) -> str:
+    if daily and start is not None:
+        raise ValueError("A Daily Activity cannot have a fixed start.")
     slug = activity_id or _slugify(name)
     lines = [f"name = {_toml_string(name)}", f"duration = {int(duration_minutes)}"]
     if start is not None:
         lines.append(f"start = {_toml_string(start)}")
     if checklist is not None:
         lines.append(f"checklist = {_toml_string(checklist)}")
+    if daily:
+        lines.append("daily = true")
     _write_toml_lines(activity_templates_dir(repo_root / "data"), slug, lines)
     return slug
 

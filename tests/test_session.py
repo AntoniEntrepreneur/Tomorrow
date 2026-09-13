@@ -16,6 +16,7 @@ from tomorrow.domain import (
     parse_clock,
 )
 from tomorrow.defaults import DayBounds
+from tomorrow.library import save_activity_template
 from tomorrow.session import (
     add_anchor,
     add_draft,
@@ -2645,3 +2646,239 @@ def test_renamed_imported_draft_keeps_its_new_name_across_a_reimport(
 
     assert len(refreshed["drafts"]) == 1
     assert refreshed["drafts"][0]["name"] == "Dentist re: crown"
+
+
+def _write_daily_activities(tmp_path: Path) -> None:
+    save_activity_template(
+        tmp_path, activity_id="deep-work", name="Deep Work", duration_minutes=90, daily=True
+    )
+    save_activity_template(
+        tmp_path, activity_id="yoga-nidra", name="Yoga Nidra", duration_minutes=20, daily=True
+    )
+
+
+def test_new_session_holds_one_unplaced_daily_flex_per_daily_activity(
+    tmp_path: Path,
+) -> None:
+    _write_defaults(tmp_path)
+    _write_daily_activities(tmp_path)
+    save_activity_template(
+        tmp_path, activity_id="therapy", name="Therapy", duration_minutes=50, start="16:00"
+    )
+
+    view = session_view(tmp_path, now=_now())
+
+    daily_flexes = {flex["name"]: flex for flex in view["flexes"]}
+    assert set(daily_flexes) == {"Deep Work", "Yoga Nidra"}
+    assert daily_flexes["Deep Work"]["source"] == "daily"
+    assert daily_flexes["Deep Work"]["start"] is None
+    assert daily_flexes["Deep Work"]["duration_minutes"] == 90
+    assert daily_flexes["Deep Work"]["activity_template_id"] == "deep-work"
+    assert view["anchors"] == []
+
+
+def test_reset_re_adds_daily_activities_and_undo_restores_prior_session(
+    tmp_path: Path,
+) -> None:
+    _write_defaults(tmp_path)
+    _write_daily_activities(tmp_path)
+    session_view(tmp_path, now=_now())
+
+    view = session_view(tmp_path, now=_now())
+    dropped_id = next(f["id"] for f in view["flexes"] if f["name"] == "Deep Work")
+    view = drop_flex(tmp_path, item_id=dropped_id, now=_now())
+    assert "Deep Work" not in [f["name"] for f in view["flexes"]]
+
+    reset = reset_session(tmp_path, now=_now())
+    assert sorted(f["name"] for f in reset["flexes"]) == ["Deep Work", "Yoga Nidra"]
+
+    undone = undo_session(tmp_path, now=_now())
+    assert "Deep Work" not in [f["name"] for f in undone["flexes"]]
+
+
+def test_dropping_a_daily_flex_then_undo_restores_it(tmp_path: Path) -> None:
+    _write_defaults(tmp_path)
+    _write_daily_activities(tmp_path)
+    view = session_view(tmp_path, now=_now())
+    item_id = next(f["id"] for f in view["flexes"] if f["name"] == "Deep Work")
+
+    dropped = drop_flex(tmp_path, item_id=item_id, now=_now())
+    assert "Deep Work" not in [f["name"] for f in dropped["flexes"]]
+
+    restored = undo_session(tmp_path, now=_now())
+    assert item_id in [f["id"] for f in restored["flexes"]]
+
+
+def test_editing_activity_template_after_session_exists_does_not_change_session(
+    tmp_path: Path,
+) -> None:
+    _write_defaults(tmp_path)
+    _write_daily_activities(tmp_path)
+    session_view(tmp_path, now=_now())
+
+    save_activity_template(
+        tmp_path, activity_id="deep-work", name="Deep Work", duration_minutes=120, daily=True
+    )
+
+    view = session_view(tmp_path, now=_now())
+    deep_work = next(f for f in view["flexes"] if f["name"] == "Deep Work")
+    assert deep_work["duration_minutes"] == 90
+
+    reset = reset_session(tmp_path, now=_now())
+    deep_work = next(f for f in reset["flexes"] if f["name"] == "Deep Work")
+    assert deep_work["duration_minutes"] == 120
+
+
+def test_non_daily_activity_templates_are_not_added_to_new_session(
+    tmp_path: Path,
+) -> None:
+    _write_defaults(tmp_path)
+    save_activity_template(
+        tmp_path, activity_id="deep-work", name="Deep Work", duration_minutes=90
+    )
+
+    view = session_view(tmp_path, now=_now())
+
+    assert view["flexes"] == []
+
+
+def test_inserting_a_daily_activity_by_hand_adds_a_second_copy_without_source(
+    tmp_path: Path,
+) -> None:
+    _write_defaults(tmp_path)
+    _write_daily_activities(tmp_path)
+    view = session_view(tmp_path, now=_now())
+    assert len([f for f in view["flexes"] if f["name"] == "Deep Work"]) == 1
+
+    view = insert_activity_template(tmp_path, activity_id="deep-work", now=_now())
+
+    deep_work_copies = [f for f in view["flexes"] if f["name"] == "Deep Work"]
+    assert len(deep_work_copies) == 2
+    assert any(f.get("source") is None for f in deep_work_copies)
+
+
+def test_weekday_offer_shows_when_session_holds_only_daily_and_icloud_items(
+    tmp_path: Path,
+) -> None:
+    _write_defaults(tmp_path)
+    _write_tuesday_template(tmp_path)
+    _write_daily_activities(tmp_path)
+
+    view = session_view(tmp_path, now=_now())
+
+    assert view["flexes"]
+    assert view["show_template_offer"] is True
+
+
+def test_plan_html_does_not_include_daily_source_marker(tmp_path: Path) -> None:
+    _write_defaults(tmp_path)
+    _write_daily_activities(tmp_path)
+    view = session_view(tmp_path, now=_now())
+    item_id = next(f["id"] for f in view["flexes"] if f["name"] == "Deep Work")
+    place_flex(tmp_path, item_id=item_id, start="07:00", now=_now())
+    other_id = next(f["id"] for f in view["flexes"] if f["name"] == "Yoga Nidra")
+    place_flex(tmp_path, item_id=other_id, start="09:00", now=_now())
+
+    plan_path = submit_session(tmp_path, now=_now())
+    content = plan_path.read_text(encoding="utf-8")
+
+    assert "daily" not in content.lower()
+
+
+def test_apply_removes_daily_flex_duplicated_by_activity_reference(
+    tmp_path: Path,
+) -> None:
+    _write_defaults(tmp_path)
+    _write_daily_activities(tmp_path)
+    templates = tmp_path / "data" / "templates"
+    templates.mkdir()
+    (templates / "tuesday.toml").write_text(
+        '[[flex]]\nactivity = "deep-work"\n', encoding="utf-8"
+    )
+
+    view = apply_template(tmp_path, now=_now())
+
+    deep_work_flexes = [f for f in view["flexes"] if f["name"] == "Deep Work"]
+    assert len(deep_work_flexes) == 1
+    assert deep_work_flexes[0].get("source") is None
+    assert any(f["name"] == "Yoga Nidra" for f in view["flexes"])
+
+
+def test_apply_removes_daily_flex_duplicated_by_case_insensitive_name(
+    tmp_path: Path,
+) -> None:
+    _write_defaults(tmp_path)
+    _write_daily_activities(tmp_path)
+    templates = tmp_path / "data" / "templates"
+    templates.mkdir()
+    (templates / "tuesday.toml").write_text(
+        '[[anchor]]\nname = "deep work"\nstart = "09:00"\nduration = 90\n',
+        encoding="utf-8",
+    )
+
+    view = apply_template(tmp_path, now=_now())
+
+    assert [f["name"] for f in view["flexes"]] == ["Yoga Nidra"]
+    assert view["anchors"][0]["name"] == "deep work"
+
+
+def test_apply_removes_a_placed_or_resized_daily_flex_when_duplicated(
+    tmp_path: Path,
+) -> None:
+    _write_defaults(tmp_path)
+    _write_daily_activities(tmp_path)
+    templates = tmp_path / "data" / "templates"
+    templates.mkdir()
+    (templates / "tuesday.toml").write_text(
+        '[[flex]]\nactivity = "deep-work"\n', encoding="utf-8"
+    )
+    view = session_view(tmp_path, now=_now())
+    item_id = next(f["id"] for f in view["flexes"] if f["name"] == "Deep Work")
+    place_flex(tmp_path, item_id=item_id, start="07:00", now=_now())
+    change_flex_duration(tmp_path, item_id=item_id, duration_minutes=45, now=_now())
+
+    view = apply_template(tmp_path, now=_now())
+
+    assert item_id not in [f["id"] for f in view["flexes"]]
+
+
+def test_undo_after_apply_restores_removed_daily_flex_with_same_id_and_placement(
+    tmp_path: Path,
+) -> None:
+    _write_defaults(tmp_path)
+    _write_daily_activities(tmp_path)
+    templates = tmp_path / "data" / "templates"
+    templates.mkdir()
+    (templates / "tuesday.toml").write_text(
+        '[[flex]]\nactivity = "deep-work"\n', encoding="utf-8"
+    )
+    view = session_view(tmp_path, now=_now())
+    item_id = next(f["id"] for f in view["flexes"] if f["name"] == "Deep Work")
+    place_flex(tmp_path, item_id=item_id, start="07:00", now=_now())
+
+    apply_template(tmp_path, now=_now())
+    restored = undo_session(tmp_path, now=_now())
+
+    restored_flex = next(f for f in restored["flexes"] if f["id"] == item_id)
+    assert restored_flex["start"] == "07:00"
+    assert restored_flex["name"] == "Deep Work"
+
+
+def test_apply_does_not_remove_a_hand_added_flex_with_matching_name(
+    tmp_path: Path,
+) -> None:
+    _write_defaults(tmp_path)
+    _write_daily_activities(tmp_path)
+    templates = tmp_path / "data" / "templates"
+    templates.mkdir()
+    (templates / "tuesday.toml").write_text(
+        '[[flex]]\nname = "Deep Work"\nduration = 90\n', encoding="utf-8"
+    )
+
+    view = add_flex(tmp_path, name="Deep Work", duration_minutes=90, now=_now())
+    assert view["template_offer"] == "pending"
+    assert view["show_template_offer"] is False
+
+    applied = apply_template(tmp_path, now=_now())
+    assert applied["template_offer"] == "pending"
+    assert [f["name"] for f in applied["flexes"]].count("Deep Work") == 2
