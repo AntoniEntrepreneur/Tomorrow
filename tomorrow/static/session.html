@@ -669,6 +669,7 @@
           (item.source === "icloud" ? ' <span class="icloud-tag">📅 iCloud</span>' : "") +
           "</span>" +
           '<button type="button" data-promote="' + esc(item.id) + '">Promote</button>' +
+          '<button type="button" data-edit-draft="' + esc(item.id) + '">Edit</button>' +
           '<button type="button" data-drop-draft="' + esc(item.id) + '">Drop</button>' +
           "</div>" +
           (item.note ? '<div class="draft-note">' + esc(item.note) + "</div>" : "") +
@@ -855,6 +856,7 @@
         "<h2>Promote Draft · " + esc(item.name) + "</h2>" +
         '<p class="hint">A new opaque id is minted. The Draft’s id does not leak.</p>' +
         '<form id="promote-draft" data-id="' + esc(item.id) + '">' +
+        '<label>Name <input name="name" required value="' + esc(item.name) + '"></label>' +
         '<label>Promote to <select name="kind">' +
         '<option value="anchor">Anchor</option>' +
         '<option value="flex">Flex</option>' +
@@ -863,6 +865,7 @@
         durationFields("09:00", 30, "promote-start-label") +
         '<p class="hint" id="promote-flex-hint" hidden>Flex lands unplaced in the tray. Place it whenever you notice a Gap.</p>' +
         '<p class="hint" id="promote-todo-hint" hidden>To-do needs nothing else — its note carries over if it has one.</p>' +
+        checklistField("") +
         '<div class="actions"><button class="primary" type="submit">Promote</button>' +
         '<button type="button" class="ghost" data-close>Cancel</button>' +
         '<button type="button" class="danger" data-drop-draft="' + esc(item.id) + '">Drop</button></div></form>'
@@ -872,6 +875,17 @@
       const kind = form.querySelector('[name="kind"]');
       kind.addEventListener("change", () => syncPromoteFields(form));
       syncPromoteFields(form);
+      maybeSuggestChecklist(form);
+    }
+
+    function sheetEditDraft(item) {
+      openSheet(
+        "<h2>Edit Draft</h2>" +
+        '<form id="edit-draft" data-id="' + esc(item.id) + '">' +
+        '<label>Name <input name="name" required value="' + esc(item.name) + '"></label>' +
+        '<div class="actions"><button class="primary" type="submit">Save</button>' +
+        '<button type="button" class="ghost" data-close>Cancel</button></div></form>'
+      );
     }
 
     function syncPromoteFields(form) {
@@ -881,6 +895,7 @@
       document.getElementById("promote-start-label").hidden = asFlex || asTodo;
       document.getElementById("promote-flex-hint").hidden = !asFlex;
       document.getElementById("promote-todo-hint").hidden = !asTodo;
+      if (form.checklist) form.checklist.closest("label").hidden = asTodo;
       const row = form.querySelector(".row");
       if (row) row.hidden = asTodo;
       const toggleBtn = form.querySelector("[data-toggle-duration-mode]");
@@ -1045,10 +1060,28 @@
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload)
       });
-      const session = await response.json();
+      const data = await response.json();
+      if (!response.ok) {
+        showSheetError(data.error || "Something went wrong.");
+        return null;
+      }
       closeSheet();
-      render(session);
-      return session;
+      render(data);
+      return data;
+    }
+
+    function showSheetError(message) {
+      const sheet = document.getElementById("sheet");
+      const form = sheet.querySelector("form");
+      if (!form) return;
+      let el = form.querySelector(".field-error");
+      if (!el) {
+        el = document.createElement("p");
+        el.className = "field-error";
+        form.insertBefore(el, form.firstChild);
+      }
+      el.textContent = message;
+      el.hidden = false;
     }
 
     async function loadSession() {
@@ -1111,9 +1144,15 @@
         return;
       }
       const promoteId = event.target.dataset.promote;
-      if (!promoteId) return;
-      const item = findDraft(promoteId);
-      if (item) sheetPromote(item);
+      if (promoteId) {
+        const item = findDraft(promoteId);
+        if (item) sheetPromote(item);
+        return;
+      }
+      const editId = event.target.dataset.editDraft;
+      if (!editId) return;
+      const item = findDraft(editId);
+      if (item) sheetEditDraft(item);
     });
 
     document.getElementById("tray").addEventListener("click", event => {
@@ -1301,11 +1340,12 @@
         return;
       }
       if (form.id === "promote-draft") {
-        const payload = { id: form.dataset.id, kind: form.kind.value };
+        const payload = { id: form.dataset.id, kind: form.kind.value, name: form.name.value };
         if (form.kind.value !== "todo") {
           const duration = resolveDurationMinutes(form);
           if (duration === null) return;
           payload.duration_minutes = duration;
+          payload.checklist = checklistPayload(form);
           if (form.kind.value === "anchor") payload.start = clockValue(form.start);
         }
         await mutate("/api/promote", payload);
@@ -1344,6 +1384,14 @@
           id: form.dataset.id,
           start: clockValue(form.start),
           duration_minutes: duration
+        });
+        return;
+      }
+      if (form.id === "edit-draft") {
+        await mutate("/api/edit", {
+          kind: "draft",
+          id: form.dataset.id,
+          name: form.name.value
         });
         return;
       }
