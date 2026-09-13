@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Tuesday, 25 August 2026</title>
+  <title>Sunday, 13 September 2026</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=DM+Mono:ital,wght@0,400;0,500;1,400&family=Instrument+Serif:ital@0;1&family=Outfit:wght@400;500;600&display=swap" rel="stylesheet">
@@ -216,56 +216,48 @@
     <div class="shell">
       <header class="plan-header">
         <div class="plan-meta">
-          <div class="plan-date">Tuesday, 25 August 2026</div>
-          <div class="plan-bounds">Wake 10:30 · Sleep 00:30 +1</div>
+          <div class="plan-date">Sunday, 13 September 2026</div>
+          <div class="plan-bounds">Wake 09:00 · Sleep 23:30</div>
           
         </div>
       </header>
-      <div class="bounds-cap">↑ 10:30 wake</div>
+      <div class="bounds-cap">↑ 09:00 wake</div>
       <div class="rail-wrap">
         
         
         <div class="block flex" style="min-height:52px">
-          <div class="time-tag">10:30</div>
+          <div class="time-tag">09:00</div>
           <div class="block-title">Morning routine</div>
-          <div class="block-range">10:30–11:40</div>
+          <div class="block-range">09:00–10:15</div>
         </div>
         
         
         
         <div class="block flex" style="min-height:52px">
-          <div class="time-tag">11:40</div>
-          <div class="block-title">Deep work</div>
-          <div class="block-range">11:40–13:10</div>
+          <div class="time-tag">10:15</div>
+          <div class="block-title">Deep Work</div>
+          <div class="block-range">10:15–11:45</div>
         </div>
         
         
         
-        <div class="block gap-filler" style="min-height:145px">Gap · 4h 50m</div>
+        <div class="block gap-filler" style="min-height:147px">Gap · 5h 5m</div>
         
         
         
-        <div class="block anchor" style="min-height:52px">
-          <div class="time-tag">18:00</div>
-          <div class="block-title">Fryzjer 18</div>
-          <div class="block-range">18:00–18:40</div>
+        <div class="block flex" style="min-height:62px">
+          <div class="time-tag">16:50</div>
+          <div class="block-title">Gym + Sauna</div>
+          <div class="block-range">16:50–19:00</div>
         </div>
         
         
         
-        <div class="block anchor" style="min-height:52px">
-          <div class="time-tag">18:40</div>
-          <div class="block-title">Gym</div>
-          <div class="block-range">18:40–20:10</div>
-        </div>
-        
-        
-        
-        <div class="block gap-filler" style="min-height:130px">Gap · 4h 20m</div>
+        <div class="block gap-filler" style="min-height:130px">Gap · 4h 30m</div>
         
         
       </div>
-      <div class="bounds-cap">00:30 +1 sleep ↓</div>
+      <div class="bounds-cap">23:30 sleep ↓</div>
       <section class="prep-section" aria-label="Pack and prep">
         <div class="prep-heading">Pack &amp; prep</div>
         <div id="prep-active"></div>
@@ -275,23 +267,53 @@
   </div>
   <script>
     const PLAN = {
-      dateKey: "2026-08-25",
+      dateKey: "2026-09-13",
       bundles: [
         
         {
-          itemId: "gym-0",
-          itemName: "Gym",
-          checklistId: "gym-bag",
-          checklistName: "Gym bag",
+          itemId: "gym-sauna-0",
+          itemName: "Gym + Sauna",
+          checklistId: "gym-sauna",
+          checklistName: "Gym + Sauna",
           rows: [
             
-            "Water bottle",
+            "Koszulka",
             
-            "Towel",
+            "Spodenki",
             
-            "Lock",
+            "Skarpetki",
             
-            "Headphones"
+            "Buty",
+            
+            "Woda",
+            
+            "Klodka",
+            
+            "Dezodorant",
+            
+            "Czapa na saune",
+            
+            "Klucze do domu",
+            
+            "Recznik",
+            
+            "Klapki",
+            
+            "Swieze ubrania",
+            
+            "Sluchawki",
+            
+            "Garmin",
+            
+            "Elektrolity",
+            
+            "Etui na zegarek",
+            
+            "Pre workout stack",
+            
+            "Zel pod prysznic i szampon",
+            
+            "Mini band for serratus"
             
           ]
         }
@@ -349,22 +371,12 @@
     function renderPrep() {
       const activeRoot = document.getElementById("prep-active");
       const doneRoot = document.getElementById("prep-done");
-
-      // Remember which sections the user had expanded, so re-rendering after a
-      // single checkbox change doesn't collapse everything.
-      const openBundles = new Set();
-      document.querySelectorAll(".prep-bundle[open][data-bundle]").forEach(el => {
-        openBundles.add(el.dataset.bundle);
-      });
-      const doneOpen = !!document.querySelector(".prep-done[open]");
-
       const { active, done } = splitActiveDone(PLAN.bundles);
 
       activeRoot.innerHTML = active.map(bundle => {
         const progress = bundleProgress(bundle);
-        const openAttr = openBundles.has(bundle.itemId) ? " open" : "";
         return `
-          <details class="prep-bundle" data-bundle="${bundle.itemId}"${openAttr}>
+          <details class="prep-bundle" data-bundle="${bundle.itemId}">
             <summary>
               <span>${bundleLabel(bundle)}</span>
               <span class="bundle-count">${progress.done}/${progress.total}</span>
@@ -374,7 +386,7 @@
       }).join("");
 
       doneRoot.innerHTML = done.length ? `
-        <details class="prep-done"${doneOpen ? " open" : ""}>
+        <details class="prep-done">
           <summary>Done · ${done.length}</summary>
           <div class="done-list">
             ${done.map(bundle => `
