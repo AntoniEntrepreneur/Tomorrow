@@ -17,10 +17,19 @@ from tomorrow.defaults import DayBounds
 
 @dataclass(frozen=True)
 class Draft:
-    """Something captured this session that is not yet an Anchor or Flex."""
+    """Something captured this session that is not yet an Anchor, Flex, or To-do."""
 
     name: str
     source: str | None = None
+    note: str | None = None
+
+
+@dataclass(frozen=True)
+class ToDo:
+    """A named thing to do sometime tomorrow: no start, no duration, no Gap."""
+
+    name: str
+    note: str = ""
 
 
 @dataclass(frozen=True)
@@ -140,6 +149,7 @@ class FinalizedPlan:
     bounds: DayBounds
     anchors: tuple[Anchor, ...]
     flexes: tuple[Flex, ...]
+    todos: tuple[ToDo, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -285,6 +295,7 @@ def finalize_plan(
     drafts: Sequence[Draft],
     anchors: Sequence[Anchor],
     flexes: Sequence[Flex] = (),
+    todos: Sequence[ToDo] = (),
 ) -> FinalizeResult:
     """Day bounds and Anchor overlap checks are inclusive at the boundary: an
     Anchor may start exactly at wake and its occupied time may end exactly at
@@ -344,7 +355,12 @@ def finalize_plan(
         sorted(placed_flexes, key=lambda flex: minutes_since_wake(flex.start, wake=wake))
     )
     return FinalizeResult(
-        plan=FinalizedPlan(bounds=bounds, anchors=ordered_anchors, flexes=ordered_flexes),
+        plan=FinalizedPlan(
+            bounds=bounds,
+            anchors=ordered_anchors,
+            flexes=ordered_flexes,
+            todos=tuple(todos),
+        ),
         blockers=(),
     )
 

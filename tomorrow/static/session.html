@@ -21,6 +21,8 @@
       --flex: #e0b896;
       --flex-bg: #2c241c;
       --draft: #8ea0c8;
+      --todo: #c98ec8;
+      --todo-bg: #2a1f2c;
       --danger: #e07a6a;
     }
 
@@ -31,7 +33,7 @@
       font-family: "IBM Plex Sans", system-ui, sans-serif;
     }
 
-    .shell { max-width: 28rem; margin: 0 auto; padding: 1.25rem 1.1rem 8.5rem; }
+    .shell { max-width: 28rem; margin: 0 auto; padding: 1.25rem 1.1rem 14rem; }
 
     .header { margin-bottom: 1rem; }
     .kicker {
@@ -104,7 +106,7 @@
       border: 1px solid rgba(224,168,74,0.28);
     }
 
-    .stamps { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 0.4rem; margin: 1rem 0 1.25rem; }
+    .stamps { display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap: 0.4rem; margin: 1rem 0 1.25rem; }
     .stamp {
       border: 2px solid currentColor;
       background: transparent;
@@ -119,6 +121,7 @@
     .stamp.anchor { color: var(--anchor); }
     .stamp.flex { color: var(--flex); }
     .stamp.draft { color: var(--draft); }
+    .stamp.todo { color: var(--todo); }
     .stamp span { display: block; font-size: 1.35rem; line-height: 1; margin-bottom: 0.2rem; font-weight: 400; }
 
     .drafts { display: flex; flex-wrap: wrap; gap: 0.35rem; margin: 0 0 0.85rem; }
@@ -141,6 +144,9 @@
       background: transparent; border: none; color: inherit; cursor: pointer;
       font-size: 0.68rem; padding: 0.15rem 0.35rem;
     }
+    .draft-chip { flex-direction: column; align-items: flex-start; }
+    .draft-chip .row { display: flex; align-items: center; gap: 0.35rem; width: 100%; }
+    .draft-note { font-size: 0.68rem; opacity: 0.75; white-space: pre-line; margin-top: 0.1rem; }
 
     .blockers { color: var(--danger); font-size: 0.8rem; margin-bottom: 0.85rem; }
 
@@ -206,8 +212,11 @@
     .gap.armed { outline: 2px solid var(--wick); }
     .gap .cta { font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; font-size: 0.65rem; }
 
-    .tray {
+    .trays {
       position: fixed; left: 0; right: 0; bottom: 0; z-index: 80;
+      display: flex; flex-direction: column;
+    }
+    .tray {
       background: #0e121a;
       border-top: 1px solid rgba(224,168,74,0.25);
       padding: 0.55rem 1rem 0.85rem;
@@ -239,6 +248,27 @@
       color: inherit; border-radius: 999px; font-size: 0.62rem;
       padding: 0.1rem 0.4rem; cursor: pointer;
     }
+    .todo-chip {
+      flex: 0 0 auto;
+      background: var(--todo-bg);
+      color: var(--todo);
+      border: 1px solid rgba(201,142,200,0.55);
+      border-radius: 10px;
+      padding: 0.45rem 0.65rem;
+      font-size: 0.8rem;
+      cursor: pointer;
+      min-width: 9.5rem;
+      text-align: left;
+    }
+    .todo-chip .name { font-weight: 600; display: block; }
+    .todo-chip .note { font-size: 0.68rem; opacity: 0.75; white-space: pre-line; margin-top: 0.15rem; }
+    .todo-chip .ops { display: flex; gap: 0.25rem; margin-top: 0.25rem; }
+    .todo-chip .ops button {
+      background: transparent; border: 1px solid rgba(201,142,200,0.35);
+      color: inherit; border-radius: 999px; font-size: 0.62rem;
+      padding: 0.1rem 0.4rem; cursor: pointer;
+    }
+    .tray.todos { border-top-color: rgba(201,142,200,0.35); }
 
     .sheet-backdrop {
       display: none;
@@ -260,7 +290,7 @@
     }
     .sheet h2 { font-size: 1.05rem; font-weight: 600; margin-bottom: 0.85rem; }
     .sheet label { display: block; font-size: 0.75rem; font-weight: 600; margin: 0.65rem 0 0.25rem; }
-    .sheet input, .sheet select {
+    .sheet input, .sheet select, .sheet textarea {
       width: 100%;
       font: 400 1rem/1.3 "IBM Plex Sans", system-ui, sans-serif;
       padding: 0.5rem 0.6rem;
@@ -316,6 +346,7 @@
       <button type="button" class="stamp anchor" id="stamp-anchor"><span>A</span>Anchor</button>
       <button type="button" class="stamp flex" id="stamp-flex"><span>F</span>Flex</button>
       <button type="button" class="stamp draft" id="stamp-draft"><span>D</span>Draft</button>
+      <button type="button" class="stamp todo" id="stamp-todo"><span>T</span>To-do</button>
     </div>
 
     <div class="drafts empty" id="drafts"></div>
@@ -327,9 +358,15 @@
     <button type="button" class="rail-cap" id="sleep-cap">sleep ↓</button>
   </div>
 
-  <div class="tray empty" id="tray">
-    <div class="tray-label">Unplaced Flex — Place / Change Duration / Drop any time</div>
-    <div>No unplaced Flex.</div>
+  <div class="trays">
+    <div class="tray todos empty" id="todos-tray">
+      <div class="tray-label">To-dos — sometime tomorrow, no time needed</div>
+      <div>No To-dos.</div>
+    </div>
+    <div class="tray empty" id="tray">
+      <div class="tray-label">Unplaced Flex — Place / Change Duration / Drop any time</div>
+      <div>No unplaced Flex.</div>
+    </div>
   </div>
 
   <div class="sheet-backdrop" id="sheet-backdrop" hidden>
@@ -549,6 +586,7 @@
           '<button type="button" data-edit-flex="' + esc(item.id) + '">Edit</button>' +
           '<button type="button" data-place="' + esc(item.id) + '">Place</button>' +
           '<button type="button" data-change-duration="' + esc(item.id) + '">Change Duration</button>' +
+          '<button type="button" data-flex-to-todo="' + esc(item.id) + '">Make To-do</button>' +
           '<button type="button" data-drop="' + esc(item.id) + '">Drop</button>' +
           "</div></div>"
         ).join("") + "</div>";
@@ -567,13 +605,40 @@
         '<div class="drafts-label">Drafts</div>' +
         drafts.map(item =>
           '<div class="draft-chip">' +
-          "<span>" + esc(item.name) +
+          '<div class="row"><span>' + esc(item.name) +
           (item.source === "icloud" ? ' <span class="icloud-tag">📅 iCloud</span>' : "") +
           "</span>" +
           '<button type="button" data-promote="' + esc(item.id) + '">Promote</button>' +
           '<button type="button" data-drop-draft="' + esc(item.id) + '">Drop</button>' +
+          "</div>" +
+          (item.note ? '<div class="draft-note">' + esc(item.note) + "</div>" : "") +
           "</div>"
         ).join("");
+    }
+
+    function renderTodos(session) {
+      const todos = session.todos || [];
+      const tray = document.getElementById("todos-tray");
+      if (!todos.length) {
+        tray.classList.add("empty");
+        tray.innerHTML =
+          '<div class="tray-label">To-dos — sometime tomorrow, no time needed</div>' +
+          "<div>No To-dos.</div>";
+        return;
+      }
+      tray.classList.remove("empty");
+      tray.innerHTML =
+        '<div class="tray-label">To-dos — sometime tomorrow, no time needed</div>' +
+        '<div class="tray-chips">' + todos.map(item =>
+          '<div class="todo-chip" data-edit-todo="' + esc(item.id) + '">' +
+          '<span class="name">' + esc(item.name) + "</span>" +
+          (item.note ? '<div class="note">' + esc(item.note) + "</div>" : "") +
+          '<div class="ops">' +
+          '<button type="button" data-todo-to-flex="' + esc(item.id) + '">Make Flex</button>' +
+          '<button type="button" data-todo-to-anchor="' + esc(item.id) + '">Make Anchor</button>' +
+          '<button type="button" data-drop-todo="' + esc(item.id) + '">Drop</button>' +
+          "</div></div>"
+        ).join("") + "</div>";
     }
 
     function render(session) {
@@ -600,6 +665,7 @@
       renderRail(session);
       renderDrafts(session);
       renderTray(session);
+      renderTodos(session);
       setChromeEnabled();
     }
 
@@ -692,6 +758,10 @@
       return (current.drafts || []).find(item => item.id === itemId);
     }
 
+    function findTodo(itemId) {
+      return (current.todos || []).find(item => item.id === itemId);
+    }
+
     function gapRows() {
       return railRows(current).filter(row => row.kind === "gap");
     }
@@ -729,9 +799,11 @@
         '<label>Promote to <select name="kind">' +
         '<option value="anchor">Anchor</option>' +
         '<option value="flex">Flex</option>' +
+        '<option value="todo">To-do</option>' +
         "</select></label>" +
         durationFields("09:00", 30, "promote-start-label") +
         '<p class="hint" id="promote-flex-hint" hidden>Flex lands unplaced in the tray. Place it whenever you notice a Gap.</p>' +
+        '<p class="hint" id="promote-todo-hint" hidden>To-do needs nothing else — its note carries over if it has one.</p>' +
         '<div class="actions"><button class="primary" type="submit">Promote</button>' +
         '<button type="button" class="ghost" data-close>Cancel</button>' +
         '<button type="button" class="danger" data-drop-draft="' + esc(item.id) + '">Drop</button></div></form>'
@@ -745,12 +817,66 @@
 
     function syncPromoteFields(form) {
       const asFlex = form.kind.value === "flex";
-      form.start.required = !asFlex;
-      document.getElementById("promote-start-label").hidden = asFlex;
+      const asTodo = form.kind.value === "todo";
+      form.start.required = !asFlex && !asTodo;
+      document.getElementById("promote-start-label").hidden = asFlex || asTodo;
       document.getElementById("promote-flex-hint").hidden = !asFlex;
+      document.getElementById("promote-todo-hint").hidden = !asTodo;
+      const row = form.querySelector(".row");
+      if (row) row.hidden = asTodo;
       const toggleBtn = form.querySelector("[data-toggle-duration-mode]");
-      if (toggleBtn) toggleBtn.hidden = asFlex;
-      if (asFlex && form.dataset.durationMode === "end") setDurationMode(form, "duration");
+      if (toggleBtn) toggleBtn.hidden = asFlex || asTodo;
+      form.duration_minutes.required = !asTodo && form.dataset.durationMode !== "end";
+      if ((asFlex || asTodo) && form.dataset.durationMode === "end") setDurationMode(form, "duration");
+    }
+
+    function sheetAddTodo() {
+      openSheet(
+        "<h2>Add To-do</h2><p class=\"hint\">No start, no duration — just something to do sometime tomorrow.</p>" +
+        "<form id=\"add-todo\">" +
+        '<label>Name <input name="name" required></label>' +
+        '<label>Note <textarea name="note" rows="3"></textarea></label>' +
+        '<div class="actions"><button class="primary" type="submit">Add To-do</button>' +
+        '<button type="button" class="ghost" data-close>Cancel</button></div></form>',
+        "stamp"
+      );
+    }
+
+    function sheetEditTodo(item) {
+      openSheet(
+        "<h2>To-do · " + esc(item.name) + "</h2>" +
+        '<form id="edit-todo" data-id="' + esc(item.id) + '">' +
+        '<label>Name <input name="name" required value="' + esc(item.name) + '"></label>' +
+        '<label>Note <textarea name="note" rows="3">' + esc(item.note || "") + '</textarea></label>' +
+        '<div class="actions"><button class="primary" type="submit">Update</button>' +
+        '<button type="button" class="ghost" data-todo-to-flex="' + esc(item.id) + '">Make Flex</button>' +
+        '<button type="button" class="ghost" data-todo-to-anchor="' + esc(item.id) + '">Make Anchor</button>' +
+        '<button type="button" class="ghost" data-close>Cancel</button>' +
+        '<button type="button" class="danger" data-drop-todo="' + esc(item.id) + '">Drop</button></div></form>'
+      );
+    }
+
+    function sheetTodoToFlex(item) {
+      openSheet(
+        "<h2>Make Flex · " + esc(item.name) + "</h2>" +
+        '<p class="hint">The note is discarded. Undo brings it back.</p>' +
+        '<form id="todo-to-flex" data-id="' + esc(item.id) + '">' +
+        '<label>Duration (min) <input name="duration_minutes" type="number" min="1" required value="30"></label>' +
+        '<div class="actions"><button class="primary" type="submit">Make Flex</button>' +
+        '<button type="button" class="ghost" data-close>Cancel</button></div></form>'
+      );
+    }
+
+    function sheetTodoToAnchor(item) {
+      openSheet(
+        "<h2>Make Anchor · " + esc(item.name) + "</h2>" +
+        '<p class="hint">The note is discarded. Undo brings it back.</p>' +
+        '<form id="todo-to-anchor" data-id="' + esc(item.id) + '">' +
+        durationFields("09:00", 30) +
+        '<div class="actions"><button class="primary" type="submit">Make Anchor</button>' +
+        '<button type="button" class="ghost" data-close>Cancel</button></div></form>'
+      );
+      initDurationToggle(document.getElementById("todo-to-anchor"));
     }
 
     function sheetPlace(item) {
@@ -809,6 +935,7 @@
         '<div class="actions"><button class="primary" type="submit">Update</button>' +
         '<button type="button" class="ghost" data-place="' + esc(item.id) + '">Place</button>' +
         '<button type="button" class="ghost" data-change-duration="' + esc(item.id) + '">Change Duration</button>' +
+        '<button type="button" class="ghost" data-flex-to-todo="' + esc(item.id) + '">Make To-do</button>' +
         '<button type="button" class="ghost" data-close>Cancel</button>' +
         '<button type="button" class="danger" data-drop="' + esc(item.id) + '">Drop</button></div></form>'
       );
@@ -883,9 +1010,14 @@
       await mutate("/api/place", { id: itemId, start: start });
     }
 
+    async function flexToTodo(itemId) {
+      await mutate("/api/convert", { kind: "flex-to-todo", id: itemId });
+    }
+
     document.getElementById("stamp-anchor").addEventListener("click", sheetAddAnchor);
     document.getElementById("stamp-flex").addEventListener("click", sheetAddFlex);
     document.getElementById("stamp-draft").addEventListener("click", sheetAddDraft);
+    document.getElementById("stamp-todo").addEventListener("click", sheetAddTodo);
     document.getElementById("wake-cap").addEventListener("click", () => sheetEditBound("wake"));
     document.getElementById("sleep-cap").addEventListener("click", () => sheetEditBound("sleep"));
     document.getElementById("rail").addEventListener("click", event => {
@@ -952,10 +1084,47 @@
         if (item) sheetEditFlex(item);
         return;
       }
+      const flexToTodoId = event.target.dataset.flexToTodo;
+      if (flexToTodoId) {
+        event.stopPropagation();
+        flexToTodo(flexToTodoId);
+        return;
+      }
       const chip = event.target.closest("[data-arm]");
       if (!chip) return;
       armedFlexId = armedFlexId === chip.dataset.arm ? null : chip.dataset.arm;
       if (current) render(current);
+    });
+
+    async function dropTodo(itemId) {
+      await mutate("/api/drop", { kind: "todo", id: itemId });
+    }
+
+    document.getElementById("todos-tray").addEventListener("click", event => {
+      const dropId = event.target.dataset.dropTodo;
+      if (dropId) {
+        event.stopPropagation();
+        dropTodo(dropId);
+        return;
+      }
+      const toFlexId = event.target.dataset.todoToFlex;
+      if (toFlexId) {
+        event.stopPropagation();
+        const item = findTodo(toFlexId);
+        if (item) sheetTodoToFlex(item);
+        return;
+      }
+      const toAnchorId = event.target.dataset.todoToAnchor;
+      if (toAnchorId) {
+        event.stopPropagation();
+        const item = findTodo(toAnchorId);
+        if (item) sheetTodoToAnchor(item);
+        return;
+      }
+      const chip = event.target.closest("[data-edit-todo]");
+      if (!chip) return;
+      const item = findTodo(chip.dataset.editTodo);
+      if (item) sheetEditTodo(item);
     });
 
     document.getElementById("sheet-backdrop").addEventListener("click", event => {
@@ -977,10 +1146,36 @@
         await dropFlex(dropId);
         return;
       }
+      const flexToTodoId = event.target.dataset.flexToTodo;
+      if (flexToTodoId) {
+        event.preventDefault();
+        await flexToTodo(flexToTodoId);
+        return;
+      }
       const dropDraftId = event.target.dataset.dropDraft;
       if (dropDraftId) {
         event.preventDefault();
         await dropDraft(dropDraftId);
+        return;
+      }
+      const dropTodoId = event.target.dataset.dropTodo;
+      if (dropTodoId) {
+        event.preventDefault();
+        await dropTodo(dropTodoId);
+        return;
+      }
+      const toFlexId = event.target.dataset.todoToFlex;
+      if (toFlexId) {
+        event.preventDefault();
+        const item = findTodo(toFlexId);
+        if (item) sheetTodoToFlex(item);
+        return;
+      }
+      const toAnchorId = event.target.dataset.todoToAnchor;
+      if (toAnchorId) {
+        event.preventDefault();
+        const item = findTodo(toAnchorId);
+        if (item) sheetTodoToAnchor(item);
         return;
       }
       const placeAt = event.target.dataset.placeAt;
@@ -1046,15 +1241,50 @@
         return;
       }
       if (form.id === "promote-draft") {
+        const payload = { id: form.dataset.id, kind: form.kind.value };
+        if (form.kind.value !== "todo") {
+          const duration = resolveDurationMinutes(form);
+          if (duration === null) return;
+          payload.duration_minutes = duration;
+          if (form.kind.value === "anchor") payload.start = clockValue(form.start);
+        }
+        await mutate("/api/promote", payload);
+        return;
+      }
+      if (form.id === "add-todo") {
+        await mutate("/api/add", {
+          kind: "todo",
+          name: form.name.value,
+          note: form.note.value
+        });
+        return;
+      }
+      if (form.id === "edit-todo") {
+        await mutate("/api/edit", {
+          kind: "todo",
+          id: form.dataset.id,
+          name: form.name.value,
+          note: form.note.value
+        });
+        return;
+      }
+      if (form.id === "todo-to-flex") {
+        await mutate("/api/convert", {
+          kind: "todo-to-flex",
+          id: form.dataset.id,
+          duration_minutes: Number(form.duration_minutes.value)
+        });
+        return;
+      }
+      if (form.id === "todo-to-anchor") {
         const duration = resolveDurationMinutes(form);
         if (duration === null) return;
-        const payload = {
+        await mutate("/api/convert", {
+          kind: "todo-to-anchor",
           id: form.dataset.id,
-          kind: form.kind.value,
+          start: clockValue(form.start),
           duration_minutes: duration
-        };
-        if (form.kind.value === "anchor") payload.start = clockValue(form.start);
-        await mutate("/api/promote", payload);
+        });
         return;
       }
       if (form.id === "place-flex") {
@@ -1121,6 +1351,9 @@
         } else if (key === "d") {
           event.preventDefault();
           sheetAddDraft();
+        } else if (key === "t") {
+          event.preventDefault();
+          sheetAddTodo();
         }
         return;
       }

@@ -25,6 +25,7 @@ from tomorrow.domain import (
     FinalizeResult,
     Flex,
     PlanBlockedError,
+    ToDo,
     compute_gaps,
     describe_blocker,
     finalize_plan,
@@ -78,6 +79,7 @@ def _blank_session(repo_root: Path, *, now: datetime | None = None) -> dict:
         "drafts": [],
         "anchors": [],
         "flexes": [],
+        "todos": [],
         "undo": {"past": [], "future": []},
         "icloud_seen": [],
     }
@@ -127,7 +129,12 @@ def _seed_icloud_items(repo_root: Path, document: dict) -> bool:
             continue
         seen.add(key)
         document["drafts"].append(
-            {"id": uuid.uuid4().hex, "name": item.name, "source": item.source}
+            {
+                "id": uuid.uuid4().hex,
+                "name": item.name,
+                "source": item.source,
+                "note": item.note,
+            }
         )
         added = True
 
@@ -199,6 +206,7 @@ def load_session(repo_root: Path, *, now: datetime | None = None) -> dict:
         document = _new_session_document(repo_root, now=now)
         save_session(repo_root, document)
         return document
+    document.setdefault("todos", [])
     for draft in document.get("drafts", []):
         draft.pop("checklist", None)
     return document
@@ -211,7 +219,12 @@ def _default_day_template_file(repo_root: Path, document: dict) -> Path:
 
 
 def _session_has_items(document: dict) -> bool:
-    return bool(document["drafts"] or document["anchors"] or document["flexes"])
+    return bool(
+        document["drafts"]
+        or document["anchors"]
+        or document["flexes"]
+        or document.get("todos")
+    )
 
 
 def _show_template_offer(repo_root: Path, document: dict) -> bool:
@@ -411,6 +424,125 @@ def add_draft(
     return _commit(repo_root, document, mutate, now=now, opener=opener)
 
 
+def add_todo(
+    repo_root: Path,
+    *,
+    name: str,
+    note: str = "",
+    now: datetime | None = None,
+    opener: Callable[[Request], object] = _default_opener,
+) -> dict:
+    document = load_session(repo_root, now=now)
+
+    def mutate(current: dict) -> None:
+        current["todos"].append({"id": uuid.uuid4().hex, "name": name, "note": note})
+
+    return _commit(repo_root, document, mutate, now=now, opener=opener)
+
+
+def edit_todo(
+    repo_root: Path,
+    *,
+    item_id: str,
+    name: str | None = None,
+    note: str | None = None,
+    now: datetime | None = None,
+    opener: Callable[[Request], object] = _default_opener,
+) -> dict:
+    document = load_session(repo_root, now=now)
+
+    def mutate(current: dict) -> None:
+        todo = _item_by_id(current["todos"], item_id)
+        if name is not None:
+            todo["name"] = name
+        if note is not None:
+            todo["note"] = note
+
+    return _commit(repo_root, document, mutate, now=now, opener=opener)
+
+
+def drop_todo(
+    repo_root: Path,
+    *,
+    item_id: str,
+    now: datetime | None = None,
+    opener: Callable[[Request], object] = _default_opener,
+) -> dict:
+    document = load_session(repo_root, now=now)
+
+    def mutate(current: dict) -> None:
+        _drop_keyed(current, "todos", item_id)
+
+    return _commit(repo_root, document, mutate, now=now, opener=opener)
+
+
+def convert_todo_to_flex(
+    repo_root: Path,
+    *,
+    item_id: str,
+    duration_minutes: int,
+    now: datetime | None = None,
+    opener: Callable[[Request], object] = _default_opener,
+) -> dict:
+    document = load_session(repo_root, now=now)
+
+    def mutate(current: dict) -> None:
+        todo = _drop_keyed(current, "todos", item_id)
+        current["flexes"].append(
+            {
+                "id": uuid.uuid4().hex,
+                "name": todo["name"],
+                "duration_minutes": duration_minutes,
+                "start": None,
+                "checklist": None,
+            }
+        )
+
+    return _commit(repo_root, document, mutate, now=now, opener=opener)
+
+
+def convert_todo_to_anchor(
+    repo_root: Path,
+    *,
+    item_id: str,
+    start: str,
+    duration_minutes: int,
+    now: datetime | None = None,
+    opener: Callable[[Request], object] = _default_opener,
+) -> dict:
+    document = load_session(repo_root, now=now)
+
+    def mutate(current: dict) -> None:
+        todo = _drop_keyed(current, "todos", item_id)
+        current["anchors"].append(
+            {
+                "id": uuid.uuid4().hex,
+                "name": todo["name"],
+                "start": start,
+                "duration_minutes": duration_minutes,
+                "checklist": None,
+            }
+        )
+
+    return _commit(repo_root, document, mutate, now=now, opener=opener)
+
+
+def convert_flex_to_todo(
+    repo_root: Path,
+    *,
+    item_id: str,
+    now: datetime | None = None,
+    opener: Callable[[Request], object] = _default_opener,
+) -> dict:
+    document = load_session(repo_root, now=now)
+
+    def mutate(current: dict) -> None:
+        flex = _drop_keyed(current, "flexes", item_id)
+        current["todos"].append({"id": uuid.uuid4().hex, "name": flex["name"], "note": ""})
+
+    return _commit(repo_root, document, mutate, now=now, opener=opener)
+
+
 def _require_flex(current: dict, item_id: str) -> dict:
     return _item_by_id(current["flexes"], item_id)
 
@@ -482,7 +614,7 @@ def promote_draft(
     *,
     item_id: str,
     kind: str,
-    duration_minutes: int,
+    duration_minutes: int | None = None,
     start: str | None = None,
     now: datetime | None = None,
     opener: Callable[[Request], object] = _default_opener,
@@ -492,6 +624,11 @@ def promote_draft(
     def mutate(current: dict) -> None:
         draft = _drop_keyed(current, "drafts", item_id)
         new_id = uuid.uuid4().hex
+        if kind == "todo":
+            current["todos"].append(
+                {"id": new_id, "name": draft["name"], "note": draft.get("note") or ""}
+            )
+            return
         if kind == "anchor":
             current["anchors"].append(
                 {
@@ -706,13 +843,16 @@ def edit_bounds(
     return _commit(repo_root, document, mutate, now=now, opener=opener)
 
 
-def _unpack(document: dict) -> tuple[DayBounds, list[Draft], list[Anchor], list[Flex]]:
+def _unpack(
+    document: dict,
+) -> tuple[DayBounds, list[Draft], list[Anchor], list[Flex], list[ToDo]]:
     bounds = DayBounds(
         wake=document["bounds"]["wake"],
         sleep=document["bounds"]["sleep"],
     )
     drafts = [
-        Draft(name=item["name"], source=item.get("source")) for item in document["drafts"]
+        Draft(name=item["name"], source=item.get("source"), note=item.get("note"))
+        for item in document["drafts"]
     ]
     anchors = [
         Anchor(
@@ -733,12 +873,18 @@ def _unpack(document: dict) -> tuple[DayBounds, list[Draft], list[Anchor], list[
         )
         for item in document["flexes"]
     ]
-    return bounds, drafts, anchors, flexes
+    todos = [
+        ToDo(name=item["name"], note=item.get("note") or "")
+        for item in document.get("todos", [])
+    ]
+    return bounds, drafts, anchors, flexes, todos
 
 
 def _finalize_document(document: dict) -> FinalizeResult:
-    bounds, drafts, anchors, flexes = _unpack(document)
-    return finalize_plan(bounds=bounds, drafts=drafts, anchors=anchors, flexes=flexes)
+    bounds, drafts, anchors, flexes, todos = _unpack(document)
+    return finalize_plan(
+        bounds=bounds, drafts=drafts, anchors=anchors, flexes=flexes, todos=todos
+    )
 
 
 def session_view(
@@ -748,9 +894,9 @@ def session_view(
     opener: Callable[[Request], object] = _default_opener,
 ) -> dict:
     document = load_session(repo_root, now=now)
-    bounds, drafts, anchors, flexes = _unpack(document)
+    bounds, drafts, anchors, flexes, todos = _unpack(document)
     result = finalize_plan(
-        bounds=bounds, drafts=drafts, anchors=anchors, flexes=flexes
+        bounds=bounds, drafts=drafts, anchors=anchors, flexes=flexes, todos=todos
     )
     undo = document.get("undo", {"past": [], "future": []})
     plan_date = date.fromisoformat(document["plan_date"])
@@ -784,6 +930,7 @@ def session_view(
         ],
         "anchors": document["anchors"],
         "flexes": document["flexes"],
+        "todos": document.get("todos", []),
         "gaps": gaps,
         "blockers": [describe_blocker(blocker) for blocker in result.blockers],
         "can_undo": bool(undo.get("past")),
@@ -852,6 +999,7 @@ def reset_session(
         current["drafts"] = []
         current["anchors"] = []
         current["flexes"] = []
+        current["todos"] = []
 
     return _commit(repo_root, document, mutate, now=now, opener=opener)
 
@@ -1058,6 +1206,15 @@ class SessionHandler(BaseHTTPRequestHandler):
                 )
                 self._send_json(200, view)
                 return
+            if kind == "todo":
+                view = add_todo(
+                    self.server.repo_root,
+                    name=payload["name"],
+                    note=payload.get("note") or "",
+                    **self._view_args(),
+                )
+                self._send_json(200, view)
+                return
             if kind != "anchor":
                 self.send_error(404)
                 return
@@ -1091,6 +1248,16 @@ class SessionHandler(BaseHTTPRequestHandler):
                     name=payload.get("name"),
                     duration_minutes=int(duration) if duration is not None else None,
                     checklist=_optional_checklist(payload),
+                    **self._view_args(),
+                )
+                self._send_json(200, view)
+                return
+            if kind == "todo":
+                view = edit_todo(
+                    self.server.repo_root,
+                    item_id=payload["id"],
+                    name=payload.get("name"),
+                    note=payload.get("note"),
                     **self._view_args(),
                 )
                 self._send_json(200, view)
@@ -1142,6 +1309,14 @@ class SessionHandler(BaseHTTPRequestHandler):
                 )
                 self._send_json(200, view)
                 return
+            if kind == "todo":
+                view = drop_todo(
+                    self.server.repo_root,
+                    item_id=payload["id"],
+                    **self._view_args(),
+                )
+                self._send_json(200, view)
+                return
             if kind != "flex":
                 self.send_error(404)
                 return
@@ -1154,12 +1329,45 @@ class SessionHandler(BaseHTTPRequestHandler):
             return
         if path == "/api/promote":
             payload = self._read_json()
+            duration = payload.get("duration_minutes")
             view = promote_draft(
                 self.server.repo_root,
                 item_id=payload["id"],
                 kind=payload["kind"],
-                duration_minutes=int(payload["duration_minutes"]),
+                duration_minutes=int(duration) if duration is not None else None,
                 start=payload.get("start") or None,
+                **self._view_args(),
+            )
+            self._send_json(200, view)
+            return
+        if path == "/api/convert":
+            payload = self._read_json()
+            kind = payload.get("kind")
+            if kind == "todo-to-flex":
+                view = convert_todo_to_flex(
+                    self.server.repo_root,
+                    item_id=payload["id"],
+                    duration_minutes=int(payload["duration_minutes"]),
+                    **self._view_args(),
+                )
+                self._send_json(200, view)
+                return
+            if kind == "todo-to-anchor":
+                view = convert_todo_to_anchor(
+                    self.server.repo_root,
+                    item_id=payload["id"],
+                    start=payload["start"],
+                    duration_minutes=int(payload["duration_minutes"]),
+                    **self._view_args(),
+                )
+                self._send_json(200, view)
+                return
+            if kind != "flex-to-todo":
+                self.send_error(404)
+                return
+            view = convert_flex_to_todo(
+                self.server.repo_root,
+                item_id=payload["id"],
                 **self._view_args(),
             )
             self._send_json(200, view)

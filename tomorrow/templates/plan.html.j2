@@ -36,6 +36,13 @@
     }
     .checklist label { cursor: pointer; }
     .checklist input:checked + label { text-decoration: line-through; opacity: 0.5; }
+    .todo-note {
+      white-space: pre-line;
+      font-size: 0.85em;
+      opacity: 0.6;
+      margin-top: 0.15rem;
+      text-decoration: none !important;
+    }
 
     .v-tl-base {
       --bg: #f7f3ed;
@@ -243,6 +250,24 @@
         <div id="prep-active"></div>
         <div id="prep-done"></div>
       </section>
+      {% if todos %}
+      <section class="prep-section todos-section" aria-label="To-dos">
+        <div class="prep-heading">To-dos</div>
+        <ul class="checklist" id="todos-list">
+          {% for todo in todos %}
+          <li>
+            <input type="checkbox" id="todo-{{ todo.slug }}" data-todo="{{ todo.slug }}">
+            <label for="todo-{{ todo.slug }}">
+              <div>{{ todo.name }}</div>
+              {% if todo.note %}
+              <div class="todo-note">{{ todo.note }}</div>
+              {% endif %}
+            </label>
+          </li>
+          {% endfor %}
+        </ul>
+      </section>
+      {% endif %}
     </div>
   </div>
   <script>
@@ -359,6 +384,20 @@
     }
 
     renderPrep();
+
+    function todoStorageKey(slug) {
+      return STORAGE_PREFIX + "todo-" + slug;
+    }
+
+    document.querySelectorAll('#todos-list input[type="checkbox"]').forEach(cb => {
+      const slug = cb.dataset.todo;
+      cb.checked = localStorage.getItem(todoStorageKey(slug)) === "1";
+      cb.addEventListener("change", () => {
+        const key = todoStorageKey(slug);
+        if (cb.checked) localStorage.setItem(key, "1");
+        else localStorage.removeItem(key);
+      });
+    });
   </script>
 </body>
 </html>

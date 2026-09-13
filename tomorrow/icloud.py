@@ -41,6 +41,7 @@ class RawReminder:
     due_date: date | None
     due_time: time | None = None
     completed: bool = False
+    note: str | None = None
 
 
 @dataclass(frozen=True)
@@ -51,6 +52,7 @@ class ImportedItem:
     start: time | None = None
     duration_minutes: int | None = None
     source: str = ICLOUD_SOURCE
+    note: str | None = None
 
 
 @dataclass(frozen=True)
@@ -116,6 +118,8 @@ def classify_icloud_items(
             continue
         start_time = event.start.time()
         end_time = _anchor_end(start_time, event.duration_minutes)
+        # A calendar-derived Draft never carries a note: invite noise and
+        # meeting links must not reach the Plan.
         if _overlaps_any(start_time, end_time, placed_anchors):
             drafts.append(ImportedItem(name=event.title))
             continue
@@ -145,11 +149,11 @@ def classify_icloud_items(
         # Draft. A timed reminder that collides with something already placed
         # falls back to a Draft, again matching how events are handled.
         if reminder.due_time is None:
-            drafts.append(ImportedItem(name=reminder.title))
+            drafts.append(ImportedItem(name=reminder.title, note=reminder.note))
             continue
         end_time = _anchor_end(reminder.due_time, REMINDER_ANCHOR_MINUTES)
         if _overlaps_any(reminder.due_time, end_time, placed_anchors):
-            drafts.append(ImportedItem(name=reminder.title))
+            drafts.append(ImportedItem(name=reminder.title, note=reminder.note))
             continue
         anchors.append(
             ImportedItem(
@@ -260,6 +264,7 @@ def _fetch_from_eventkit(config: IcloudConfig, plan_date: date) -> tuple[list[Ra
                 if due is not None and due.year() and due.month() and due.day():
                     due_date = date(due.year(), due.month(), due.day())
                     due_time = _components_time(due)
+                notes = ek_reminder.notes()
                 reminders.append(
                     RawReminder(
                         title=str(ek_reminder.title()),
@@ -267,6 +272,7 @@ def _fetch_from_eventkit(config: IcloudConfig, plan_date: date) -> tuple[list[Ra
                         due_date=due_date,
                         due_time=due_time,
                         completed=bool(ek_reminder.isCompleted()),
+                        note=str(notes) if notes else None,
                     )
                 )
             completion_event.set()
