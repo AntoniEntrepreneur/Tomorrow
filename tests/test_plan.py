@@ -221,3 +221,24 @@ def test_render_plan_timeline_stays_schedule_only_without_inline_checklists() ->
     rail_html = html[rail_start:prep_start]
     assert '"Towel"' not in rail_html
     assert 'type="checkbox"' not in rail_html
+
+
+def test_render_plan_defaults_to_dark_theme() -> None:
+    html = render_plan(
+        plan_date=date(2026, 8, 11),
+        bounds=DayBounds(wake="06:30", sleep="23:00"),
+    )
+
+    assert '<html lang="en" data-theme="dark">' in html
+    assert '[data-theme="light"]' in html
+
+
+def test_render_plan_has_persistent_theme_toggle() -> None:
+    html = render_plan(
+        plan_date=date(2026, 8, 11),
+        bounds=DayBounds(wake="06:30", sleep="23:00"),
+    )
+
+    assert 'id="theme-toggle"' in html
+    assert 'type="button"' in html
+    assert '"tomorrow-theme"' in html
