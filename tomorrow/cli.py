@@ -3,7 +3,6 @@ from datetime import datetime
 from pathlib import Path
 from typing import Callable, Sequence
 from urllib.request import Request
-import json
 import webbrowser
 
 from tomorrow.defaults import (
@@ -15,7 +14,12 @@ from tomorrow.defaults import (
 )
 from tomorrow.icloud import list_available_calendars
 from tomorrow.plan import default_plan_date, find_plan_to_open
-from tomorrow.session import _default_opener, run_library, run_session
+from tomorrow.session import (
+    _default_opener,
+    run_library,
+    run_session,
+    session_exists_for_plan_date,
+)
 
 
 def discover_repo_root(*starts: Path) -> Path:
@@ -66,15 +70,8 @@ def _print_defaults(repo_root: Path) -> None:
 def _session_keeps_bounds_until_reset(
     repo_root: Path, *, now: datetime | None, previous: DayBounds
 ) -> bool:
-    session_path = repo_root / "data" / "session.json"
-    if not session_path.is_file():
-        return False
-    try:
-        document = json.loads(session_path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return False
     plan_date = default_plan_date(now, wake=previous.wake)
-    return document.get("plan_date") == plan_date.isoformat()
+    return session_exists_for_plan_date(repo_root, plan_date)
 
 
 def _set_defaults(
@@ -112,7 +109,7 @@ def _open_plan(repo_root: Path, *, now: datetime | None) -> None:
 def _build_parser() -> tuple[argparse.ArgumentParser, dict[str, argparse.ArgumentParser]]:
     parser = argparse.ArgumentParser(
         prog="tomorrow",
-        description="With no command, starts tonight's Session.",
+        description="With no command, bare `tomorrow` starts tonight's Session.",
     )
     subparsers = parser.add_subparsers(dest="command")
     commands: dict[str, argparse.ArgumentParser] = {}

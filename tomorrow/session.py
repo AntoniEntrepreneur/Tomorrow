@@ -74,6 +74,24 @@ def _session_path(repo_root: Path) -> Path:
     return repo_root / "data" / "session.json"
 
 
+def session_exists_for_plan_date(repo_root: Path, plan_date: date) -> bool:
+    """Check for a stored Session without the load_session side effects.
+
+    Used where an on-disk Session's existence needs checking (e.g. before
+    changing Defaults) but reading it must not create, refresh, or discard
+    anything the way `load_session` does.
+    """
+
+    path = _session_path(repo_root)
+    if not path.is_file():
+        return False
+    try:
+        document = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return False
+    return document.get("plan_date") == plan_date.isoformat()
+
+
 def _blank_session(repo_root: Path, *, now: datetime | None = None) -> dict:
     defaults = load_defaults(repo_root / "data" / "defaults.toml")
     plan_date = default_plan_date(now, wake=defaults.wake)
