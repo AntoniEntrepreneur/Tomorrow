@@ -21,7 +21,7 @@
     :root {
       color-scheme: dark;
       --bg: #1a1714;
-      --rail: #857a6b;
+      --rail: #948877;
       --ink: #ece4d8;
       --anchor: #7fae8a;
       --anchor-bg: #213027;
@@ -321,19 +321,24 @@
     </div>
   </div>
   <script>
+    const THEME_STORAGE_KEY = "tomorrow-theme";
     const themeToggle = document.getElementById("theme-toggle");
 
+    function nextTheme() {
+      return document.documentElement.dataset.theme === "light" ? "dark" : "light";
+    }
+
     function renderThemeToggle() {
-      const next = document.documentElement.dataset.theme === "light" ? "dark" : "light";
+      const next = nextTheme();
       themeToggle.textContent = next === "light" ? "☀" : "☾";
       themeToggle.setAttribute("aria-label", `Switch to ${next} theme`);
       themeToggle.title = `Switch to ${next} theme`;
     }
 
     themeToggle.addEventListener("click", () => {
-      const next = document.documentElement.dataset.theme === "light" ? "dark" : "light";
+      const next = nextTheme();
       document.documentElement.dataset.theme = next;
-      try { localStorage.setItem("tomorrow-theme", next); } catch (_) {}
+      try { localStorage.setItem(THEME_STORAGE_KEY, next); } catch (_) {}
       renderThemeToggle();
     });
 

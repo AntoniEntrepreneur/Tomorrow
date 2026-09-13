@@ -239,6 +239,5 @@ def test_render_plan_has_persistent_theme_toggle() -> None:
         bounds=DayBounds(wake="06:30", sleep="23:00"),
     )
 
-    assert 'id="theme-toggle"' in html
-    assert 'type="button"' in html
+    assert '<button type="button" id="theme-toggle"' in html
     assert '"tomorrow-theme"' in html
