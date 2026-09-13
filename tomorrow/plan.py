@@ -35,6 +35,39 @@ def plan_filename(plan_date: date) -> str:
     return f"{plan_date.isoformat()}.html"
 
 
+def discard_past_plans(repo_root: Path, *, now: datetime | None = None) -> None:
+    today = (now if now is not None else datetime.now()).date()
+    plans_dir = repo_root / "plans"
+    if not plans_dir.is_dir():
+        return
+    for path in plans_dir.glob("*.html"):
+        try:
+            plan_date = date.fromisoformat(path.stem)
+        except ValueError:
+            continue
+        if plan_date < today:
+            path.unlink()
+
+
+def find_plan_to_open(repo_root: Path, *, now: datetime | None = None) -> Path | None:
+    """Return tomorrow's Plan if it exists, otherwise today's, otherwise None.
+
+    "Tomorrow" and "today" are calendar dates relative to `now`, unlike the
+    Plan date rule used to start a Session (see `default_plan_date`) — at
+    10:00 the Session's Plan date is tomorrow, but today's Plan is the one
+    still useful to open.
+    """
+
+    discard_past_plans(repo_root, now=now)
+    today = (now if now is not None else datetime.now()).date()
+    plans_dir = repo_root / "plans"
+    for candidate in (today + timedelta(days=1), today):
+        path = plans_dir / plan_filename(candidate)
+        if path.is_file():
+            return path
+    return None
+
+
 def _format_clock(value: time) -> str:
     return value.strftime("%H:%M")
 

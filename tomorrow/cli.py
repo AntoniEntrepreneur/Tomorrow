@@ -1,9 +1,21 @@
 import argparse
+from datetime import datetime
 from pathlib import Path
-from typing import Sequence
+from typing import Callable, Sequence
+from urllib.request import Request
+import json
+import webbrowser
 
+from tomorrow.defaults import (
+    DayBounds,
+    DefaultsError,
+    load_defaults,
+    parse_time_of_day,
+    save_defaults,
+)
 from tomorrow.icloud import list_available_calendars
-from tomorrow.session import run_session
+from tomorrow.plan import default_plan_date, find_plan_to_open
+from tomorrow.session import _default_opener, run_library, run_session
 
 
 def discover_repo_root(*starts: Path) -> Path:
@@ -42,20 +54,141 @@ def _print_calendars() -> None:
         print(f"  {name}")
 
 
-def main(argv: Sequence[str] | None = None) -> None:
-    parser = argparse.ArgumentParser(prog="tomorrow")
+def _defaults_path(repo_root: Path) -> Path:
+    return repo_root / "data" / "defaults.toml"
+
+
+def _print_defaults(repo_root: Path) -> None:
+    defaults = load_defaults(_defaults_path(repo_root))
+    print(f"wake {defaults.wake} · sleep {defaults.sleep}")
+
+
+def _session_keeps_bounds_until_reset(
+    repo_root: Path, *, now: datetime | None, previous: DayBounds
+) -> bool:
+    session_path = repo_root / "data" / "session.json"
+    if not session_path.is_file():
+        return False
+    try:
+        document = json.loads(session_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return False
+    plan_date = default_plan_date(now, wake=previous.wake)
+    return document.get("plan_date") == plan_date.isoformat()
+
+
+def _set_defaults(
+    repo_root: Path, *, wake: str | None, sleep: str | None, now: datetime | None
+) -> int:
+    if wake is None and sleep is None:
+        print("Pass --wake, --sleep, or both.")
+        return 1
+
+    path = _defaults_path(repo_root)
+    previous = load_defaults(path)
+    try:
+        new_wake = parse_time_of_day(wake) if wake is not None else previous.wake
+        new_sleep = parse_time_of_day(sleep) if sleep is not None else previous.sleep
+        updated = DayBounds(wake=new_wake, sleep=new_sleep)
+        save_defaults(path, updated)
+    except DefaultsError as exc:
+        print(str(exc))
+        return 1
+
+    if _session_keeps_bounds_until_reset(repo_root, now=now, previous=previous):
+        print("Tonight's Session keeps its day bounds until Reset.")
+    return 0
+
+
+def _open_plan(repo_root: Path, *, now: datetime | None) -> None:
+    plan_path = find_plan_to_open(repo_root, now=now)
+    if plan_path is None:
+        print("No Plan for today or tomorrow — run `tomorrow` to build one.")
+        return
+    webbrowser.open(plan_path.as_uri())
+    print(plan_path)
+
+
+def _build_parser() -> tuple[argparse.ArgumentParser, dict[str, argparse.ArgumentParser]]:
+    parser = argparse.ArgumentParser(
+        prog="tomorrow",
+        description="With no command, starts tonight's Session.",
+    )
     subparsers = parser.add_subparsers(dest="command")
-    subparsers.add_parser(
+    commands: dict[str, argparse.ArgumentParser] = {}
+
+    commands["calendars"] = subparsers.add_parser(
         "calendars", help="List calendars and reminder lists EventKit can see"
     )
+    commands["library"] = subparsers.add_parser(
+        "library",
+        help="Open the Day Template, Activity Template and Checklist library",
+    )
+    defaults_parser = subparsers.add_parser(
+        "defaults", help="Show or change your wake and sleep Defaults"
+    )
+    commands["defaults"] = defaults_parser
+    defaults_subparsers = defaults_parser.add_subparsers(dest="defaults_command")
+    set_parser = defaults_subparsers.add_parser(
+        "set", help="Change your wake and/or sleep Defaults"
+    )
+    set_parser.add_argument("--wake", help="New wake time, as H:MM or HH:MM")
+    set_parser.add_argument("--sleep", help="New sleep time, as H:MM or HH:MM")
+    commands["plan"] = subparsers.add_parser(
+        "plan", help="Open the newest Plan that isn't in the past"
+    )
+    help_parser = subparsers.add_parser(
+        "help", help="Show help, the same as --help"
+    )
+    help_parser.add_argument(
+        "topic", nargs="?", choices=list(commands), help="A command to show help for"
+    )
+    commands["help"] = help_parser
+    return parser, commands
+
+
+def main(
+    argv: Sequence[str] | None = None,
+    *,
+    now: datetime | None = None,
+    opener: Callable[[Request], object] = _default_opener,
+) -> None:
+    parser, commands = _build_parser()
     args = parser.parse_args(argv)
+
+    if args.command == "help":
+        if args.topic is None:
+            parser.print_help()
+        else:
+            commands[args.topic].print_help()
+        return
 
     if args.command == "calendars":
         _print_calendars()
         return
 
     repo_root = discover_repo_root()
-    run_session(repo_root)
+
+    if args.command == "library":
+        run_library(repo_root, now=now, opener=opener)
+        return
+
+    if args.command == "defaults":
+        if args.defaults_command == "set":
+            exit_code = _set_defaults(
+                repo_root, wake=args.wake, sleep=args.sleep, now=now
+            )
+            if exit_code != 0:
+                raise SystemExit(exit_code)
+            return
+        _print_defaults(repo_root)
+        return
+
+    if args.command == "plan":
+        _open_plan(repo_root, now=now)
+        return
+
+    run_session(repo_root, now=now, opener=opener)
 
 
 if __name__ == "__main__":

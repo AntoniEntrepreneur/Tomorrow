@@ -58,7 +58,7 @@ def test_main_finds_clone_data_when_cwd_is_elsewhere(
     monkeypatch.chdir(tmp_path)
     seen: dict[str, Path] = {}
 
-    def fake_run_session(repo_root: Path, *, now=None) -> None:
+    def fake_run_session(repo_root: Path, *, now=None, opener=None) -> None:
         seen["repo_root"] = repo_root
 
     monkeypatch.setattr("tomorrow.cli.run_session", fake_run_session)
@@ -760,6 +760,302 @@ def test_checklist_library_and_item_attach_over_http(tmp_path: Path) -> None:
     assert flex_edited["flexes"][0]["checklist"] is None
     assert flushed["anchors"][0]["checklist"] == "sauna-kit"
     assert flushed["flexes"][0]["checklist"] is None
+
+
+def _write_plan(tmp_path: Path, plan_date: str) -> Path:
+    path = tmp_path / "plans" / f"{plan_date}.html"
+    path.write_text(f"<html>{plan_date}</html>", encoding="utf-8")
+    return path
+
+
+def _write_session(tmp_path: Path, plan_date: str) -> None:
+    (tmp_path / "data" / "session.json").write_text(
+        json.dumps(
+            {
+                "plan_date": plan_date,
+                "bounds": {"wake": "06:30", "sleep": "23:00"},
+                "template_offer": "pending",
+                "drafts": [],
+                "anchors": [],
+                "flexes": [],
+                "undo": {"past": [], "future": []},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+
+def test_library_command_opens_and_prints_url_without_touching_session(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _write_defaults(tmp_path)
+    monkeypatch.setattr("tomorrow.cli.discover_repo_root", lambda: tmp_path)
+    opened: list[str] = []
+    monkeypatch.setattr(
+        "tomorrow.session.webbrowser.open", lambda url: opened.append(url)
+    )
+
+    class FakeServer:
+        def serve_forever(self) -> None:
+            raise KeyboardInterrupt
+
+        def server_close(self) -> None:
+            return
+
+    monkeypatch.setattr(
+        "tomorrow.session.bind_session_server", lambda *_args, **_kwargs: FakeServer()
+    )
+
+    main(argv=["library"])
+
+    output = capsys.readouterr().out
+    assert "http://127.0.0.1:8765/library" in output
+    assert "Ctrl+C to leave." in output
+    assert opened == ["http://127.0.0.1:8765/library"]
+    assert not (tmp_path / "data" / "session.json").exists()
+
+
+def test_library_command_with_busy_port_opens_running_servers_library(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _write_defaults(tmp_path)
+    monkeypatch.setattr("tomorrow.cli.discover_repo_root", lambda: tmp_path)
+    opened: list[str] = []
+    monkeypatch.setattr(
+        "tomorrow.session.webbrowser.open", lambda url: opened.append(url)
+    )
+    occupant = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    occupant.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    occupant.bind((SESSION_HOST, SESSION_PORT))
+    occupant.listen(1)
+    try:
+        main(argv=["library"])
+    finally:
+        occupant.close()
+
+    output = capsys.readouterr().out
+    assert output == ""
+    assert opened == ["http://127.0.0.1:8765/library"]
+
+
+def test_defaults_command_prints_wake_and_sleep(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _write_defaults(tmp_path)
+    monkeypatch.setattr("tomorrow.cli.discover_repo_root", lambda: tmp_path)
+
+    main(argv=["defaults"])
+
+    assert capsys.readouterr().out.strip() == "wake 06:30 · sleep 23:00"
+
+
+def test_defaults_set_wake_only(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _write_defaults(tmp_path)
+    monkeypatch.setattr("tomorrow.cli.discover_repo_root", lambda: tmp_path)
+
+    main(argv=["defaults", "set", "--wake", "07:00"])
+
+    assert (tmp_path / "data" / "defaults.toml").read_text(
+        encoding="utf-8"
+    ) == 'wake = "07:00"\nsleep = "23:00"\n'
+
+
+def test_defaults_set_sleep_only(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _write_defaults(tmp_path)
+    monkeypatch.setattr("tomorrow.cli.discover_repo_root", lambda: tmp_path)
+
+    main(argv=["defaults", "set", "--sleep", "23:30"])
+
+    assert (tmp_path / "data" / "defaults.toml").read_text(
+        encoding="utf-8"
+    ) == 'wake = "06:30"\nsleep = "23:30"\n'
+
+
+def test_defaults_set_both(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _write_defaults(tmp_path)
+    monkeypatch.setattr("tomorrow.cli.discover_repo_root", lambda: tmp_path)
+
+    main(argv=["defaults", "set", "--wake", "07:00", "--sleep", "23:30"])
+
+    assert (tmp_path / "data" / "defaults.toml").read_text(
+        encoding="utf-8"
+    ) == 'wake = "07:00"\nsleep = "23:30"\n'
+
+
+def test_defaults_set_normalizes_single_digit_hour(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _write_defaults(tmp_path)
+    monkeypatch.setattr("tomorrow.cli.discover_repo_root", lambda: tmp_path)
+
+    main(argv=["defaults", "set", "--wake", "7:00"])
+
+    assert (tmp_path / "data" / "defaults.toml").read_text(
+        encoding="utf-8"
+    ) == 'wake = "07:00"\nsleep = "23:00"\n'
+
+
+@pytest.mark.parametrize("bad_time", ["25:00", "7", "abc", "7:5"])
+def test_defaults_set_rejects_malformed_time_and_leaves_file_unchanged(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, bad_time: str
+) -> None:
+    _write_defaults(tmp_path)
+    monkeypatch.setattr("tomorrow.cli.discover_repo_root", lambda: tmp_path)
+    original = (tmp_path / "data" / "defaults.toml").read_bytes()
+
+    with pytest.raises(SystemExit) as excinfo:
+        main(argv=["defaults", "set", "--wake", bad_time])
+
+    assert excinfo.value.code != 0
+    assert (tmp_path / "data" / "defaults.toml").read_bytes() == original
+
+
+def test_defaults_set_rejects_wake_equal_sleep_and_leaves_file_unchanged(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _write_defaults(tmp_path)
+    monkeypatch.setattr("tomorrow.cli.discover_repo_root", lambda: tmp_path)
+    original = (tmp_path / "data" / "defaults.toml").read_bytes()
+
+    with pytest.raises(SystemExit) as excinfo:
+        main(argv=["defaults", "set", "--wake", "23:00"])
+
+    assert excinfo.value.code != 0
+    assert (tmp_path / "data" / "defaults.toml").read_bytes() == original
+
+
+def test_defaults_set_accepts_sleep_at_or_before_wake(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _write_defaults(tmp_path)
+    monkeypatch.setattr("tomorrow.cli.discover_repo_root", lambda: tmp_path)
+
+    main(argv=["defaults", "set", "--wake", "07:00", "--sleep", "00:30"])
+
+    assert (tmp_path / "data" / "defaults.toml").read_text(
+        encoding="utf-8"
+    ) == 'wake = "07:00"\nsleep = "00:30"\n'
+
+
+def test_defaults_set_with_no_flags_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _write_defaults(tmp_path)
+    monkeypatch.setattr("tomorrow.cli.discover_repo_root", lambda: tmp_path)
+
+    with pytest.raises(SystemExit) as excinfo:
+        main(argv=["defaults", "set"])
+
+    assert excinfo.value.code != 0
+
+
+def test_defaults_set_notes_in_progress_session_and_leaves_session_untouched(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _write_defaults(tmp_path)
+    monkeypatch.setattr("tomorrow.cli.discover_repo_root", lambda: tmp_path)
+    _write_session(tmp_path, "2026-08-11")
+    session_before = (tmp_path / "data" / "session.json").read_bytes()
+
+    main(
+        argv=["defaults", "set", "--wake", "07:00"],
+        now=datetime(2026, 8, 10, 22, 0),
+    )
+
+    output = capsys.readouterr().out
+    assert "keeps its day bounds until Reset" in output
+    assert (tmp_path / "data" / "session.json").read_bytes() == session_before
+
+
+def test_defaults_set_no_note_when_no_session_for_plan_date(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _write_defaults(tmp_path)
+    monkeypatch.setattr("tomorrow.cli.discover_repo_root", lambda: tmp_path)
+
+    main(
+        argv=["defaults", "set", "--wake", "07:00"],
+        now=datetime(2026, 8, 10, 22, 0),
+    )
+
+    output = capsys.readouterr().out
+    assert "Reset" not in output
+
+
+def test_plan_command_opens_tomorrows_plan_and_deletes_yesterdays(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _write_defaults(tmp_path)
+    monkeypatch.setattr("tomorrow.cli.discover_repo_root", lambda: tmp_path)
+    _write_plan(tmp_path, "2026-08-09")
+    _write_plan(tmp_path, "2026-08-10")
+    tomorrow_path = _write_plan(tmp_path, "2026-08-11")
+    opened: list[str] = []
+    monkeypatch.setattr("tomorrow.cli.webbrowser.open", lambda url: opened.append(url))
+
+    main(argv=["plan"], now=datetime(2026, 8, 10, 12, 0))
+
+    output = capsys.readouterr().out
+    assert opened == [tomorrow_path.as_uri()]
+    assert str(tomorrow_path) in output
+    assert not (tmp_path / "plans" / "2026-08-09.html").exists()
+
+
+def test_plan_command_opens_todays_plan_when_no_tomorrow(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _write_defaults(tmp_path)
+    monkeypatch.setattr("tomorrow.cli.discover_repo_root", lambda: tmp_path)
+    today_path = _write_plan(tmp_path, "2026-08-10")
+    opened: list[str] = []
+    monkeypatch.setattr("tomorrow.cli.webbrowser.open", lambda url: opened.append(url))
+
+    main(argv=["plan"], now=datetime(2026, 8, 10, 12, 0))
+
+    output = capsys.readouterr().out
+    assert opened == [today_path.as_uri()]
+    assert str(today_path) in output
+
+
+def test_plan_command_prints_message_when_none_exists(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _write_defaults(tmp_path)
+    monkeypatch.setattr("tomorrow.cli.discover_repo_root", lambda: tmp_path)
+    opened: list[str] = []
+    monkeypatch.setattr("tomorrow.cli.webbrowser.open", lambda url: opened.append(url))
+
+    main(argv=["plan"], now=datetime(2026, 8, 10, 12, 0))
+
+    output = capsys.readouterr().out
+    assert "No Plan for today or tomorrow" in output
+    assert "tomorrow" in output
+    assert opened == []
+
+
+def test_help_matches_top_level_help_and_mentions_bare_session(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    main(argv=["help"])
+    help_output = capsys.readouterr().out
+    with pytest.raises(SystemExit):
+        main(argv=["--help"])
+    flag_output = capsys.readouterr().out
+
+    assert help_output == flag_output
+    assert "session" in help_output.lower()
+
+
+def test_help_for_command_matches_command_flag_help(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    main(argv=["help", "defaults"])
+    help_output = capsys.readouterr().out
+    with pytest.raises(SystemExit):
+        main(argv=["defaults", "--help"])
+    flag_output = capsys.readouterr().out
+
+    assert help_output == flag_output
 
 
 def test_undo_and_redo_over_http_omit_stacks_and_restore_ids(tmp_path: Path) -> None:
