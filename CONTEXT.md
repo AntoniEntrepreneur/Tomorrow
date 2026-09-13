@@ -13,11 +13,11 @@ The calendar day a Session is constructing a Plan for. If local time is before D
 _Avoid_: Target date, session date, schedule date
 
 **Session**:
-The mutable night-before construction of a Plan for one Plan date: day bounds, Drafts, Anchors, and Flex. One Session per Plan date. Submit does not end it; Reset blanks it; when the Plan date rolls, an unfinished Session is gone.
+The mutable night-before construction of a Plan for one Plan date: day bounds, Drafts, Anchors, Flex, and To-dos. One Session per Plan date. Submit does not end it; Reset blanks it; when the Plan date rolls, an unfinished Session is gone.
 _Avoid_: Wizard, editor, draft (as the name of the whole)
 
 **Submit**:
-Writing a Plan from the current Session. Allowed only when no Draft remains, every Flex is placed, and no finalization blocker remains. Does not end the Session; a later Submit overwrites that Plan date's Plan.
+Writing a Plan from the current Session. Allowed only when no Draft remains, every Flex is placed, and no finalization blocker remains. To-dos never block Submit. Does not end the Session; a later Submit overwrites that Plan date's Plan.
 _Avoid_: Save, export, publish, write
 
 **Reset**:
@@ -25,7 +25,7 @@ Discard the Session's contents to a blank Session for the same Plan date. Does n
 _Avoid_: Start over, clear, new session, discard (as the name of this act)
 
 **Undo**:
-Restore the previous Session from a short stack of snapshots. Covers Session mutations including Drop and Reset. Does not touch Plan HTML.
+Restore the previous Session from a short stack of snapshots. Covers Session mutations including Drop, Reset, and every To-do change (add, edit, Drop, conversion). Does not touch Plan HTML.
 _Avoid_: revert, history, revision
 
 **Redo**:
@@ -49,8 +49,12 @@ A contiguous stretch of free time on the Plan between day bounds and Anchors, in
 _Avoid_: Slot, window, free block
 
 **Draft**:
-Something captured during a Session that is not yet an Anchor or Flex. A Plan is not finished while any Draft remains.
-_Avoid_: Inbox item, untimed task, note
+Something captured during a Session that is not yet an Anchor, Flex, or To-do. A Plan is not finished while any Draft remains. A Draft imported from a date-only or clashing iCloud reminder carries that reminder's note, read-only, shown muted; a Draft imported from a clashing calendar event, or one added by hand, never carries a note. The note becomes the To-do's note on promotion.
+_Avoid_: Inbox item, untimed task, note (as the name of the whole concept)
+
+**To-do**:
+A named thing to do sometime tomorrow, with an optional multi-line note, that has no start and no duration and takes no part in Gaps or wake-relative offsets. A Draft can be promoted to a To-do with no further input. A To-do can be converted into a Flex (given a duration) or an Anchor (given a start plus duration or end); a Flex can be converted into a To-do. A To-do never becomes a Draft. The finished Plan shows To-dos in their own section, each tickable, below the timeline. Unfinished To-dos do not carry over to the next Session.
+_Avoid_: Task, errand, reminder (reminder means the iCloud source)
 
 **Day Template**:
 A reusable seed of Anchors and/or Flex for a whole Plan date, copied into tonight's Session as a starting point. It does not place Flex into Gaps. A Day Template may be assigned as the default for one weekday (at most one Day Template per weekday) or left unassigned, reachable only by manually choosing it. Applying a Day Template — by weekday default or manual choice — is only possible on a blank Session; it seeds, it does not merge. Entries may define a Checklist to attach, or reference an Activity Template.
@@ -65,7 +69,7 @@ A named reusable list of things to bring or do, attached to a Plan item and show
 _Avoid_: Packing list, subtasks (unless they are literally checklist rows)
 
 **Drop**:
-An explicit decision to remove a Flex (or Draft) from tomorrow so the Plan can finish honestly. The item is gone from the Plan — no not-today list, no note on the Plan. Undo can restore it until that step ages off the stack.
+An explicit decision to remove a Flex, Draft, or To-do from tomorrow so the Plan can finish honestly. The item is gone from the Plan — no not-today list, no note on the Plan. Undo can restore it until that step ages off the stack.
 _Avoid_: Defer, snooze, skip (unless we later define those)
 
 **Defaults**:

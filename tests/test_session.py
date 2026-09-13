@@ -20,11 +20,17 @@ from tomorrow.session import (
     add_anchor,
     add_draft,
     add_flex,
+    add_todo,
     apply_named_day_template,
     apply_template,
+    convert_flex_to_todo,
+    convert_todo_to_anchor,
+    convert_todo_to_flex,
     decline_template,
+    drop_todo,
     edit_anchor,
     edit_bounds,
+    edit_todo,
     drop_draft,
     edit_flex,
     drop_flex,
@@ -102,6 +108,7 @@ def test_missing_session_file_opens_as_blank_session(tmp_path: Path) -> None:
         "drafts": [],
         "anchors": [],
         "flexes": [],
+        "todos": [],
         "undo": {"past": [], "future": []},
         "icloud_seen": [],
     }
@@ -170,6 +177,31 @@ def test_dropped_icloud_draft_does_not_return_after_undo_or_reset(
     assert call_count == 1
 
 
+def test_imported_draft_note_shows_in_session_and_becomes_todo_note_on_promotion(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from tomorrow.icloud import ClassifiedIcloudItems, ImportedItem
+
+    _write_defaults(tmp_path)
+
+    def fake_import(data_dir, plan_date, *, existing_anchors):
+        return ClassifiedIcloudItems(
+            anchors=[],
+            drafts=[ImportedItem(name="Call dentist", note="555-1234")],
+        )
+
+    monkeypatch.setattr("tomorrow.session.try_import_icloud_items", fake_import)
+
+    seeded = session_view(tmp_path, now=datetime(2026, 8, 10, 22, 0))
+    draft = seeded["drafts"][0]
+    assert draft["note"] == "555-1234"
+
+    promoted = promote_draft(
+        tmp_path, item_id=draft["id"], kind="todo", now=datetime(2026, 8, 10, 22, 0)
+    )
+    assert promoted["todos"][0]["note"] == "555-1234"
+
+
 def test_unfinished_session_resumes_with_its_own_bounds(tmp_path: Path) -> None:
     _write_defaults(tmp_path)
     saved = {
@@ -185,7 +217,7 @@ def test_unfinished_session_resumes_with_its_own_bounds(tmp_path: Path) -> None:
 
     document = load_session(tmp_path, now=datetime(2026, 8, 10, 22, 0))
 
-    assert document == saved
+    assert document == {**saved, "todos": []}
     assert document["bounds"] != {"wake": "06:30", "sleep": "23:00"}
 
 
@@ -232,6 +264,7 @@ def test_rolled_plan_date_replaces_session_with_blank_and_empty_undo(
         "drafts": [],
         "anchors": [],
         "flexes": [],
+        "todos": [],
         "undo": {"past": [], "future": []},
         "icloud_seen": [],
     }
@@ -534,7 +567,7 @@ def test_submit_does_not_end_session_or_blank_it(tmp_path: Path) -> None:
     resumed = load_session(tmp_path, now=datetime(2026, 8, 10, 22, 0))
 
     assert plan_path.exists()
-    assert resumed == saved
+    assert resumed == {**saved, "todos": []}
     assert resumed["bounds"]["wake"] == "07:15"
     assert resumed["template_offer"] == "declined"
     assert resumed["undo"]["past"] == [{"plan_date": "2026-08-11"}]
@@ -2183,3 +2216,142 @@ def test_refresh_icloud_items_does_not_resurrect_a_deleted_item(
     refreshed = refresh_icloud_items(tmp_path, now=now)
 
     assert refreshed["drafts"] == []
+
+
+def _now() -> datetime:
+    return datetime(2026, 8, 10, 22, 0)
+
+
+def test_add_edit_and_drop_todo_in_insertion_order(tmp_path: Path) -> None:
+    _write_defaults(tmp_path)
+
+    add_todo(tmp_path, name="Call dentist", now=_now())
+    view = add_todo(tmp_path, name="Pay rent", note="Bank transfer", now=_now())
+
+    assert [item["name"] for item in view["todos"]] == ["Call dentist", "Pay rent"]
+    assert view["todos"][1]["note"] == "Bank transfer"
+
+    first_id = view["todos"][0]["id"]
+    view = edit_todo(tmp_path, item_id=first_id, name="Call the dentist", note="555-1234", now=_now())
+    assert view["todos"][0]["name"] == "Call the dentist"
+    assert view["todos"][0]["note"] == "555-1234"
+
+    view = drop_todo(tmp_path, item_id=first_id, now=_now())
+    assert [item["name"] for item in view["todos"]] == ["Pay rent"]
+
+
+def test_undo_redo_covers_todo_add_edit_drop(tmp_path: Path) -> None:
+    _write_defaults(tmp_path)
+
+    view = add_todo(tmp_path, name="Call dentist", now=_now())
+    item_id = view["todos"][0]["id"]
+    edit_todo(tmp_path, item_id=item_id, name="Call the dentist", now=_now())
+    drop_todo(tmp_path, item_id=item_id, now=_now())
+
+    view = undo_session(tmp_path, now=_now())
+    assert [item["name"] for item in view["todos"]] == ["Call the dentist"]
+
+    view = undo_session(tmp_path, now=_now())
+    assert [item["name"] for item in view["todos"]] == ["Call dentist"]
+
+    view = undo_session(tmp_path, now=_now())
+    assert view["todos"] == []
+
+    view = redo_session(tmp_path, now=_now())
+    assert [item["name"] for item in view["todos"]] == ["Call dentist"]
+
+
+def test_promote_draft_to_todo_carries_imported_note(tmp_path: Path) -> None:
+    _write_defaults(tmp_path)
+    add_draft(tmp_path, name="Call dentist", now=_now())
+    view = session_view(tmp_path, now=_now())
+    draft_id = view["drafts"][0]["id"]
+
+    view = promote_draft(tmp_path, item_id=draft_id, kind="todo", now=_now())
+
+    assert view["drafts"] == []
+    assert [item["name"] for item in view["todos"]] == ["Call dentist"]
+    assert view["todos"][0]["note"] == ""
+
+
+def test_todo_to_flex_and_todo_to_anchor_discard_note(tmp_path: Path) -> None:
+    _write_defaults(tmp_path)
+    view = add_todo(tmp_path, name="Call dentist", note="555-1234", now=_now())
+    todo_id = view["todos"][0]["id"]
+
+    view = convert_todo_to_flex(tmp_path, item_id=todo_id, duration_minutes=30, now=_now())
+    assert view["todos"] == []
+    assert len(view["flexes"]) == 1
+    assert view["flexes"][0]["name"] == "Call dentist"
+    assert view["flexes"][0]["start"] is None
+
+    view = undo_session(tmp_path, now=_now())
+    assert view["flexes"] == []
+    assert view["todos"][0]["note"] == "555-1234"
+
+    todo_id = view["todos"][0]["id"]
+    view = convert_todo_to_anchor(
+        tmp_path, item_id=todo_id, start="09:00", duration_minutes=30, now=_now()
+    )
+    assert view["todos"] == []
+    assert len(view["anchors"]) == 1
+    assert view["anchors"][0]["start"] == "09:00"
+
+    view = undo_session(tmp_path, now=_now())
+    assert view["anchors"] == []
+    assert view["todos"][0]["note"] == "555-1234"
+
+
+def test_flex_to_todo_detaches_checklist_and_undo_restores_it(tmp_path: Path) -> None:
+    _write_defaults(tmp_path)
+    view = add_flex(tmp_path, name="Sauna", duration_minutes=30, checklist="sauna-kit", now=_now())
+    flex_id = view["flexes"][0]["id"]
+
+    view = convert_flex_to_todo(tmp_path, item_id=flex_id, now=_now())
+    assert view["flexes"] == []
+    assert view["todos"][0]["name"] == "Sauna"
+    assert view["todos"][0]["note"] == ""
+
+    view = undo_session(tmp_path, now=_now())
+    assert view["todos"] == []
+    assert view["flexes"][0]["checklist"] == "sauna-kit"
+
+
+def test_reset_clears_todos_and_todos_only_session_is_not_blank(tmp_path: Path) -> None:
+    _write_defaults(tmp_path)
+    _write_tuesday_template(tmp_path)
+    add_todo(tmp_path, name="Call dentist", now=_now())
+
+    view = apply_named_day_template(tmp_path, template_id="tuesday", now=_now())
+    assert view["anchors"] == []
+    assert view["flexes"] == []
+    assert [item["name"] for item in view["todos"]] == ["Call dentist"]
+
+    view = reset_session(tmp_path, now=_now())
+    assert view["todos"] == []
+
+
+def test_submit_succeeds_with_todos_and_still_refuses_with_a_draft(tmp_path: Path) -> None:
+    _write_defaults(tmp_path)
+    add_todo(tmp_path, name="Call dentist", note="Ask about Friday\nBring insurance card", now=_now())
+
+    plan_path = submit_session(tmp_path, now=_now())
+    content = plan_path.read_text(encoding="utf-8")
+
+    assert '<div class="prep-heading">To-dos</div>' in content
+    assert "Call dentist" in content
+    assert "Ask about Friday" in content
+    assert "Bring insurance card" in content
+
+    add_draft(tmp_path, name="Undecided", now=_now())
+    with pytest.raises(PlanBlockedError):
+        submit_session(tmp_path, now=_now())
+
+
+def test_submit_omits_todos_section_when_there_are_none(tmp_path: Path) -> None:
+    _write_defaults(tmp_path)
+
+    plan_path = submit_session(tmp_path, now=_now())
+    content = plan_path.read_text(encoding="utf-8")
+
+    assert "To-dos" not in content

@@ -162,6 +162,70 @@ def test_classify_reminder_due_on_plan_date_becomes_a_draft() -> None:
     assert result.drafts[0].start is None
 
 
+def test_classify_date_only_reminder_draft_carries_its_note() -> None:
+    reminders = [
+        RawReminder(
+            title="Call dentist",
+            list_name="Errands",
+            due_date=PLAN_DATE,
+            note="555-1234",
+        )
+    ]
+
+    result = classify_icloud_items(
+        existing_anchors=[], events=[], reminders=reminders, plan_date=PLAN_DATE, config=CONFIG
+    )
+
+    assert result.drafts[0].note == "555-1234"
+
+
+def test_classify_clashing_timed_reminder_draft_carries_its_note() -> None:
+    existing = [Anchor(name="Standup", start=time(9, 0), duration=timedelta(minutes=30))]
+    reminders = [
+        RawReminder(
+            title="Call dentist",
+            list_name="Errands",
+            due_date=PLAN_DATE,
+            due_time=time(9, 15),
+            note="555-1234",
+        )
+    ]
+
+    result = classify_icloud_items(
+        existing_anchors=existing,
+        events=[],
+        reminders=reminders,
+        plan_date=PLAN_DATE,
+        config=CONFIG,
+    )
+
+    assert result.anchors == []
+    assert len(result.drafts) == 1
+    assert result.drafts[0].note == "555-1234"
+
+
+def test_classify_clashing_event_draft_carries_no_note() -> None:
+    existing = [Anchor(name="Standup", start=time(9, 0), duration=timedelta(minutes=30))]
+    events = [
+        RawEvent(
+            title="Dentist",
+            calendar="Work",
+            start=datetime(2026, 8, 11, 9, 15),
+            duration_minutes=30,
+        )
+    ]
+
+    result = classify_icloud_items(
+        existing_anchors=existing,
+        events=events,
+        reminders=[],
+        plan_date=PLAN_DATE,
+        config=CONFIG,
+    )
+
+    assert result.drafts[0].note is None
+
+
 def test_classify_reminder_with_no_due_date_is_excluded() -> None:
     reminders = [RawReminder(title="Someday", list_name="Errands", due_date=None)]
 

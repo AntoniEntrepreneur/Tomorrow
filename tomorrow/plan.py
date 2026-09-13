@@ -11,6 +11,7 @@ from tomorrow.domain import (
     Anchor,
     FinalizedPlan,
     Flex,
+    ToDo,
     is_next_day,
     minutes_since_wake,
     parse_clock,
@@ -156,12 +157,20 @@ def _timeline_views(
     return views
 
 
+def _todo_views(*, todos: Sequence[ToDo]) -> list[dict[str, str]]:
+    return [
+        {"slug": _item_slug(todo.name, index), "name": todo.name, "note": todo.note}
+        for index, todo in enumerate(todos)
+    ]
+
+
 def render_plan(
     *,
     plan_date: date,
     bounds: DayBounds,
     anchors: Sequence[Anchor] = (),
     flexes: Sequence[Flex] = (),
+    todos: Sequence[ToDo] = (),
     checklists: Mapping[str, Checklist] | None = None,
     weather: str | None = None,
 ) -> str:
@@ -183,6 +192,7 @@ def render_plan(
         prep_bundles=_prep_bundles(
             anchors=anchors, flexes=flexes, checklists=library, wake=wake
         ),
+        todos=_todo_views(todos=todos),
     )
 
 
@@ -193,6 +203,7 @@ def write_plan(
     bounds: DayBounds,
     anchors: Sequence[Anchor] = (),
     flexes: Sequence[Flex] = (),
+    todos: Sequence[ToDo] = (),
     checklists: Mapping[str, Checklist] | None = None,
     weather: str | None = None,
 ) -> Path:
@@ -206,6 +217,7 @@ def write_plan(
             bounds=bounds,
             anchors=anchors,
             flexes=flexes,
+            todos=todos,
             checklists=library,
             weather=weather,
         ),
@@ -227,5 +239,6 @@ def write_finalized_plan(
         bounds=plan.bounds,
         anchors=plan.anchors,
         flexes=plan.flexes,
+        todos=plan.todos,
         weather=weather,
     )
