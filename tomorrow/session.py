@@ -49,12 +49,18 @@ from tomorrow.library import (
     save_day_template,
 )
 from tomorrow.icloud import try_import_icloud_items
-from tomorrow.plan import default_plan_date, format_plan_date, write_finalized_plan
+from tomorrow.plan import (
+    default_plan_date,
+    discard_past_plans,
+    format_plan_date,
+    write_finalized_plan,
+)
 from tomorrow.weather import load_weather_name, try_fetch_weather
 
 SESSION_HOST = "127.0.0.1"
 SESSION_PORT = 8765
 SESSION_URL = f"http://{SESSION_HOST}:{SESSION_PORT}"
+LIBRARY_URL = f"{SESSION_URL}/library"
 _PAGE_PATH = Path(__file__).parent / "static" / "session.html"
 _LIBRARY_PAGE_PATH = Path(__file__).parent / "static" / "library.html"
 _WEATHER_TIMEOUT_SECONDS = 5
@@ -67,6 +73,24 @@ def _default_opener(request: Request) -> object:
 
 def _session_path(repo_root: Path) -> Path:
     return repo_root / "data" / "session.json"
+
+
+def session_exists_for_plan_date(repo_root: Path, plan_date: date) -> bool:
+    """Check for a stored Session without the load_session side effects.
+
+    Used where an on-disk Session's existence needs checking (e.g. before
+    changing Defaults) but reading it must not create, refresh, or discard
+    anything the way `load_session` does.
+    """
+
+    path = _session_path(repo_root)
+    if not path.is_file():
+        return False
+    try:
+        document = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return False
+    return document.get("plan_date") == plan_date.isoformat()
 
 
 def _blank_session(repo_root: Path, *, now: datetime | None = None) -> dict:
@@ -175,22 +199,8 @@ def save_session(repo_root: Path, document: dict) -> None:
     path.write_text(json.dumps(document, indent=2) + "\n", encoding="utf-8")
 
 
-def _discard_past_plans(repo_root: Path, *, now: datetime | None = None) -> None:
-    today = (now if now is not None else datetime.now()).date()
-    plans_dir = repo_root / "plans"
-    if not plans_dir.is_dir():
-        return
-    for path in plans_dir.glob("*.html"):
-        try:
-            plan_date = date.fromisoformat(path.stem)
-        except ValueError:
-            continue
-        if plan_date < today:
-            path.unlink()
-
-
 def load_session(repo_root: Path, *, now: datetime | None = None) -> dict:
-    _discard_past_plans(repo_root, now=now)
+    discard_past_plans(repo_root, now=now)
     blank = _blank_session(repo_root, now=now)
     path = _session_path(repo_root)
     if not path.is_file():
@@ -1509,3 +1519,35 @@ def run_session(
     if server.submitted_path is not None:
         webbrowser.open(server.submitted_path.as_uri())
         print(server.submitted_path)
+
+
+def run_library(
+    repo_root: Path,
+    *,
+    now: datetime | None = None,
+    opener: Callable[[Request], object] = _default_opener,
+) -> None:
+    """Open the library page without touching the Session (no refresh, no import).
+
+    If a Session server is already running on the usual port, its library
+    page is opened instead — this deliberately differs from `run_session`'s
+    "Port in use" message, since browsing the library never needs a fresh
+    server.
+    """
+
+    try:
+        server = bind_session_server(repo_root, now=now, opener=opener)
+    except OSError as exc:
+        if exc.errno != errno.EADDRINUSE:
+            raise
+        webbrowser.open(LIBRARY_URL)
+        return
+    print(LIBRARY_URL)
+    print("Ctrl+C to leave.")
+    webbrowser.open(LIBRARY_URL)
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        return
+    finally:
+        server.server_close()
