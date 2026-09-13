@@ -1340,6 +1340,17 @@ def test_editing_an_unknown_draft_raises_key_error(tmp_path: Path) -> None:
         edit_draft(tmp_path, item_id="missing", name="New name", now=now)
 
 
+def test_editing_an_unknown_draft_with_a_blank_name_still_raises_key_error(
+    tmp_path: Path,
+) -> None:
+    _write_defaults(tmp_path)
+    now = datetime(2026, 8, 10, 22, 0)
+    add_draft(tmp_path, name="Call dentist", now=now)
+
+    with pytest.raises(KeyError):
+        edit_draft(tmp_path, item_id="missing", name="   ", now=now)
+
+
 def test_undo_and_redo_revert_and_reapply_a_draft_rename(tmp_path: Path) -> None:
     _write_defaults(tmp_path)
     now = datetime(2026, 8, 10, 22, 0)

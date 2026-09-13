@@ -632,6 +632,7 @@ def edit_draft(
     opener: Callable[[Request], object] = _default_opener,
 ) -> dict:
     document = load_session(repo_root, now=now)
+    _item_by_id(document["drafts"], item_id)
     trimmed = name.strip()
     if not trimmed:
         raise ValueError("Draft name cannot be blank.")
