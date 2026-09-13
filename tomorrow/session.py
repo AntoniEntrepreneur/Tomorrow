@@ -424,6 +424,10 @@ def add_draft(
     return _commit(repo_root, document, mutate, now=now, opener=opener)
 
 
+def _new_todo(name: str, note: str = "") -> dict:
+    return {"id": uuid.uuid4().hex, "name": name, "note": note}
+
+
 def add_todo(
     repo_root: Path,
     *,
@@ -435,7 +439,7 @@ def add_todo(
     document = load_session(repo_root, now=now)
 
     def mutate(current: dict) -> None:
-        current["todos"].append({"id": uuid.uuid4().hex, "name": name, "note": note})
+        current["todos"].append(_new_todo(name, note))
 
     return _commit(repo_root, document, mutate, now=now, opener=opener)
 
@@ -538,7 +542,7 @@ def convert_flex_to_todo(
 
     def mutate(current: dict) -> None:
         flex = _drop_keyed(current, "flexes", item_id)
-        current["todos"].append({"id": uuid.uuid4().hex, "name": flex["name"], "note": ""})
+        current["todos"].append(_new_todo(flex["name"]))
 
     return _commit(repo_root, document, mutate, now=now, opener=opener)
 
@@ -625,9 +629,7 @@ def promote_draft(
         draft = _drop_keyed(current, "drafts", item_id)
         new_id = uuid.uuid4().hex
         if kind == "todo":
-            current["todos"].append(
-                {"id": new_id, "name": draft["name"], "note": draft.get("note") or ""}
-            )
+            current["todos"].append(_new_todo(draft["name"], draft.get("note") or ""))
             return
         if kind == "anchor":
             current["anchors"].append(

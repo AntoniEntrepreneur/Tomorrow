@@ -49,8 +49,8 @@ A contiguous stretch of free time on the Plan between day bounds and Anchors, in
 _Avoid_: Slot, window, free block
 
 **Draft**:
-Something captured during a Session that is not yet an Anchor, Flex, or To-do. A Plan is not finished while any Draft remains.
-_Avoid_: Inbox item, untimed task, note
+Something captured during a Session that is not yet an Anchor, Flex, or To-do. A Plan is not finished while any Draft remains. A Draft imported from a date-only or clashing iCloud reminder carries that reminder's note, read-only, shown muted; a Draft imported from a clashing calendar event, or one added by hand, never carries a note. The note becomes the To-do's note on promotion.
+_Avoid_: Inbox item, untimed task, note (as the name of the whole concept)
 
 **To-do**:
 A named thing to do sometime tomorrow, with an optional multi-line note, that has no start and no duration and takes no part in Gaps or wake-relative offsets. A Draft can be promoted to a To-do with no further input. A To-do can be converted into a Flex (given a duration) or an Anchor (given a start plus duration or end); a Flex can be converted into a To-do. A To-do never becomes a Draft. The finished Plan shows To-dos in their own section, each tickable, below the timeline. Unfinished To-dos do not carry over to the next Session.
