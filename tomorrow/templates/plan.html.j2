@@ -388,6 +388,7 @@
     }
 
     function bundleLabel(bundle) {
+      if (!bundle.checklistName) return bundle.itemName;
       return `${bundle.itemName}<span class="bundle-sub">· ${bundle.checklistName}</span>`;
     }
 

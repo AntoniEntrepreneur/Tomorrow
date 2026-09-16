@@ -330,6 +330,43 @@ def _attached_checklist(
     return suggest_checklist(name, load_checklist_library(repo_root / "data"))
 
 
+def _clean_checklist_items(items: object) -> tuple[str, ...]:
+    """Strip blank lines from typed one-time checklist rows.
+
+    `items` is `None`-safe so callers can pass through an unset/None value.
+    """
+
+    if not items:
+        return ()
+    return tuple(line.strip() for line in items if line and line.strip())
+
+
+def _resolve_checklist_fields(
+    repo_root: Path,
+    name: str,
+    checklist: str | None | object,
+    checklist_items: object,
+) -> tuple[str | None, tuple[str, ...]]:
+    """Resolve the (checklist, checklist_items) pair for a new item.
+
+    At most one of the two is ever non-empty. Explicit, non-blank typed rows
+    win outright (no Library lookup, no auto-suggest). Otherwise this falls
+    back to the existing Library-reference resolution (`_attached_checklist`),
+    unchanged.
+    """
+
+    if checklist_items is not _UNSET:
+        cleaned = _clean_checklist_items(checklist_items)
+        if cleaned:
+            return None, cleaned
+        if checklist is _UNSET:
+            # Rows were explicitly supplied but empty: an explicit "no
+            # checklist" rather than "auto-suggest one from the name".
+            return None, ()
+    attached = _attached_checklist(repo_root, name, checklist)
+    return attached, ()
+
+
 def add_anchor(
     repo_root: Path,
     *,
@@ -337,11 +374,12 @@ def add_anchor(
     start: str,
     duration_minutes: int,
     checklist: str | None | object = _UNSET,
+    checklist_items: object = _UNSET,
     now: datetime | None = None,
     opener: Callable[[Request], object] = _default_opener,
 ) -> dict:
     document = load_session(repo_root, now=now)
-    attached = _attached_checklist(repo_root, name, checklist)
+    attached, items = _resolve_checklist_fields(repo_root, name, checklist, checklist_items)
 
     def mutate(current: dict) -> None:
         current["anchors"].append(
@@ -351,6 +389,7 @@ def add_anchor(
                 "start": start,
                 "duration_minutes": duration_minutes,
                 "checklist": attached,
+                "checklist_items": list(items),
             }
         )
 
@@ -363,11 +402,12 @@ def add_flex(
     name: str,
     duration_minutes: int,
     checklist: str | None | object = _UNSET,
+    checklist_items: object = _UNSET,
     now: datetime | None = None,
     opener: Callable[[Request], object] = _default_opener,
 ) -> dict:
     document = load_session(repo_root, now=now)
-    attached = _attached_checklist(repo_root, name, checklist)
+    attached, items = _resolve_checklist_fields(repo_root, name, checklist, checklist_items)
 
     def mutate(current: dict) -> None:
         current["flexes"].append(
@@ -377,6 +417,7 @@ def add_flex(
                 "duration_minutes": duration_minutes,
                 "start": None,
                 "checklist": attached,
+                "checklist_items": list(items),
             }
         )
 
@@ -862,11 +903,29 @@ def decline_template(
 
 
 def _apply_item_checklist(
-    repo_root: Path, item: dict, *, name: str, checklist: object
+    repo_root: Path,
+    item: dict,
+    *,
+    name: str,
+    checklist: object,
+    checklist_items: object = _UNSET,
 ) -> None:
+    if checklist_items is not _UNSET:
+        cleaned = _clean_checklist_items(checklist_items)
+        if cleaned:
+            item["checklist_items"] = list(cleaned)
+            item["checklist"] = None
+            return
+        item["checklist_items"] = []
+        if checklist is _UNSET:
+            # Rows explicitly cleared to empty: leave the item with no
+            # checklist at all, rather than falling through to auto-suggest.
+            item["checklist"] = None
+            return
     if checklist is not _UNSET:
         item["checklist"] = checklist
-    elif not item.get("checklist"):
+        item["checklist_items"] = []
+    elif not item.get("checklist") and not item.get("checklist_items"):
         item["checklist"] = suggest_checklist(
             name, load_checklist_library(repo_root / "data")
         )
@@ -879,6 +938,7 @@ def edit_flex(
     name: str | None = None,
     duration_minutes: int | None = None,
     checklist: str | None | object = _UNSET,
+    checklist_items: object = _UNSET,
     now: datetime | None = None,
     opener: Callable[[Request], object] = _default_opener,
 ) -> dict:
@@ -891,7 +951,11 @@ def edit_flex(
         if duration_minutes is not None:
             flex["duration_minutes"] = duration_minutes
         _apply_item_checklist(
-            repo_root, flex, name=flex["name"], checklist=checklist
+            repo_root,
+            flex,
+            name=flex["name"],
+            checklist=checklist,
+            checklist_items=checklist_items,
         )
 
     return _commit(repo_root, document, mutate, now=now, opener=opener)
@@ -905,6 +969,7 @@ def edit_anchor(
     start: str | None = None,
     duration_minutes: int | None = None,
     checklist: str | None | object = _UNSET,
+    checklist_items: object = _UNSET,
     remove: bool = False,
     now: datetime | None = None,
     opener: Callable[[Request], object] = _default_opener,
@@ -929,7 +994,11 @@ def edit_anchor(
                 if duration_minutes is not None:
                     anchor["duration_minutes"] = duration_minutes
                 _apply_item_checklist(
-                    repo_root, anchor, name=anchor["name"], checklist=checklist
+                    repo_root,
+                    anchor,
+                    name=anchor["name"],
+                    checklist=checklist,
+                    checklist_items=checklist_items,
                 )
                 return
         raise KeyError(item_id)
@@ -973,6 +1042,7 @@ def _unpack(
             start=parse_clock(item["start"]),
             duration=timedelta(minutes=item["duration_minutes"]),
             checklist=item.get("checklist"),
+            checklist_items=tuple(item.get("checklist_items") or ()),
             source=item.get("source"),
         )
         for item in document["anchors"]
@@ -983,6 +1053,7 @@ def _unpack(
             duration=timedelta(minutes=item["duration_minutes"]),
             start=parse_clock(item["start"]) if item.get("start") else None,
             checklist=item.get("checklist"),
+            checklist_items=tuple(item.get("checklist_items") or ()),
             source=item.get("source"),
             activity_template_id=item.get("activity_template_id"),
         )
@@ -1000,6 +1071,23 @@ def _finalize_document(document: dict) -> FinalizeResult:
     return finalize_plan(
         bounds=bounds, drafts=drafts, anchors=anchors, flexes=flexes, todos=todos
     )
+
+
+def _with_checklist_kind(item: dict) -> dict:
+    """Report per-item whether the checklist is a Library reference or typed rows.
+
+    Raw item dicts are passed through to the frontend, so this adds a
+    `checklist_kind` key without mutating the stored document.
+    """
+
+    view = dict(item)
+    if item.get("checklist_items"):
+        view["checklist_kind"] = "literal"
+    elif item.get("checklist"):
+        view["checklist_kind"] = "reference"
+    else:
+        view["checklist_kind"] = None
+    return view
 
 
 def session_view(
@@ -1043,8 +1131,8 @@ def session_view(
             {key: value for key, value in item.items() if key != "checklist"}
             for item in document["drafts"]
         ],
-        "anchors": document["anchors"],
-        "flexes": document["flexes"],
+        "anchors": [_with_checklist_kind(item) for item in document["anchors"]],
+        "flexes": [_with_checklist_kind(item) for item in document["flexes"]],
         "todos": document.get("todos", []),
         "gaps": gaps,
         "blockers": [describe_blocker(blocker) for blocker in result.blockers],
@@ -1148,6 +1236,12 @@ def _optional_checklist(payload: dict) -> str | None | object:
     if "checklist" not in payload:
         return _UNSET
     return payload.get("checklist")
+
+
+def _optional_checklist_items(payload: dict) -> object:
+    if "checklist_items" not in payload:
+        return _UNSET
+    return payload.get("checklist_items")
 
 
 def _list_checklists(data_dir: Path) -> list[dict]:
@@ -1323,6 +1417,7 @@ class SessionHandler(BaseHTTPRequestHandler):
                     name=payload["name"],
                     duration_minutes=int(payload["duration_minutes"]),
                     checklist=_optional_checklist(payload),
+                    checklist_items=_optional_checklist_items(payload),
                     **self._view_args(),
                 )
                 self._send_json(200, view)
@@ -1345,6 +1440,7 @@ class SessionHandler(BaseHTTPRequestHandler):
                 start=payload["start"],
                 duration_minutes=int(payload["duration_minutes"]),
                 checklist=_optional_checklist(payload),
+                checklist_items=_optional_checklist_items(payload),
                 **self._view_args(),
             )
             self._send_json(200, view)
@@ -1382,6 +1478,7 @@ class SessionHandler(BaseHTTPRequestHandler):
                     name=payload.get("name"),
                     duration_minutes=int(duration) if duration is not None else None,
                     checklist=_optional_checklist(payload),
+                    checklist_items=_optional_checklist_items(payload),
                     **self._view_args(),
                 )
                 self._send_json(200, view)
@@ -1407,6 +1504,7 @@ class SessionHandler(BaseHTTPRequestHandler):
                 start=payload.get("start"),
                 duration_minutes=int(duration) if duration is not None else None,
                 checklist=_optional_checklist(payload),
+                checklist_items=_optional_checklist_items(payload),
                 remove=bool(payload.get("remove")),
                 **self._view_args(),
             )
