@@ -105,15 +105,26 @@ def _prep_bundles(
 ) -> list[dict[str, object]]:
     attached: list[tuple[Anchor | Flex, time]] = []
     for anchor in anchors:
-        if anchor.checklist:
+        if anchor.checklist or anchor.checklist_items:
             attached.append((anchor, anchor.start))
     for flex in flexes:
-        if flex.checklist and flex.start is not None:
+        if (flex.checklist or flex.checklist_items) and flex.start is not None:
             attached.append((flex, flex.start))
     attached.sort(key=lambda entry: minutes_since_wake(entry[1], wake=wake))
 
     bundles: list[dict[str, object]] = []
     for index, (item, _) in enumerate(attached):
+        if item.checklist_items:
+            bundles.append(
+                {
+                    "item_id": _item_slug(item.name, index),
+                    "item_name": item.name,
+                    "checklist_id": None,
+                    "checklist_name": None,
+                    "rows": [{"label": label} for label in item.checklist_items],
+                }
+            )
+            continue
         checklist_id = item.checklist
         assert checklist_id is not None
         checklist = checklists.get(checklist_id)

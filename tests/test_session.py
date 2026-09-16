@@ -71,6 +71,12 @@ def _write_checklist_library(tmp_path: Path) -> None:
     )
 
 
+def _without_kind(items: list[dict]) -> list[dict]:
+    """Strip the view-only `checklist_kind` key so raw document items compare equal."""
+
+    return [{k: v for k, v in item.items() if k != "checklist_kind"} for item in items]
+
+
 def _write_session(tmp_path: Path, document: dict) -> None:
     (tmp_path / "data" / "session.json").write_text(
         json.dumps(document), encoding="utf-8"
@@ -659,7 +665,7 @@ def test_adding_an_anchor_mints_an_id_and_flushes_the_session_file(
     assert anchor["start"] == "18:00"
     assert anchor["duration_minutes"] == 90
     assert isinstance(anchor["id"], str) and anchor["id"]
-    assert view["anchors"] == document["anchors"]
+    assert _without_kind(view["anchors"]) == document["anchors"]
     assert view["blockers"] == []
     assert "undo" not in view
     assert view["can_undo"] is True
@@ -724,9 +730,10 @@ def test_editing_an_anchor_updates_name_clock_and_duration_and_flushes(
             "start": "19:00",
             "duration_minutes": 60,
             "checklist": None,
+            "checklist_items": [],
         }
     ]
-    assert view["anchors"] == document["anchors"]
+    assert _without_kind(view["anchors"]) == document["anchors"]
     assert view["blockers"] == []
 
 
@@ -907,7 +914,7 @@ def test_adding_flex_mints_an_id_stays_unplaced_and_flushes(tmp_path: Path) -> N
     assert flex["start"] is None
     assert flex["checklist"] is None
     assert isinstance(flex["id"], str) and flex["id"]
-    assert view["flexes"] == document["flexes"]
+    assert _without_kind(view["flexes"]) == document["flexes"]
     assert "undo" not in view
     assert view["can_undo"] is True
 
@@ -954,9 +961,10 @@ def test_placing_flex_into_a_gap_flushes_and_clears_the_unplaced_blocker(
             "duration_minutes": 30,
             "start": "07:15",
             "checklist": None,
+            "checklist_items": [],
         }
     ]
-    assert view["flexes"] == document["flexes"]
+    assert _without_kind(view["flexes"]) == document["flexes"]
     assert view["blockers"] == []
 
 
@@ -1002,7 +1010,7 @@ def test_changing_duration_flushes_and_can_clear_a_does_not_fit_blocker(
 
     assert document["flexes"][0]["duration_minutes"] == 45
     assert document["flexes"][0]["start"] == "22:00"
-    assert view["flexes"] == document["flexes"]
+    assert _without_kind(view["flexes"]) == document["flexes"]
     assert view["blockers"] == []
 
 
@@ -1019,7 +1027,7 @@ def test_changing_duration_unplaced_flex_leaves_it_unplaced(tmp_path: Path) -> N
 
     assert document["flexes"][0]["duration_minutes"] == 20
     assert document["flexes"][0]["start"] is None
-    assert view["flexes"] == document["flexes"]
+    assert _without_kind(view["flexes"]) == document["flexes"]
     assert view["blockers"]
 
 
@@ -1163,8 +1171,8 @@ def test_adding_anchor_or_flex_still_works_while_a_draft_is_present(
     assert [draft["name"] for draft in document["drafts"]] == ["Call dentist"]
     assert document["anchors"][0]["name"] == "Gym"
     assert document["flexes"][0]["name"] == "Walk"
-    assert anchored["anchors"] == document["anchors"]
-    assert flexed["flexes"] == document["flexes"]
+    assert _without_kind(anchored["anchors"]) == document["anchors"]
+    assert _without_kind(flexed["flexes"]) == document["flexes"]
     assert flexed["blockers"]
 
 
@@ -1250,7 +1258,7 @@ def test_promoting_a_draft_to_anchor_mints_a_new_id_and_does_not_leak(
     assert isinstance(anchor["id"], str) and anchor["id"]
     assert anchor["id"] != draft_id
     assert draft_id not in json.dumps({"anchors": document["anchors"]})
-    assert view["anchors"] == document["anchors"]
+    assert _without_kind(view["anchors"]) == document["anchors"]
     assert view["blockers"] == []
 
 
@@ -1284,7 +1292,7 @@ def test_promoting_a_draft_to_flex_mints_a_new_id_and_stays_unplaced(
     assert isinstance(flex["id"], str) and flex["id"]
     assert flex["id"] != draft_id
     assert draft_id not in json.dumps({"flexes": document["flexes"]})
-    assert view["flexes"] == document["flexes"]
+    assert _without_kind(view["flexes"]) == document["flexes"]
     assert view["blockers"]
 
 
@@ -1605,8 +1613,8 @@ def test_accepting_template_copies_anchors_and_unplaced_flex_and_flushes(
     assert document["template_offer"] == "accepted"
     assert view["template_offer"] == "accepted"
     assert view["show_template_offer"] is False
-    assert document["anchors"] == view["anchors"]
-    assert document["flexes"] == view["flexes"]
+    assert document["anchors"] == _without_kind(view["anchors"])
+    assert document["flexes"] == _without_kind(view["flexes"])
     assert len(document["anchors"]) == 1
     assert document["anchors"][0]["name"] == "Standup"
     assert document["anchors"][0]["start"] == "07:00"
@@ -1809,7 +1817,7 @@ def test_adding_an_anchor_attaches_a_picked_checklist_and_flushes(
 
     assert document["anchors"][0]["name"] == "Standup"
     assert document["anchors"][0]["checklist"] == "sauna-kit"
-    assert view["anchors"] == document["anchors"]
+    assert _without_kind(view["anchors"]) == document["anchors"]
 
 
 def test_adding_an_anchor_attaches_a_name_match_checklist_by_default(
@@ -1830,7 +1838,7 @@ def test_adding_an_anchor_attaches_a_name_match_checklist_by_default(
     )
 
     assert document["anchors"][0]["checklist"] == "gym-bag"
-    assert view["anchors"] == document["anchors"]
+    assert _without_kind(view["anchors"]) == document["anchors"]
 
 
 def test_adding_an_anchor_can_decline_the_name_match_checklist(
@@ -1852,7 +1860,7 @@ def test_adding_an_anchor_can_decline_the_name_match_checklist(
     )
 
     assert document["anchors"][0]["checklist"] is None
-    assert view["anchors"] == document["anchors"]
+    assert _without_kind(view["anchors"]) == document["anchors"]
 
 
 def test_editing_an_anchor_can_change_or_clear_its_checklist(
@@ -1950,6 +1958,224 @@ def test_pre_attached_checklist_stays_without_a_re_prompt(tmp_path: Path) -> Non
     assert renamed["anchors"][0]["checklist"] == "gym-bag"
     assert flushed["anchors"][0]["checklist"] == "gym-bag"
     assert flushed["flexes"][0]["checklist"] == "sauna-kit"
+
+
+def test_typed_rows_on_an_anchor_survive_reload_and_reach_the_plan(
+    tmp_path: Path,
+) -> None:
+    _write_defaults(tmp_path)
+    now = datetime(2026, 8, 10, 22, 0)
+
+    view = add_anchor(
+        tmp_path,
+        name="6am Taxi",
+        start="07:00",
+        duration_minutes=15,
+        checklist_items=["Passport", "  Charger  ", "", "Boarding pass", "   "],
+        now=now,
+    )
+    document = json.loads(
+        (tmp_path / "data" / "session.json").read_text(encoding="utf-8")
+    )
+
+    assert view["anchors"][0]["checklist"] is None
+    assert view["anchors"][0]["checklist_items"] == [
+        "Passport",
+        "Charger",
+        "Boarding pass",
+    ]
+    assert view["anchors"][0]["checklist_kind"] == "literal"
+    assert document["anchors"][0]["checklist"] is None
+    assert document["anchors"][0]["checklist_items"] == [
+        "Passport",
+        "Charger",
+        "Boarding pass",
+    ]
+
+    reloaded = session_view(tmp_path, now=now)
+    assert reloaded["anchors"][0]["checklist_items"] == [
+        "Passport",
+        "Charger",
+        "Boarding pass",
+    ]
+    assert not (tmp_path / "data" / "checklists").exists()
+
+    submit_session(tmp_path, now=now)
+    plan_html = (tmp_path / "plans" / "2026-08-11.html").read_text(encoding="utf-8")
+    assert '"6am Taxi"' in plan_html
+    assert '"Passport"' in plan_html
+    assert '"Charger"' in plan_html
+    assert '"Boarding pass"' in plan_html
+
+
+def test_typed_rows_on_a_flex_reach_the_plan_once_placed(tmp_path: Path) -> None:
+    _write_defaults(tmp_path)
+    now = datetime(2026, 8, 10, 22, 0)
+
+    added = add_flex(
+        tmp_path,
+        name="Gym",
+        duration_minutes=60,
+        checklist_items=["Towel", "Water bottle"],
+        now=now,
+    )
+    item_id = added["flexes"][0]["id"]
+    assert added["flexes"][0]["checklist_kind"] == "literal"
+
+    place_flex(tmp_path, item_id=item_id, start="07:00", now=now)
+    submit_session(tmp_path, now=now)
+    plan_html = (tmp_path / "plans" / "2026-08-11.html").read_text(encoding="utf-8")
+
+    assert '"Gym"' in plan_html
+    assert '"Towel"' in plan_html
+    assert '"Water bottle"' in plan_html
+
+
+def test_zero_non_blank_rows_leaves_the_item_with_no_checklist_at_all(
+    tmp_path: Path,
+) -> None:
+    _write_defaults(tmp_path)
+    now = datetime(2026, 8, 10, 22, 0)
+
+    view = add_anchor(
+        tmp_path,
+        name="Standup",
+        start="09:00",
+        duration_minutes=30,
+        checklist_items=["   ", ""],
+        now=now,
+    )
+
+    assert view["anchors"][0]["checklist"] is None
+    assert view["anchors"][0]["checklist_items"] == []
+    assert view["anchors"][0]["checklist_kind"] is None
+
+
+def test_at_most_one_of_checklist_and_checklist_items_is_set(tmp_path: Path) -> None:
+    _write_defaults(tmp_path)
+    _write_checklist_library(tmp_path)
+    now = datetime(2026, 8, 10, 22, 0)
+
+    with_rows = add_anchor(
+        tmp_path,
+        name="6am Taxi",
+        start="06:00",
+        duration_minutes=15,
+        checklist_items=["Passport"],
+        now=now,
+    )
+    anchor = with_rows["anchors"][0]
+    assert anchor["checklist"] is None
+    assert anchor["checklist_items"] == ["Passport"]
+
+    with_reference = add_anchor(
+        tmp_path,
+        name="Sauna trip",
+        start="20:00",
+        duration_minutes=45,
+        checklist="sauna-kit",
+        now=now,
+    )
+    referenced = with_reference["anchors"][1]
+    assert referenced["checklist"] == "sauna-kit"
+    assert referenced["checklist_items"] == []
+
+
+def test_typed_rows_survive_renaming_the_item(tmp_path: Path) -> None:
+    _write_defaults(tmp_path)
+    _write_checklist_library(tmp_path)
+    now = datetime(2026, 8, 10, 22, 0)
+
+    added = add_anchor(
+        tmp_path,
+        name="6am Taxi",
+        start="06:00",
+        duration_minutes=15,
+        checklist_items=["Passport"],
+        now=now,
+    )
+    item_id = added["anchors"][0]["id"]
+
+    # Renaming to "Gym" would ordinarily trigger a name-match checklist
+    # suggestion (see _write_checklist_library) but must not clobber rows.
+    renamed = edit_anchor(tmp_path, item_id=item_id, name="Gym", now=now)
+
+    assert renamed["anchors"][0]["checklist"] is None
+    assert renamed["anchors"][0]["checklist_items"] == ["Passport"]
+
+
+def test_reset_clears_typed_rows_along_with_everything_else(tmp_path: Path) -> None:
+    _write_defaults(tmp_path)
+    now = datetime(2026, 8, 10, 22, 0)
+
+    add_anchor(
+        tmp_path,
+        name="6am Taxi",
+        start="06:00",
+        duration_minutes=15,
+        checklist_items=["Passport"],
+        now=now,
+    )
+
+    view = reset_session(tmp_path, now=now)
+
+    assert view["anchors"] == []
+
+
+def test_undo_restores_typed_rows_after_an_edit(tmp_path: Path) -> None:
+    _write_defaults(tmp_path)
+    now = datetime(2026, 8, 10, 22, 0)
+
+    added = add_anchor(
+        tmp_path,
+        name="6am Taxi",
+        start="06:00",
+        duration_minutes=15,
+        checklist_items=["Passport"],
+        now=now,
+    )
+    item_id = added["anchors"][0]["id"]
+
+    edited = edit_anchor(
+        tmp_path,
+        item_id=item_id,
+        checklist_items=["Passport", "Charger"],
+        now=now,
+    )
+    assert edited["anchors"][0]["checklist_items"] == ["Passport", "Charger"]
+
+    undone = undo_session(tmp_path, now=now)
+    assert undone["anchors"][0]["checklist_items"] == ["Passport"]
+
+
+def test_old_session_file_without_checklist_items_still_loads(tmp_path: Path) -> None:
+    _write_defaults(tmp_path)
+    now = datetime(2026, 8, 10, 22, 0)
+    _write_session(
+        tmp_path,
+        {
+            "plan_date": "2026-08-11",
+            "bounds": {"wake": "06:30", "sleep": "23:00"},
+            "template_offer": "accepted",
+            "drafts": [],
+            "anchors": [
+                {
+                    "id": "a1",
+                    "name": "Gym",
+                    "start": "18:00",
+                    "duration_minutes": 90,
+                    "checklist": "gym-bag",
+                }
+            ],
+            "flexes": [],
+            "undo": {"past": [], "future": []},
+        },
+    )
+
+    view = session_view(tmp_path, now=now)
+
+    assert view["anchors"][0]["checklist"] == "gym-bag"
+    assert view["anchors"][0]["checklist_kind"] == "reference"
 
 
 def test_adding_flex_attaches_a_picked_or_name_match_checklist(
@@ -2074,7 +2300,7 @@ def test_redo_restores_the_undone_session(tmp_path: Path) -> None:
     assert view["can_undo"] is True
     assert view["can_redo"] is False
     assert "undo" not in view
-    assert document["flexes"] == added["flexes"]
+    assert document["flexes"] == _without_kind(added["flexes"])
     assert document["undo"]["future"] == []
 
 
@@ -2155,7 +2381,7 @@ def test_submit_is_not_an_undo_step_and_does_not_touch_the_stack(
     after = load_session(tmp_path, now=now)
 
     assert after["undo"] == before["undo"]
-    assert after["anchors"] == added["anchors"]
+    assert after["anchors"] == _without_kind(added["anchors"])
     assert (tmp_path / "plans" / "2026-08-11.html").exists()
 
 
@@ -2359,7 +2585,7 @@ def test_insert_activity_template_adds_an_anchor_and_flushes(tmp_path: Path) -> 
     assert view["anchors"][0]["start"] == "16:00"
     assert view["anchors"][0]["duration_minutes"] == 50
     assert view["anchors"][0]["id"]
-    assert document["anchors"] == view["anchors"]
+    assert document["anchors"] == _without_kind(view["anchors"])
 
 
 def test_insert_activity_template_adds_a_flex_when_no_start(tmp_path: Path) -> None:
