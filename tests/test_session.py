@@ -19,6 +19,7 @@ from tomorrow.domain import (
 from tomorrow.activity_templates import activity_templates_dir
 from tomorrow.defaults import DayBounds
 from tomorrow.library import save_activity_template
+from tomorrow.name_times import parse_name_time
 from tomorrow.plan import PLAN_FILENAME
 from tomorrow.session import (
     add_anchor,
@@ -3347,6 +3348,36 @@ def test_suggest_activity_returns_none_when_nothing_matches(tmp_path: Path) -> N
     _write_defaults(tmp_path)
 
     assert suggest_activity(tmp_path, "Nothing here") is None
+
+
+def test_suggest_activity_matches_stripped_name_from_a_timed_draft_name(
+    tmp_path: Path,
+) -> None:
+    """A Draft named 'Tutoring 16:30' ships stripped_name 'Tutoring' (see
+    name_times parsing, ticket #78); a real client sends that stripped name
+    to /api/suggest-activity, so suggest_activity must match it against an
+    Activity Template named 'Tutoring', carrying over that template's own
+    start/duration/checklist bundle (the JS precedence fix in sheetPromote
+    ensures the parsed 16:30 wins over the template's own start client-side)."""
+
+    _write_defaults(tmp_path)
+    _write_checklist_library(tmp_path)
+    _write_activity_template(tmp_path, "tutoring", name="Tutoring", duration=90, start="17:00")
+
+    result = parse_name_time("Tutoring 16:30")
+    assert result.stripped_name == "Tutoring"
+    assert result.start is not None
+
+    suggestion = suggest_activity(tmp_path, result.stripped_name)
+
+    assert suggestion == {
+        "kind": "activity",
+        "activity_id": "tutoring",
+        "name": "Tutoring",
+        "start": "17:00",
+        "duration_minutes": 90,
+        "checklist": None,
+    }
 
 
 def test_refresh_icloud_items_adds_new_items_to_an_existing_session(

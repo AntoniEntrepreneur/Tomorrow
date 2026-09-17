@@ -942,7 +942,16 @@
       const kind = form.querySelector('[name="kind"]');
       kind.addEventListener("change", () => syncPromoteFields(form));
       syncPromoteFields(form);
-      maybeSuggestChecklist(form);
+      // A field the name-parse actually supplied must win over the same
+      // field supplied by a matching Activity Template, so mark it touched
+      // before suggestFromName runs (autofill only overwrites untouched
+      // fields).
+      const nameSuppliedFields = [];
+      if (item.suggested_start) nameSuppliedFields.push("start");
+      if (item.suggested_end) nameSuppliedFields.push("end");
+      if (item.suggested_duration_minutes) nameSuppliedFields.push("duration_minutes");
+      markTouched(form, nameSuppliedFields);
+      suggestFromName(form);
     }
 
     function sheetEditDraft(item) {
