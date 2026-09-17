@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, time, timedelta
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from typing import Callable
+from typing import Callable, Sequence
 from urllib.parse import urlparse
 from urllib.request import Request, urlopen
 import copy
@@ -21,6 +21,7 @@ from tomorrow.checklists import load_checklist_library, suggest_checklist
 from tomorrow.defaults import DayBounds, load_defaults
 from tomorrow.domain import (
     Anchor,
+    AnchorOverlapBlocker,
     Draft,
     FinalizeResult,
     Flex,
@@ -30,6 +31,7 @@ from tomorrow.domain import (
     describe_blocker,
     finalize_plan,
     is_next_day,
+    minutes_between,
     minutes_since_midnight,
     minutes_since_wake,
     parse_clock,
@@ -1286,24 +1288,79 @@ def _finalize_document(document: dict) -> FinalizeResult:
     )
 
 
-def _draft_view(item: dict) -> dict:
+def _suggested_span_minutes(parsed) -> int:
+    """The span (in minutes) a parsed name-time suggestion should be tested
+    against for a clash: a range's real length, else a bare duration parsed
+    alongside a start, else the 30-minute reminder default.
+    """
+
+    if parsed.end is not None:
+        return minutes_between(parse_clock(parsed.start), parse_clock(parsed.end))
+    if parsed.duration_minutes is not None:
+        return parsed.duration_minutes
+    return 30
+
+
+def _clashing_anchor(
+    parsed, anchors: Sequence[Anchor], *, wake: time
+) -> Anchor | None:
+    """The Anchor (if any) a suggested start would overlap.
+
+    Tested against Anchors only -- a placed Flex occupies real time too but
+    can be moved, and letting it suppress a good suggestion would be wrong.
+    """
+
+    if parsed.start is None:
+        return None
+    span_minutes = _suggested_span_minutes(parsed)
+    start_minutes = minutes_since_wake(parse_clock(parsed.start), wake=wake)
+    end_minutes = start_minutes + span_minutes
+    for anchor in anchors:
+        anchor_start = minutes_since_wake(anchor.start, wake=wake)
+        anchor_end = anchor_start + int(anchor.duration.total_seconds() // 60)
+        if start_minutes < anchor_end and end_minutes > anchor_start:
+            return anchor
+    return None
+
+
+def _draft_view(item: dict, *, anchors: Sequence[Anchor], wake: time) -> dict:
     """Shape a raw Draft for the frontend: drop `checklist`, add the parsed name/time.
 
     The Draft's own `name` is left untouched (the tray always shows the
     full original name). The parse result is shipped alongside it under
     `stripped_name` (used for Anchor/Flex), `suggested_start` (absent
-    when no time was found), `suggested_end` (absent unless a valid range
-    was found), and `suggested_duration_minutes` (absent when no duration
-    was found), so the Promote sheet can pre-fill without any parsing in
-    the browser.
+    when no time was found, or when a clash withholds it), `suggested_end`
+    (absent unless a valid range was found), and
+    `suggested_duration_minutes` (absent when no duration was found), so
+    the Promote sheet can pre-fill without any parsing in the browser.
+
+    When the suggested start would overlap an existing Anchor, it is
+    withheld (`suggested_start` is None) and a `clash_caption` key is added
+    naming the clashing Anchor and its span, worded exactly like a Submit
+    blocker (`describe_blocker` is reused against a synthetic
+    `AnchorOverlapBlocker` built from the candidate). This decision is made
+    once, here, and is not re-evaluated as the Start field is edited.
     """
 
     view = {key: value for key, value in item.items() if key != "checklist"}
     parsed = parse_name_time(item["name"])
     view["stripped_name"] = parsed.stripped_name
-    view["suggested_start"] = parsed.start
     view["suggested_end"] = parsed.end
     view["suggested_duration_minutes"] = parsed.duration_minutes
+
+    clashing = _clashing_anchor(parsed, anchors, wake=wake)
+    if clashing is not None:
+        candidate = Anchor(
+            name=parsed.stripped_name,
+            start=parse_clock(parsed.start),
+            duration=timedelta(minutes=_suggested_span_minutes(parsed)),
+        )
+        view["suggested_start"] = None
+        view["clash_caption"] = describe_blocker(
+            AnchorOverlapBlocker(first=candidate, second=clashing)
+        )
+    else:
+        view["suggested_start"] = parsed.start
     return view
 
 
@@ -1363,7 +1420,10 @@ def session_view(
         "bounds": bounds_view,
         "template_offer": document["template_offer"],
         "show_template_offer": _show_template_offer(repo_root, document),
-        "drafts": [_draft_view(item) for item in document["drafts"]],
+        "drafts": [
+            _draft_view(item, anchors=anchors, wake=wake_time)
+            for item in document["drafts"]
+        ],
         "anchors": [_with_checklist_kind(item) for item in document["anchors"]],
         "flexes": [_with_checklist_kind(item) for item in document["flexes"]],
         "todos": document.get("todos", []),

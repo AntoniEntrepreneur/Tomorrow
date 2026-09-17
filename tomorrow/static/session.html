@@ -912,7 +912,8 @@
 
     function sheetPromote(item) {
       const strippedName = item.stripped_name || item.name;
-      const suggestedStart = item.suggested_start || "09:00";
+      const clashCaption = item.clash_caption || null;
+      const suggestedStart = clashCaption ? "" : (item.suggested_start || "09:00");
       const suggestedEnd = item.suggested_end || null;
       const suggestedDuration = item.suggested_duration_minutes || 30;
       openSheet(
@@ -926,6 +927,7 @@
         '<option value="todo">To-do</option>' +
         "</select></label>" +
         durationFields(suggestedStart, suggestedDuration, "promote-start-label") +
+        (clashCaption ? '<p class="field-error" id="promote-clash-caption">' + esc(clashCaption) + "</p>" : "") +
         '<p class="hint" id="promote-flex-hint" hidden>Flex lands unplaced in the tray. Place it whenever you notice a Gap.</p>' +
         '<p class="hint" id="promote-todo-hint" hidden>To-do needs nothing else — its note carries over if it has one.</p>' +
         checklistField("") +
