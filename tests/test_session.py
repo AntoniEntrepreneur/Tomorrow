@@ -40,6 +40,7 @@ from tomorrow.session import (
     load_session,
     suggest_activity,
     place_flex,
+    promote_checklist,
     promote_draft,
     reset_session,
     session_view,
@@ -3148,3 +3149,150 @@ def test_apply_does_not_remove_a_hand_added_flex_with_matching_name(
     applied = apply_template(tmp_path, now=_now())
     assert applied["template_offer"] == "pending"
     assert [f["name"] for f in applied["flexes"]].count("Deep Work") == 2
+
+
+def test_promote_checklist_writes_a_new_library_checklist_from_an_anchor(
+    tmp_path: Path,
+) -> None:
+    from tomorrow.checklists import load_checklist_library
+
+    _write_defaults(tmp_path)
+    added = add_anchor(
+        tmp_path,
+        name="6am Taxi",
+        start="06:00",
+        duration_minutes=15,
+        checklist_items=["Passport", "Charger", "Boarding pass"],
+        now=_now(),
+    )
+    item_id = added["anchors"][0]["id"]
+
+    view = promote_checklist(
+        tmp_path, item_id=item_id, item_kind="anchor", name="Travel Kit", now=_now()
+    )
+
+    library = load_checklist_library(tmp_path / "data")
+    assert library["travel-kit"].name == "Travel Kit"
+    assert library["travel-kit"].items == ("Passport", "Charger", "Boarding pass")
+
+    # The Session item stays literal: no Library reference was adopted.
+    promoted_anchor = view["anchors"][0]
+    assert promoted_anchor["checklist"] is None
+    assert promoted_anchor["checklist_items"] == ["Passport", "Charger", "Boarding pass"]
+    assert promoted_anchor["checklist_kind"] == "literal"
+
+    # And the promoted Checklist is immediately offered by the select.
+    assert {"id": "travel-kit", "name": "Travel Kit"} in view["checklists"]
+
+
+def test_promote_checklist_from_a_flex_leaves_the_flex_literal(tmp_path: Path) -> None:
+    from tomorrow.checklists import load_checklist_library
+
+    _write_defaults(tmp_path)
+    added = add_flex(
+        tmp_path,
+        name="Sauna tonight",
+        duration_minutes=30,
+        checklist_items=["Towel"],
+        now=_now(),
+    )
+    item_id = added["flexes"][0]["id"]
+
+    view = promote_checklist(
+        tmp_path, item_id=item_id, item_kind="flex", name="Sauna Kit v2", now=_now()
+    )
+
+    library = load_checklist_library(tmp_path / "data")
+    assert library["sauna-kit-v2"].items == ("Towel",)
+    assert view["flexes"][0]["checklist_items"] == ["Towel"]
+    assert view["flexes"][0]["checklist"] is None
+
+
+def test_promote_checklist_leaves_the_finished_plan_identical(tmp_path: Path) -> None:
+    _write_defaults(tmp_path)
+    add_anchor(
+        tmp_path,
+        name="6am Taxi",
+        start="07:00",
+        duration_minutes=15,
+        checklist_items=["Passport", "Charger"],
+        now=_now(),
+    )
+
+    plan_before = submit_session(tmp_path, now=_now())
+    bytes_before = plan_before.read_bytes()
+    plan_before.unlink()
+
+    # Start a fresh Session with the same item so submit can run again after
+    # promotion (submit shuts down nothing here; it just writes a file).
+    (tmp_path / "data" / "session.json").unlink()
+    add_anchor(
+        tmp_path,
+        name="6am Taxi",
+        start="07:00",
+        duration_minutes=15,
+        checklist_items=["Passport", "Charger"],
+        now=_now(),
+    )
+    item_id = session_view(tmp_path, now=_now())["anchors"][0]["id"]
+    promote_checklist(
+        tmp_path, item_id=item_id, item_kind="anchor", name="Travel Kit", now=_now()
+    )
+
+    plan_after = submit_session(tmp_path, now=_now())
+    bytes_after = plan_after.read_bytes()
+
+    assert bytes_before == bytes_after
+
+
+def test_promote_checklist_rejects_a_colliding_slug_and_leaves_the_file_untouched(
+    tmp_path: Path,
+) -> None:
+    from tomorrow.library import save_checklist
+
+    _write_defaults(tmp_path)
+    save_checklist(tmp_path, checklist_id="travel-kit", name="Travel Kit", items=["Old row"])
+    checklist_path = tmp_path / "data" / "checklists" / "travel-kit.toml"
+    bytes_before = checklist_path.read_bytes()
+
+    added = add_anchor(
+        tmp_path,
+        name="6am Taxi",
+        start="06:00",
+        duration_minutes=15,
+        checklist_items=["Passport"],
+        now=_now(),
+    )
+    item_id = added["anchors"][0]["id"]
+
+    with pytest.raises(ValueError):
+        promote_checklist(
+            tmp_path,
+            item_id=item_id,
+            item_kind="anchor",
+            name="Travel Kit",
+            now=_now(),
+        )
+
+    bytes_after = checklist_path.read_bytes()
+    assert bytes_before == bytes_after
+
+
+def test_promote_checklist_does_not_touch_undo_history(tmp_path: Path) -> None:
+    _write_defaults(tmp_path)
+    added = add_anchor(
+        tmp_path,
+        name="6am Taxi",
+        start="06:00",
+        duration_minutes=15,
+        checklist_items=["Passport"],
+        now=_now(),
+    )
+    item_id = added["anchors"][0]["id"]
+    before_undo = added["can_undo"]
+
+    view = promote_checklist(
+        tmp_path, item_id=item_id, item_kind="anchor", name="Travel Kit", now=_now()
+    )
+
+    assert view["can_undo"] == before_undo

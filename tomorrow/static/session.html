@@ -1008,6 +1008,12 @@
       );
     }
 
+    function saveToLibraryButton(item, kind) {
+      if (item.checklist_kind !== "literal") return "";
+      return '<button type="button" class="ghost" data-promote-checklist="' +
+        esc(item.id) + '" data-promote-checklist-kind="' + esc(kind) + '">Save to Library</button>';
+    }
+
     function sheetEditFlex(item) {
       const placedHint = item.start
         ? esc(item.start) + " · " + esc(fmtDur(item.duration_minutes))
@@ -1024,6 +1030,7 @@
         '<button type="button" class="ghost" data-place="' + esc(item.id) + '">Place</button>' +
         '<button type="button" class="ghost" data-change-duration="' + esc(item.id) + '">Change Duration</button>' +
         '<button type="button" class="ghost" data-flex-to-todo="' + esc(item.id) + '">Make To-do</button>' +
+        saveToLibraryButton(item, "flex") +
         '<button type="button" class="ghost" data-close>Cancel</button>' +
         '<button type="button" class="danger" data-drop="' + esc(item.id) + '">Drop</button></div></form>'
       );
@@ -1049,6 +1056,7 @@
         formFields(item.name, item.start, item.duration_minutes) +
         checklistField(item.checklist, item.checklist_items) +
         '<div class="actions"><button class="primary" type="submit">Update</button>' +
+        saveToLibraryButton(item, "anchor") +
         '<button type="button" class="ghost" data-close>Cancel</button>' +
         '<button type="button" class="danger" data-remove="' + esc(item.id) + '">Remove</button></div></form>'
       );
@@ -1130,6 +1138,16 @@
         if (!confirmed) return;
       }
       await mutate("/api/convert", { kind: "flex-to-todo", id: itemId });
+    }
+
+    async function promoteChecklist(itemId, itemKind) {
+      const name = window.prompt("Save this checklist to the Library as:");
+      if (name === null) return;
+      if (!name.trim()) {
+        showSheetError("Checklist name cannot be blank.");
+        return;
+      }
+      await mutate("/api/promote-checklist", { id: itemId, kind: itemKind, name: name });
     }
 
     document.getElementById("stamp-anchor").addEventListener("click", sheetAddAnchor);
@@ -1320,6 +1338,12 @@
         event.preventDefault();
         const item = findFlex(changeDurationId);
         if (item) sheetChangeDuration(item);
+        return;
+      }
+      const promoteChecklistId = event.target.dataset.promoteChecklist;
+      if (promoteChecklistId) {
+        event.preventDefault();
+        await promoteChecklist(promoteChecklistId, event.target.dataset.promoteChecklistKind);
       }
     });
 
