@@ -915,14 +915,15 @@
       const suggestedStart = item.suggested_start || "09:00";
       const suggestedEnd = item.suggested_end || null;
       const suggestedDuration = item.suggested_duration_minutes || 30;
+      const defaultKind = item.default_kind || "anchor";
       openSheet(
         "<h2>Promote Draft · " + esc(item.name) + "</h2>" +
         '<p class="hint">A new opaque id is minted. The Draft’s id does not leak.</p>' +
         '<form id="promote-draft" data-id="' + esc(item.id) + '" data-original-name="' + esc(item.name) + '" data-stripped-name="' + esc(strippedName) + '">' +
         '<label>Name <input name="name" required value="' + esc(strippedName) + '"></label>' +
         '<label>Promote to <select name="kind">' +
-        '<option value="anchor">Anchor</option>' +
-        '<option value="flex">Flex</option>' +
+        '<option value="anchor"' + (defaultKind === "anchor" ? " selected" : "") + '>Anchor</option>' +
+        '<option value="flex"' + (defaultKind === "flex" ? " selected" : "") + '>Flex</option>' +
         '<option value="todo">To-do</option>' +
         "</select></label>" +
         durationFields(suggestedStart, suggestedDuration, "promote-start-label") +

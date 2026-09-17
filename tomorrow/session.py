@@ -1296,6 +1296,11 @@ def _draft_view(item: dict) -> dict:
     was found), and `suggested_duration_minutes` (absent when no duration
     was found), so the Promote sheet can pre-fill without any parsing in
     the browser.
+
+    Also ships `default_kind` ("anchor" or "flex"), the kind the Promote
+    sheet should open on: a parsed start or range defaults to anchor; a
+    duration with no start, or nothing detected at all, defaults to flex.
+    This is decided here so the browser doesn't re-derive it.
     """
 
     view = {key: value for key, value in item.items() if key != "checklist"}
@@ -1304,6 +1309,7 @@ def _draft_view(item: dict) -> dict:
     view["suggested_start"] = parsed.start
     view["suggested_end"] = parsed.end
     view["suggested_duration_minutes"] = parsed.duration_minutes
+    view["default_kind"] = "anchor" if parsed.start is not None else "flex"
     return view
 
 

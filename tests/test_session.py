@@ -294,6 +294,60 @@ def test_draft_with_no_time_in_name_ships_no_suggestion_and_is_left_alone(
     assert draft["suggested_start"] is None
 
 
+def test_draft_with_a_start_defaults_to_anchor(tmp_path: Path) -> None:
+    _write_defaults(tmp_path)
+
+    view = add_draft(
+        tmp_path,
+        output_dir=tmp_path / "Desktop",
+        name="Tutoring 16:30",
+        now=datetime(2026, 8, 10, 22, 0),
+    )
+    draft = view["drafts"][0]
+    assert draft["default_kind"] == "anchor"
+
+
+def test_draft_with_a_range_defaults_to_anchor(tmp_path: Path) -> None:
+    _write_defaults(tmp_path)
+
+    view = add_draft(
+        tmp_path,
+        output_dir=tmp_path / "Desktop",
+        name="Tutoring 16:30-18:00",
+        now=datetime(2026, 8, 10, 22, 0),
+    )
+    draft = view["drafts"][0]
+    assert draft["default_kind"] == "anchor"
+
+
+def test_draft_with_duration_only_defaults_to_flex(tmp_path: Path) -> None:
+    _write_defaults(tmp_path)
+
+    view = add_draft(
+        tmp_path,
+        output_dir=tmp_path / "Desktop",
+        name="Gym 45m",
+        now=datetime(2026, 8, 10, 22, 0),
+    )
+    draft = view["drafts"][0]
+    assert draft["default_kind"] == "flex"
+    assert draft["suggested_duration_minutes"] == 45
+    assert draft["suggested_start"] is None
+
+
+def test_draft_with_nothing_detected_defaults_to_flex(tmp_path: Path) -> None:
+    _write_defaults(tmp_path)
+
+    view = add_draft(
+        tmp_path,
+        output_dir=tmp_path / "Desktop",
+        name="Pick up prescription",
+        now=datetime(2026, 8, 10, 22, 0),
+    )
+    draft = view["drafts"][0]
+    assert draft["default_kind"] == "flex"
+
+
 def test_draft_with_duration_alongside_start_ships_both_suggestions(
     tmp_path: Path,
 ) -> None:
@@ -1561,6 +1615,7 @@ def test_adding_a_draft_mints_an_id_and_flushes_the_session_file(
             "suggested_start": None,
             "suggested_end": None,
             "suggested_duration_minutes": None,
+            "default_kind": "flex",
         }
     ]
     assert "undo" not in view
@@ -2934,6 +2989,7 @@ def test_drafts_cannot_carry_a_checklist(tmp_path: Path) -> None:
             "suggested_start": None,
             "suggested_end": None,
             "suggested_duration_minutes": None,
+            "default_kind": "flex",
         }
     ]
     assert "checklist" not in view["drafts"][0]
