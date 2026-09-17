@@ -915,6 +915,7 @@
       const clashCaption = item.clash_caption || null;
       const suggestedStart = clashCaption ? "" : (item.suggested_start || "09:00");
       const suggestedEnd = item.suggested_end || null;
+      // 30 mirrors DEFAULT_SUGGESTED_DURATION_MINUTES in tomorrow/session.py.
       const suggestedDuration = item.suggested_duration_minutes || 30;
       const defaultKind = item.default_kind || "anchor";
       openSheet(

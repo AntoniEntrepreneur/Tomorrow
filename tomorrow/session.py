@@ -53,7 +53,7 @@ from tomorrow.library import (
     save_day_template,
 )
 from tomorrow.icloud import try_import_icloud_items
-from tomorrow.name_times import parse_name_time
+from tomorrow.name_times import NameTimeResult, parse_name_time
 from tomorrow.plan import (
     ForeignPlanFileError,
     default_plan_date,
@@ -1288,21 +1288,28 @@ def _finalize_document(document: dict) -> FinalizeResult:
     )
 
 
-def _suggested_span_minutes(parsed) -> int:
+# The reminder default duration when a name gives neither a range nor a
+# duration. Mirrored in tomorrow/static/session.html's `sheetPromote` (the
+# Promote sheet's own fallback when a Draft has no parsed suggestion at
+# all); keep the two in sync if this ever changes.
+DEFAULT_SUGGESTED_DURATION_MINUTES = 30
+
+
+def _suggested_span_minutes(parsed: NameTimeResult) -> int:
     """The span (in minutes) a parsed name-time suggestion should be tested
     against for a clash: a range's real length, else a bare duration parsed
-    alongside a start, else the 30-minute reminder default.
+    alongside a start, else the default reminder duration.
     """
 
     if parsed.end is not None:
         return minutes_between(parse_clock(parsed.start), parse_clock(parsed.end))
     if parsed.duration_minutes is not None:
         return parsed.duration_minutes
-    return 30
+    return DEFAULT_SUGGESTED_DURATION_MINUTES
 
 
 def _clashing_anchor(
-    parsed, anchors: Sequence[Anchor], *, wake: time
+    parsed: NameTimeResult, anchors: Sequence[Anchor], *, wake: time
 ) -> Anchor | None:
     """The Anchor (if any) a suggested start would overlap.
 
