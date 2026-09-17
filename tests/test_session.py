@@ -3414,7 +3414,11 @@ def test_promote_checklist_writes_a_new_library_checklist_from_an_anchor(
     assert promoted_anchor["checklist_kind"] == "literal"
 
     # And the promoted Checklist is immediately offered by the select.
-    assert {"id": "travel-kit", "name": "Travel Kit"} in view["checklists"]
+    assert {
+        "id": "travel-kit",
+        "name": "Travel Kit",
+        "items": ["Passport", "Charger", "Boarding pass"],
+    } in view["checklists"]
 
 
 def test_promote_checklist_from_a_flex_leaves_the_flex_literal(tmp_path: Path) -> None:
