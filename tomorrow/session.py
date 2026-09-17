@@ -30,6 +30,7 @@ from tomorrow.domain import (
     describe_blocker,
     finalize_plan,
     is_next_day,
+    minutes_since_midnight,
     minutes_since_wake,
     parse_clock,
 )
@@ -978,10 +979,30 @@ def edit_bounds(
     document = load_session(repo_root, output_dir=output_dir, now=now)
 
     def mutate(current: dict) -> None:
+        old_wake = parse_clock(current["bounds"]["wake"])
+
         if wake is not None:
             current["bounds"]["wake"] = wake
         if sleep is not None:
             current["bounds"]["sleep"] = sleep
+
+        if wake is not None and current["anchors"]:
+            new_wake = parse_clock(wake)
+            delta_minutes = (
+                minutes_since_midnight(new_wake) - minutes_since_midnight(old_wake)
+            )
+            if delta_minutes != 0:
+                earliest = min(
+                    range(len(current["anchors"])),
+                    key=lambda index: minutes_since_midnight(
+                        parse_clock(current["anchors"][index]["start"])
+                    ),
+                )
+                anchor = current["anchors"][earliest]
+                shifted_start = datetime.combine(
+                    date(2000, 1, 1), parse_clock(anchor["start"])
+                ) + timedelta(minutes=delta_minutes)
+                anchor["start"] = shifted_start.strftime("%H:%M")
 
     return _commit(repo_root, document, mutate, output_dir=output_dir, now=now, opener=opener)
 

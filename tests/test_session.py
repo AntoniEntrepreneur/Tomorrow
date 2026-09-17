@@ -844,6 +844,101 @@ def test_submit_blocks_when_wake_equals_sleep(tmp_path: Path) -> None:
         submit_session(tmp_path, output_dir=tmp_path / "Desktop", now=now)
 
 
+def test_anchor_at_wake_shifts_to_new_wake_on_wake_edit(tmp_path: Path) -> None:
+    _write_defaults(tmp_path)
+    now = datetime(2026, 8, 10, 22, 0)
+    edit_bounds(tmp_path, output_dir=tmp_path / "Desktop", wake="06:00", now=now)
+    add_anchor(
+        tmp_path, output_dir=tmp_path / "Desktop", name="Stretch", start="06:00", duration_minutes=15, now=now
+    )
+
+    view = edit_bounds(tmp_path, output_dir=tmp_path / "Desktop", wake="09:00", now=now)
+
+    stretch = next(a for a in view["anchors"] if a["name"] == "Stretch")
+    assert stretch["start"] == "09:00"
+    assert stretch["duration_minutes"] == 15
+
+
+def test_anchor_after_wake_keeps_offset_on_wake_edit(tmp_path: Path) -> None:
+    _write_defaults(tmp_path)
+    now = datetime(2026, 8, 10, 22, 0)
+    edit_bounds(tmp_path, output_dir=tmp_path / "Desktop", wake="06:00", now=now)
+    add_anchor(
+        tmp_path, output_dir=tmp_path / "Desktop", name="Stretch", start="06:30", duration_minutes=15, now=now
+    )
+
+    view = edit_bounds(tmp_path, output_dir=tmp_path / "Desktop", wake="09:00", now=now)
+
+    stretch = next(a for a in view["anchors"] if a["name"] == "Stretch")
+    assert stretch["start"] == "09:30"
+    assert stretch["duration_minutes"] == 15
+
+
+def test_editing_wake_with_no_anchors_is_a_no_op(tmp_path: Path) -> None:
+    _write_defaults(tmp_path)
+    now = datetime(2026, 8, 10, 22, 0)
+
+    view = edit_bounds(tmp_path, output_dir=tmp_path / "Desktop", wake="09:00", now=now)
+
+    assert view["anchors"] == []
+    assert view["bounds"]["wake"] == "09:00"
+
+
+def test_only_earliest_anchor_shifts_with_wake(tmp_path: Path) -> None:
+    _write_defaults(tmp_path)
+    now = datetime(2026, 8, 10, 22, 0)
+    edit_bounds(tmp_path, output_dir=tmp_path / "Desktop", wake="06:00", now=now)
+    add_anchor(
+        tmp_path, output_dir=tmp_path / "Desktop", name="Stretch", start="06:00", duration_minutes=15, now=now
+    )
+    add_anchor(
+        tmp_path, output_dir=tmp_path / "Desktop", name="Gym", start="18:00", duration_minutes=90, now=now
+    )
+
+    view = edit_bounds(tmp_path, output_dir=tmp_path / "Desktop", wake="09:00", now=now)
+
+    stretch = next(a for a in view["anchors"] if a["name"] == "Stretch")
+    gym = next(a for a in view["anchors"] if a["name"] == "Gym")
+    assert stretch["start"] == "09:00"
+    assert gym["start"] == "18:00"
+
+
+def test_tied_earliest_anchors_resolve_by_list_order(tmp_path: Path) -> None:
+    _write_defaults(tmp_path)
+    now = datetime(2026, 8, 10, 22, 0)
+    edit_bounds(tmp_path, output_dir=tmp_path / "Desktop", wake="06:00", now=now)
+    add_anchor(
+        tmp_path, output_dir=tmp_path / "Desktop", name="First", start="06:00", duration_minutes=15, now=now
+    )
+    add_anchor(
+        tmp_path, output_dir=tmp_path / "Desktop", name="Second", start="06:00", duration_minutes=20, now=now
+    )
+
+    view = edit_bounds(tmp_path, output_dir=tmp_path / "Desktop", wake="09:00", now=now)
+
+    first = next(a for a in view["anchors"] if a["name"] == "First")
+    second = next(a for a in view["anchors"] if a["name"] == "Second")
+    assert first["start"] == "09:00"
+    assert second["start"] == "06:00"
+
+
+def test_wake_anchor_shift_is_persisted_on_fresh_read(tmp_path: Path) -> None:
+    _write_defaults(tmp_path)
+    now = datetime(2026, 8, 10, 22, 0)
+    edit_bounds(tmp_path, output_dir=tmp_path / "Desktop", wake="06:00", now=now)
+    add_anchor(
+        tmp_path, output_dir=tmp_path / "Desktop", name="Stretch", start="06:00", duration_minutes=15, now=now
+    )
+    edit_bounds(tmp_path, output_dir=tmp_path / "Desktop", wake="09:00", now=now)
+
+    document = json.loads(
+        (tmp_path / "data" / "session.json").read_text(encoding="utf-8")
+    )
+
+    stretch = next(a for a in document["anchors"] if a["name"] == "Stretch")
+    assert stretch["start"] == "09:00"
+
+
 def test_anchor_outside_new_bounds_is_a_live_blocker(tmp_path: Path) -> None:
     _write_defaults(tmp_path)
     now = datetime(2026, 8, 10, 22, 0)
