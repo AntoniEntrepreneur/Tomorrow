@@ -30,6 +30,7 @@ from tomorrow.domain import (
     describe_blocker,
     finalize_plan,
     is_next_day,
+    minutes_since_midnight,
     minutes_since_wake,
     parse_clock,
 )
@@ -802,6 +803,7 @@ def _seed_mutation(seed) -> Callable[[dict], None]:
                 "start": anchor.start.strftime("%H:%M"),
                 "duration_minutes": int(anchor.duration.total_seconds() // 60),
                 "checklist": anchor.checklist,
+                "activity_template_id": anchor.activity_template_id,
             }
             for anchor in seed.anchors
         )
@@ -978,10 +980,95 @@ def edit_bounds(
     document = load_session(repo_root, output_dir=output_dir, now=now)
 
     def mutate(current: dict) -> None:
+        old_wake = parse_clock(current["bounds"]["wake"])
+        old_sleep = parse_clock(current["bounds"]["sleep"])
+
+        anchors = current["anchors"]
+
+        def start_minutes(index: int) -> int:
+            return minutes_since_midnight(parse_clock(anchors[index]["start"]))
+
+        def end_minutes(index: int) -> int:
+            return start_minutes(index) + anchors[index]["duration_minutes"]
+
+        earliest = (
+            min(range(len(anchors)), key=start_minutes) if anchors else None
+        )
+        latest = (
+            min(range(len(anchors)), key=lambda index: -end_minutes(index))
+            if anchors
+            else None
+        )
+
         if wake is not None:
             current["bounds"]["wake"] = wake
         if sleep is not None:
             current["bounds"]["sleep"] = sleep
+
+        def shift(index: int, delta_minutes: int) -> None:
+            anchor = anchors[index]
+            shifted_start = datetime.combine(
+                date(2000, 1, 1), parse_clock(anchor["start"])
+            ) + timedelta(minutes=delta_minutes)
+            anchor["start"] = shifted_start.strftime("%H:%M")
+
+        def collides_with_another(index: int) -> bool:
+            anchor = anchors[index]
+            anchor_start = start_minutes(index)
+            anchor_end = end_minutes(index)
+            for other_index, other in enumerate(anchors):
+                if other_index == index:
+                    continue
+                other_start = start_minutes(other_index)
+                other_end = end_minutes(other_index)
+                if anchor_start < other_end and other_start < anchor_end:
+                    return True
+            return False
+
+        def demote_to_flex(index: int) -> None:
+            anchor = anchors.pop(index)
+            current["flexes"].append(
+                {
+                    "id": uuid.uuid4().hex,
+                    "name": anchor["name"],
+                    "duration_minutes": anchor["duration_minutes"],
+                    "start": None,
+                    "checklist": anchor.get("checklist"),
+                    "source": anchor.get("source"),
+                    "activity_template_id": anchor.get("activity_template_id"),
+                }
+            )
+
+        def shift_and_maybe_demote(index: int, delta_minutes: int) -> bool:
+            """Shift the anchor at index by delta_minutes; if it now collides
+            with another anchor, demote it to a flex. Returns True if the
+            anchor was removed (demoted), so callers can adjust any other
+            cached index that pointed past it.
+            """
+            if delta_minutes == 0:
+                return False
+            shift(index, delta_minutes)
+            if collides_with_another(index):
+                demote_to_flex(index)
+                return True
+            return False
+
+        if wake is not None and earliest is not None:
+            new_wake = parse_clock(wake)
+            delta_minutes = (
+                minutes_since_midnight(new_wake) - minutes_since_midnight(old_wake)
+            )
+            if shift_and_maybe_demote(earliest, delta_minutes):
+                # demoting earlier index shifts all later indices down by one
+                if latest is not None and latest > earliest:
+                    latest -= 1
+
+        if sleep is not None and latest is not None and latest != earliest:
+            new_sleep = parse_clock(sleep)
+            delta_minutes = (
+                minutes_since_midnight(new_sleep) - minutes_since_midnight(old_sleep)
+            )
+            shift_and_maybe_demote(latest, delta_minutes)
 
     return _commit(repo_root, document, mutate, output_dir=output_dir, now=now, opener=opener)
 
@@ -1004,6 +1091,7 @@ def _unpack(
             duration=timedelta(minutes=item["duration_minutes"]),
             checklist=item.get("checklist"),
             source=item.get("source"),
+            activity_template_id=item.get("activity_template_id"),
         )
         for item in document["anchors"]
     ]
