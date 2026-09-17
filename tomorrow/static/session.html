@@ -1118,6 +1118,17 @@
     }
 
     async function flexToTodo(itemId) {
+      const item = findFlex(itemId);
+      const rowCount = item && Array.isArray(item.checklist_items)
+        ? item.checklist_items.length
+        : 0;
+      if (rowCount > 0) {
+        const rowWord = rowCount === 1 ? "row" : "rows";
+        const confirmed = window.confirm(
+          `Discard ${rowCount} checklist ${rowWord} and convert to a To-do?`
+        );
+        if (!confirmed) return;
+      }
       await mutate("/api/convert", { kind: "flex-to-todo", id: itemId });
     }
 

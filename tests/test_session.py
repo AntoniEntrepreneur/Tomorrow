@@ -2814,6 +2814,42 @@ def test_flex_to_todo_detaches_checklist_and_undo_restores_it(tmp_path: Path) ->
     assert view["flexes"][0]["checklist"] == "sauna-kit"
 
 
+def test_flex_to_todo_discards_literal_rows_and_undo_restores_them(tmp_path: Path) -> None:
+    _write_defaults(tmp_path)
+    view = add_flex(
+        tmp_path,
+        name="Pack for trip",
+        duration_minutes=30,
+        checklist_items=["Passport", "Charger", "Boarding pass"],
+        now=_now(),
+    )
+    flex_id = view["flexes"][0]["id"]
+    assert view["flexes"][0]["checklist_kind"] == "literal"
+
+    view = convert_flex_to_todo(tmp_path, item_id=flex_id, now=_now())
+    assert view["flexes"] == []
+    assert view["todos"][0]["name"] == "Pack for trip"
+    assert view["todos"][0]["note"] == ""
+    assert "Passport" not in view["todos"][0]["note"]
+
+    view = undo_session(tmp_path, now=_now())
+    assert view["todos"] == []
+    assert view["flexes"][0]["checklist_items"] == ["Passport", "Charger", "Boarding pass"]
+    assert view["flexes"][0]["checklist_kind"] == "literal"
+
+
+def test_flex_to_todo_with_no_checklist_converts_without_incident(tmp_path: Path) -> None:
+    _write_defaults(tmp_path)
+    view = add_flex(tmp_path, name="Errand", duration_minutes=30, now=_now())
+    flex_id = view["flexes"][0]["id"]
+    assert view["flexes"][0]["checklist_kind"] is None
+
+    view = convert_flex_to_todo(tmp_path, item_id=flex_id, now=_now())
+    assert view["flexes"] == []
+    assert view["todos"][0]["name"] == "Errand"
+    assert view["todos"][0]["note"] == ""
+
+
 def test_reset_clears_todos_and_todos_only_session_is_not_blank(tmp_path: Path) -> None:
     _write_defaults(tmp_path)
     _write_tuesday_template(tmp_path)
