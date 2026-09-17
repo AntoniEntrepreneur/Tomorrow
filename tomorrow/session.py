@@ -803,6 +803,7 @@ def _seed_mutation(seed) -> Callable[[dict], None]:
                 "start": anchor.start.strftime("%H:%M"),
                 "duration_minutes": int(anchor.duration.total_seconds() // 60),
                 "checklist": anchor.checklist,
+                "activity_template_id": anchor.activity_template_id,
             }
             for anchor in seed.anchors
         )
@@ -1025,6 +1026,7 @@ def _unpack(
             duration=timedelta(minutes=item["duration_minutes"]),
             checklist=item.get("checklist"),
             source=item.get("source"),
+            activity_template_id=item.get("activity_template_id"),
         )
         for item in document["anchors"]
     ]
