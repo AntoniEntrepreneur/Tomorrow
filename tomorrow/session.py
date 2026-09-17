@@ -51,6 +51,7 @@ from tomorrow.library import (
     save_day_template,
 )
 from tomorrow.icloud import try_import_icloud_items
+from tomorrow.name_times import parse_name_time
 from tomorrow.plan import (
     ForeignPlanFileError,
     default_plan_date,
@@ -1285,6 +1286,23 @@ def _finalize_document(document: dict) -> FinalizeResult:
     )
 
 
+def _draft_view(item: dict) -> dict:
+    """Shape a raw Draft for the frontend: drop `checklist`, add the parsed name/time.
+
+    The Draft's own `name` is left untouched (the tray always shows the
+    full original name). The parse result is shipped alongside it under
+    `stripped_name` (used for Anchor/Flex) and `suggested_start` (absent
+    when no time was found), so the Promote sheet can pre-fill without any
+    parsing in the browser.
+    """
+
+    view = {key: value for key, value in item.items() if key != "checklist"}
+    parsed = parse_name_time(item["name"])
+    view["stripped_name"] = parsed.stripped_name
+    view["suggested_start"] = parsed.start
+    return view
+
+
 def _with_checklist_kind(item: dict) -> dict:
     """Report per-item whether the checklist is a Library reference or typed rows.
 
@@ -1341,10 +1359,7 @@ def session_view(
         "bounds": bounds_view,
         "template_offer": document["template_offer"],
         "show_template_offer": _show_template_offer(repo_root, document),
-        "drafts": [
-            {key: value for key, value in item.items() if key != "checklist"}
-            for item in document["drafts"]
-        ],
+        "drafts": [_draft_view(item) for item in document["drafts"]],
         "anchors": [_with_checklist_kind(item) for item in document["anchors"]],
         "flexes": [_with_checklist_kind(item) for item in document["flexes"]],
         "todos": document.get("todos", []),
