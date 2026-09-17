@@ -939,6 +939,132 @@ def test_wake_anchor_shift_is_persisted_on_fresh_read(tmp_path: Path) -> None:
     assert stretch["start"] == "09:00"
 
 
+def test_anchor_at_sleep_shifts_to_new_sleep_on_sleep_edit(tmp_path: Path) -> None:
+    _write_defaults(tmp_path)
+    now = datetime(2026, 8, 10, 22, 0)
+    edit_bounds(tmp_path, output_dir=tmp_path / "Desktop", sleep="22:00", now=now)
+    add_anchor(
+        tmp_path, output_dir=tmp_path / "Desktop", name="Stretch", start="06:30", duration_minutes=15, now=now
+    )
+    add_anchor(
+        tmp_path, output_dir=tmp_path / "Desktop", name="Wind-down", start="21:45", duration_minutes=15, now=now
+    )
+
+    view = edit_bounds(tmp_path, output_dir=tmp_path / "Desktop", sleep="23:00", now=now)
+
+    wind_down = next(a for a in view["anchors"] if a["name"] == "Wind-down")
+    assert wind_down["start"] == "22:45"
+    assert wind_down["duration_minutes"] == 15
+
+
+def test_anchor_before_sleep_keeps_offset_on_sleep_edit(tmp_path: Path) -> None:
+    _write_defaults(tmp_path)
+    now = datetime(2026, 8, 10, 22, 0)
+    edit_bounds(tmp_path, output_dir=tmp_path / "Desktop", sleep="22:00", now=now)
+    add_anchor(
+        tmp_path, output_dir=tmp_path / "Desktop", name="Stretch", start="06:30", duration_minutes=15, now=now
+    )
+    add_anchor(
+        tmp_path, output_dir=tmp_path / "Desktop", name="Wind-down", start="21:00", duration_minutes=15, now=now
+    )
+
+    view = edit_bounds(tmp_path, output_dir=tmp_path / "Desktop", sleep="23:00", now=now)
+
+    wind_down = next(a for a in view["anchors"] if a["name"] == "Wind-down")
+    assert wind_down["start"] == "22:00"
+    assert wind_down["duration_minutes"] == 15
+
+
+def test_wake_and_sleep_anchors_shift_independently_in_one_edit(tmp_path: Path) -> None:
+    _write_defaults(tmp_path)
+    now = datetime(2026, 8, 10, 22, 0)
+    edit_bounds(tmp_path, output_dir=tmp_path / "Desktop", wake="06:00", sleep="22:00", now=now)
+    add_anchor(
+        tmp_path, output_dir=tmp_path / "Desktop", name="Stretch", start="06:00", duration_minutes=15, now=now
+    )
+    add_anchor(
+        tmp_path, output_dir=tmp_path / "Desktop", name="Wind-down", start="21:45", duration_minutes=15, now=now
+    )
+
+    view = edit_bounds(tmp_path, output_dir=tmp_path / "Desktop", wake="07:00", sleep="23:00", now=now)
+
+    stretch = next(a for a in view["anchors"] if a["name"] == "Stretch")
+    wind_down = next(a for a in view["anchors"] if a["name"] == "Wind-down")
+    assert stretch["start"] == "07:00"
+    assert wind_down["start"] == "22:45"
+
+
+def test_sleep_only_edit_leaves_wake_anchor_untouched(tmp_path: Path) -> None:
+    _write_defaults(tmp_path)
+    now = datetime(2026, 8, 10, 22, 0)
+    edit_bounds(tmp_path, output_dir=tmp_path / "Desktop", wake="06:00", sleep="22:00", now=now)
+    add_anchor(
+        tmp_path, output_dir=tmp_path / "Desktop", name="Stretch", start="06:00", duration_minutes=15, now=now
+    )
+    add_anchor(
+        tmp_path, output_dir=tmp_path / "Desktop", name="Wind-down", start="21:45", duration_minutes=15, now=now
+    )
+
+    view = edit_bounds(tmp_path, output_dir=tmp_path / "Desktop", sleep="23:00", now=now)
+
+    stretch = next(a for a in view["anchors"] if a["name"] == "Stretch")
+    wind_down = next(a for a in view["anchors"] if a["name"] == "Wind-down")
+    assert stretch["start"] == "06:00"
+    assert wind_down["start"] == "22:45"
+
+
+def test_wake_only_edit_leaves_sleep_anchor_untouched(tmp_path: Path) -> None:
+    _write_defaults(tmp_path)
+    now = datetime(2026, 8, 10, 22, 0)
+    edit_bounds(tmp_path, output_dir=tmp_path / "Desktop", wake="06:00", sleep="22:00", now=now)
+    add_anchor(
+        tmp_path, output_dir=tmp_path / "Desktop", name="Stretch", start="06:00", duration_minutes=15, now=now
+    )
+    add_anchor(
+        tmp_path, output_dir=tmp_path / "Desktop", name="Wind-down", start="21:45", duration_minutes=15, now=now
+    )
+
+    view = edit_bounds(tmp_path, output_dir=tmp_path / "Desktop", wake="07:00", now=now)
+
+    stretch = next(a for a in view["anchors"] if a["name"] == "Stretch")
+    wind_down = next(a for a in view["anchors"] if a["name"] == "Wind-down")
+    assert stretch["start"] == "07:00"
+    assert wind_down["start"] == "21:45"
+
+
+def test_lone_anchor_both_wake_and_sleep_anchored_takes_wake_shift_only(tmp_path: Path) -> None:
+    _write_defaults(tmp_path)
+    now = datetime(2026, 8, 10, 22, 0)
+    edit_bounds(tmp_path, output_dir=tmp_path / "Desktop", wake="06:00", sleep="22:00", now=now)
+    add_anchor(
+        tmp_path, output_dir=tmp_path / "Desktop", name="Only", start="06:00", duration_minutes=15, now=now
+    )
+
+    view = edit_bounds(tmp_path, output_dir=tmp_path / "Desktop", wake="07:00", sleep="23:00", now=now)
+
+    only = next(a for a in view["anchors"] if a["name"] == "Only")
+    assert only["start"] == "07:00"
+
+
+def test_tied_latest_anchors_resolve_by_list_order(tmp_path: Path) -> None:
+    _write_defaults(tmp_path)
+    now = datetime(2026, 8, 10, 22, 0)
+    edit_bounds(tmp_path, output_dir=tmp_path / "Desktop", wake="06:00", sleep="22:00", now=now)
+    add_anchor(
+        tmp_path, output_dir=tmp_path / "Desktop", name="First", start="21:30", duration_minutes=30, now=now
+    )
+    add_anchor(
+        tmp_path, output_dir=tmp_path / "Desktop", name="Second", start="21:00", duration_minutes=60, now=now
+    )
+
+    view = edit_bounds(tmp_path, output_dir=tmp_path / "Desktop", sleep="23:00", now=now)
+
+    first = next(a for a in view["anchors"] if a["name"] == "First")
+    second = next(a for a in view["anchors"] if a["name"] == "Second")
+    assert first["start"] == "22:30"
+    assert second["start"] == "21:00"
+
+
 def test_anchor_outside_new_bounds_is_a_live_blocker(tmp_path: Path) -> None:
     _write_defaults(tmp_path)
     now = datetime(2026, 8, 10, 22, 0)

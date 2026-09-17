@@ -981,29 +981,52 @@ def edit_bounds(
 
     def mutate(current: dict) -> None:
         old_wake = parse_clock(current["bounds"]["wake"])
+        old_sleep = parse_clock(current["bounds"]["sleep"])
+
+        anchors = current["anchors"]
+
+        def start_minutes(index: int) -> int:
+            return minutes_since_midnight(parse_clock(anchors[index]["start"]))
+
+        def end_minutes(index: int) -> int:
+            return start_minutes(index) + anchors[index]["duration_minutes"]
+
+        earliest = (
+            min(range(len(anchors)), key=start_minutes) if anchors else None
+        )
+        latest = (
+            min(range(len(anchors)), key=lambda index: -end_minutes(index))
+            if anchors
+            else None
+        )
 
         if wake is not None:
             current["bounds"]["wake"] = wake
         if sleep is not None:
             current["bounds"]["sleep"] = sleep
 
-        if wake is not None and current["anchors"]:
+        def shift(index: int, delta_minutes: int) -> None:
+            anchor = anchors[index]
+            shifted_start = datetime.combine(
+                date(2000, 1, 1), parse_clock(anchor["start"])
+            ) + timedelta(minutes=delta_minutes)
+            anchor["start"] = shifted_start.strftime("%H:%M")
+
+        if wake is not None and earliest is not None:
             new_wake = parse_clock(wake)
             delta_minutes = (
                 minutes_since_midnight(new_wake) - minutes_since_midnight(old_wake)
             )
             if delta_minutes != 0:
-                earliest = min(
-                    range(len(current["anchors"])),
-                    key=lambda index: minutes_since_midnight(
-                        parse_clock(current["anchors"][index]["start"])
-                    ),
-                )
-                anchor = current["anchors"][earliest]
-                shifted_start = datetime.combine(
-                    date(2000, 1, 1), parse_clock(anchor["start"])
-                ) + timedelta(minutes=delta_minutes)
-                anchor["start"] = shifted_start.strftime("%H:%M")
+                shift(earliest, delta_minutes)
+
+        if sleep is not None and latest is not None and latest != earliest:
+            new_sleep = parse_clock(sleep)
+            delta_minutes = (
+                minutes_since_midnight(new_sleep) - minutes_since_midnight(old_sleep)
+            )
+            if delta_minutes != 0:
+                shift(latest, delta_minutes)
 
     return _commit(repo_root, document, mutate, output_dir=output_dir, now=now, opener=opener)
 
