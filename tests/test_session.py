@@ -8,6 +8,7 @@ import pytest
 
 from tomorrow.domain import (
     Anchor,
+    AnchorOverlapBlocker,
     Draft,
     Flex,
     FlexDoesNotFitBlocker,
@@ -382,6 +383,143 @@ def test_draft_with_duration_only_ships_duration_and_no_start(
     assert draft["stripped_name"] == "Gym"
     assert draft["suggested_start"] is None
     assert draft["suggested_duration_minutes"] == 45
+
+
+def test_suggested_start_clashing_with_an_anchor_is_withheld_with_a_caption(
+    tmp_path: Path,
+) -> None:
+    _write_defaults(tmp_path)
+    now = datetime(2026, 8, 10, 22, 0)
+    add_anchor(
+        tmp_path,
+        output_dir=tmp_path / "Desktop",
+        name="Tutoring",
+        start="16:00",
+        duration_minutes=60,
+        now=now,
+    )
+    view = add_draft(
+        tmp_path,
+        output_dir=tmp_path / "Desktop",
+        name="Tutoring 16:30",
+        now=now,
+    )
+    draft = view["drafts"][-1]
+    assert draft["stripped_name"] == "Tutoring"
+    assert draft["suggested_start"] is None
+
+    tutoring_anchor = Anchor(name="Tutoring", start=parse_clock("16:00"), duration=timedelta(minutes=60))
+    candidate = Anchor(name="Tutoring", start=parse_clock("16:30"), duration=timedelta(minutes=30))
+    expected_caption = describe_blocker(
+        AnchorOverlapBlocker(first=candidate, second=tutoring_anchor)
+    )
+    assert draft["clash_caption"] == expected_caption
+    assert "Tutoring" in draft["clash_caption"]
+    assert "16:00" in draft["clash_caption"] and "17:00" in draft["clash_caption"]
+
+
+def test_clash_span_uses_a_parsed_ranges_real_length_not_the_default(
+    tmp_path: Path,
+) -> None:
+    _write_defaults(tmp_path)
+    now = datetime(2026, 8, 10, 22, 0)
+    add_anchor(
+        tmp_path,
+        output_dir=tmp_path / "Desktop",
+        name="Curfew check-in",
+        start="23:15",
+        duration_minutes=15,
+        now=now,
+    )
+    # A 30-minute test would miss this: 22:00 + 30min ends at 22:30, well
+    # before the 23:15 Anchor. Only the range's real 90-minute length (ending
+    # 23:30) actually overlaps it.
+    view = add_draft(
+        tmp_path,
+        output_dir=tmp_path / "Desktop",
+        name="Party 22:00-23:30",
+        now=now,
+    )
+    draft = view["drafts"][-1]
+    assert draft["suggested_start"] is None
+    assert draft["clash_caption"] is not None
+
+
+def test_clash_span_defaults_to_thirty_minutes_with_no_parsed_length(
+    tmp_path: Path,
+) -> None:
+    _write_defaults(tmp_path)
+    now = datetime(2026, 8, 10, 22, 0)
+    add_anchor(
+        tmp_path,
+        output_dir=tmp_path / "Desktop",
+        name="Standup",
+        start="16:45",
+        duration_minutes=15,
+        now=now,
+    )
+    # A bare start with nothing else parsed is tested as 30 minutes: 16:30
+    # to 17:00 overlaps the 16:45-17:00 Anchor even though a naive point
+    # check at 16:30 alone would not.
+    view = add_draft(
+        tmp_path,
+        output_dir=tmp_path / "Desktop",
+        name="Tutoring 16:30",
+        now=now,
+    )
+    draft = view["drafts"][-1]
+    assert draft["suggested_start"] is None
+    assert draft["clash_caption"] is not None
+
+
+def test_a_placed_flex_does_not_suppress_a_clashing_looking_suggestion(
+    tmp_path: Path,
+) -> None:
+    _write_defaults(tmp_path)
+    now = datetime(2026, 8, 10, 22, 0)
+    flex_view = add_flex(
+        tmp_path,
+        output_dir=tmp_path / "Desktop",
+        name="Reading",
+        duration_minutes=60,
+        now=now,
+    )
+    flex_id = flex_view["flexes"][0]["id"]
+    place_flex(tmp_path, output_dir=tmp_path / "Desktop", item_id=flex_id, start="16:30", now=now)
+
+    view = add_draft(
+        tmp_path,
+        output_dir=tmp_path / "Desktop",
+        name="Tutoring 16:30",
+        now=now,
+    )
+    draft = view["drafts"][-1]
+    assert draft["suggested_start"] == "16:30"
+    assert "clash_caption" not in draft
+
+
+def test_non_clashing_suggestion_is_prefilled_with_no_caption(
+    tmp_path: Path,
+) -> None:
+    _write_defaults(tmp_path)
+    now = datetime(2026, 8, 10, 22, 0)
+    add_anchor(
+        tmp_path,
+        output_dir=tmp_path / "Desktop",
+        name="Gym",
+        start="18:00",
+        duration_minutes=60,
+        now=now,
+    )
+    view = add_draft(
+        tmp_path,
+        output_dir=tmp_path / "Desktop",
+        name="Tutoring 16:30",
+        now=now,
+    )
+    draft = view["drafts"][-1]
+    assert draft["suggested_start"] == "16:30"
+    assert "clash_caption" not in draft
 
 
 def test_unfinished_session_resumes_with_its_own_bounds(tmp_path: Path) -> None:
