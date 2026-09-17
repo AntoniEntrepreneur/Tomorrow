@@ -341,6 +341,15 @@ def _clean_checklist_items(items: object) -> tuple[str, ...]:
     return tuple(line.strip() for line in items if line and line.strip())
 
 
+def _library_checklist_rows(repo_root: Path, checklist_id: str | None) -> tuple[str, ...] | None:
+    """Return a Library Checklist's current rows, or `None` if it has none/doesn't exist."""
+
+    if not checklist_id:
+        return None
+    entry = load_checklist_library(repo_root / "data").get(checklist_id)
+    return entry.items if entry is not None else None
+
+
 def _resolve_checklist_fields(
     repo_root: Path,
     name: str,
@@ -349,15 +358,20 @@ def _resolve_checklist_fields(
 ) -> tuple[str | None, tuple[str, ...]]:
     """Resolve the (checklist, checklist_items) pair for a new item.
 
-    At most one of the two is ever non-empty. Explicit, non-blank typed rows
-    win outright (no Library lookup, no auto-suggest). Otherwise this falls
-    back to the existing Library-reference resolution (`_attached_checklist`),
-    unchanged.
+    At most one of the two is ever non-empty. Typed rows that exactly match
+    an explicitly selected Library Checklist's current rows (the untouched
+    prefill from attaching it) keep the item a reference. Any other
+    non-blank typed rows win outright as literal, one-time rows (no Library
+    lookup, no auto-suggest). Otherwise this falls back to the existing
+    Library-reference resolution (`_attached_checklist`), unchanged.
     """
 
     if checklist_items is not _UNSET:
         cleaned = _clean_checklist_items(checklist_items)
         if cleaned:
+            if checklist not in (_UNSET, None):
+                if _library_checklist_rows(repo_root, checklist) == cleaned:  # type: ignore[arg-type]
+                    return checklist, ()  # type: ignore[return-value]
             return None, cleaned
         if checklist is _UNSET:
             # Rows were explicitly supplied but empty: an explicit "no
@@ -910,9 +924,29 @@ def _apply_item_checklist(
     checklist: object,
     checklist_items: object = _UNSET,
 ) -> None:
+    current_checklist = item.get("checklist")
+    if checklist is not _UNSET and checklist != current_checklist:
+        # The select was changed to a different Checklist (or cleared): that
+        # always wins outright, discarding whatever the rows editor holds,
+        # per the "re-attaching overwrites typed rows" rule (Undo recovers
+        # them, not a confirmation dialog).
+        item["checklist"] = checklist
+        item["checklist_items"] = []
+        return
     if checklist_items is not _UNSET:
         cleaned = _clean_checklist_items(checklist_items)
         if cleaned:
+            reference = checklist if checklist is not _UNSET else current_checklist
+            if reference and _library_checklist_rows(repo_root, reference) == cleaned:
+                # Rows match the referenced Checklist's current rows
+                # verbatim: nothing was actually edited (e.g. a plain
+                # re-save), so the reference stays attached.
+                item["checklist"] = reference
+                item["checklist_items"] = []
+                return
+            # The rows editor was edited away from what the referenced
+            # Checklist holds (or there was no reference at all): detach.
+            # One rule, no provenance marker, no merge with the Library.
             item["checklist_items"] = list(cleaned)
             item["checklist"] = None
             return
@@ -1141,7 +1175,11 @@ def session_view(
         "weather_name": load_weather_name(data_dir),
         "weather_one_liner": try_fetch_weather(data_dir, plan_date, opener=opener),
         "checklists": [
-            {"id": checklist_id, "name": checklist.name}
+            {
+                "id": checklist_id,
+                "name": checklist.name,
+                "items": list(checklist.items),
+            }
             for checklist_id, checklist in load_checklist_library(data_dir).items()
         ],
     }

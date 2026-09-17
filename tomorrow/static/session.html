@@ -434,15 +434,27 @@
       return entry ? entry.name : "";
     }
 
+    function checklistRows(checklistId) {
+      if (!checklistId || !current) return [];
+      const entry = (current.checklists || []).find(item => item.id === checklistId);
+      return entry ? (entry.items || []) : [];
+    }
+
     function checklistField(selectedId, selectedItems) {
       const selected = selectedId || "";
-      const rows = (selectedItems || []).join("\n");
+      // A reference item carries no `checklist_items` of its own; its rows
+      // editor is prefilled from the referenced Checklist's current rows so
+      // the first edit has something concrete to detach away from.
+      const rows = (selectedItems && selectedItems.length
+        ? selectedItems
+        : checklistRows(selected)
+      ).join("\n");
       const options = (current && current.checklists || []).map(entry =>
         '<option value="' + esc(entry.id) + '"' +
         (entry.id === selected ? " selected" : "") + ">" +
         esc(entry.name) + "</option>"
       ).join("");
-      return '<label>Checklist <select name="checklist"' +
+      return '<label>Checklist <select name="checklist" data-checklist-select="1"' +
         (selected ? ' data-touched="1"' : "") + ">" +
         '<option value="">None</option>' + options + "</select></label>" +
         '<label>One-time rows (one per line)<textarea name="checklist_items"' +
@@ -1315,6 +1327,16 @@
     document.getElementById("sheet").addEventListener("input", event => {
       const form = event.target.form;
       if (!form) return;
+      if (event.target.dataset.checklistSelect === "1") {
+        // Attaching a Library Checklist from the select prefills the rows
+        // editor with its rows, overwriting whatever was typed there.
+        markTouched(form, ["checklist"]);
+        if (form.checklist_items) {
+          form.checklist_items.value = checklistRows(event.target.value).join("\n");
+          delete form.checklist_items.dataset.touched;
+        }
+        return;
+      }
       if (SUGGESTIBLE_FIELDS.includes(event.target.name)) {
         markTouched(form, [event.target.name]);
         if (event.target.name === "checklist_items") markTouched(form, ["checklist"]);

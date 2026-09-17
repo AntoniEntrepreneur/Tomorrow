@@ -15,6 +15,7 @@ from tomorrow.domain import (
     finalize_plan,
     parse_clock,
 )
+from tomorrow.activity_templates import activity_templates_dir
 from tomorrow.defaults import DayBounds
 from tomorrow.library import save_activity_template
 from tomorrow.session import (
@@ -1781,7 +1782,7 @@ def test_accepted_then_empty_session_does_not_look_like_pending(
     assert view["show_template_offer"] is False
 
 
-def test_session_view_exposes_checklist_library_names_without_rows(
+def test_session_view_exposes_checklist_library_names_and_rows(
     tmp_path: Path,
 ) -> None:
     _write_defaults(tmp_path)
@@ -1789,12 +1790,12 @@ def test_session_view_exposes_checklist_library_names_without_rows(
 
     view = session_view(tmp_path, now=datetime(2026, 8, 10, 22, 0))
 
+    # Rows ride along so the session editor can prefill the rows textarea
+    # when a Library Checklist is attached or picked from the select.
     assert view["checklists"] == [
-        {"id": "gym-bag", "name": "Gym bag"},
-        {"id": "sauna-kit", "name": "Sauna kit"},
+        {"id": "gym-bag", "name": "Gym bag", "items": ["Towel", "Lock"]},
+        {"id": "sauna-kit", "name": "Sauna kit", "items": ["Towel"]},
     ]
-    assert all("items" not in entry for entry in view["checklists"])
-    assert all("rows" not in entry for entry in view["checklists"])
 
 
 def test_adding_an_anchor_attaches_a_picked_checklist_and_flushes(
@@ -2176,6 +2177,237 @@ def test_old_session_file_without_checklist_items_still_loads(tmp_path: Path) ->
 
     assert view["anchors"][0]["checklist"] == "gym-bag"
     assert view["anchors"][0]["checklist_kind"] == "reference"
+
+
+def test_editing_the_rows_of_a_referenced_checklist_detaches_it(
+    tmp_path: Path,
+) -> None:
+    _write_defaults(tmp_path)
+    _write_checklist_library(tmp_path)
+    now = datetime(2026, 8, 10, 22, 0)
+    added = add_anchor(
+        tmp_path,
+        name="6am Taxi",
+        start="06:00",
+        duration_minutes=15,
+        checklist="gym-bag",
+        now=now,
+    )
+    item_id = added["anchors"][0]["id"]
+    library_file = tmp_path / "data" / "checklists" / "gym-bag.toml"
+    before = library_file.read_bytes()
+
+    edited = edit_anchor(
+        tmp_path,
+        item_id=item_id,
+        checklist="gym-bag",
+        checklist_items=["Towel", "Lock", "Passport"],
+        now=now,
+    )
+    flushed = json.loads(
+        (tmp_path / "data" / "session.json").read_text(encoding="utf-8")
+    )
+
+    assert edited["anchors"][0]["checklist"] is None
+    assert edited["anchors"][0]["checklist_items"] == ["Towel", "Lock", "Passport"]
+    assert edited["anchors"][0]["checklist_kind"] == "literal"
+    assert flushed["anchors"][0]["checklist"] is None
+    assert flushed["anchors"][0]["checklist_items"] == ["Towel", "Lock", "Passport"]
+    assert library_file.read_bytes() == before
+
+
+def test_resubmitting_unedited_prefilled_rows_keeps_the_reference(
+    tmp_path: Path,
+) -> None:
+    _write_defaults(tmp_path)
+    _write_checklist_library(tmp_path)
+    now = datetime(2026, 8, 10, 22, 0)
+    added = add_anchor(
+        tmp_path,
+        name="Gym",
+        start="18:00",
+        duration_minutes=90,
+        checklist="gym-bag",
+        now=now,
+    )
+    item_id = added["anchors"][0]["id"]
+
+    # Session editor always sends the select's value plus whatever the rows
+    # editor holds; a prefilled-but-untouched textarea sends the referenced
+    # Checklist's own rows back unchanged, which must not count as an edit.
+    resubmitted = edit_anchor(
+        tmp_path,
+        item_id=item_id,
+        checklist="gym-bag",
+        checklist_items=["Towel", "Lock"],
+        now=now,
+    )
+
+    assert resubmitted["anchors"][0]["checklist"] == "gym-bag"
+    assert resubmitted["anchors"][0]["checklist_items"] == []
+    assert resubmitted["anchors"][0]["checklist_kind"] == "reference"
+
+
+def test_a_detached_item_shows_a_blank_reference_not_the_former_name(
+    tmp_path: Path,
+) -> None:
+    _write_defaults(tmp_path)
+    _write_checklist_library(tmp_path)
+    now = datetime(2026, 8, 10, 22, 0)
+    added = add_flex(
+        tmp_path,
+        name="Gym",
+        duration_minutes=60,
+        checklist="gym-bag",
+        now=now,
+    )
+    item_id = added["flexes"][0]["id"]
+
+    detached = edit_flex(
+        tmp_path,
+        item_id=item_id,
+        checklist="gym-bag",
+        checklist_items=["Towel"],
+        now=now,
+    )
+
+    assert detached["flexes"][0]["checklist"] is None
+    assert detached["flexes"][0]["checklist_kind"] == "literal"
+
+
+def test_a_later_library_edit_does_not_reach_a_detached_item(tmp_path: Path) -> None:
+    _write_defaults(tmp_path)
+    _write_checklist_library(tmp_path)
+    now = datetime(2026, 8, 10, 22, 0)
+    added = add_anchor(
+        tmp_path,
+        name="Gym",
+        start="18:00",
+        duration_minutes=90,
+        checklist="gym-bag",
+        now=now,
+    )
+    item_id = added["anchors"][0]["id"]
+    edit_anchor(
+        tmp_path,
+        item_id=item_id,
+        checklist="gym-bag",
+        checklist_items=["Towel", "Lock", "Sauna cap"],
+        now=now,
+    )
+
+    # Edit the Library entry directly, as the Library page would.
+    (tmp_path / "data" / "checklists" / "gym-bag.toml").write_text(
+        'name = "Gym bag"\nitems = ["Towel", "Lock", "New rule"]\n', encoding="utf-8"
+    )
+
+    view = session_view(tmp_path, now=now)
+    assert view["anchors"][0]["checklist"] is None
+    assert view["anchors"][0]["checklist_items"] == ["Towel", "Lock", "Sauna cap"]
+
+
+def test_reattaching_from_the_select_overwrites_typed_rows_and_undo_restores_them(
+    tmp_path: Path,
+) -> None:
+    _write_defaults(tmp_path)
+    _write_checklist_library(tmp_path)
+    now = datetime(2026, 8, 10, 22, 0)
+    added = add_anchor(
+        tmp_path,
+        name="6am Taxi",
+        start="06:00",
+        duration_minutes=15,
+        checklist_items=["Passport", "Charger"],
+        now=now,
+    )
+    item_id = added["anchors"][0]["id"]
+
+    reattached = edit_anchor(
+        tmp_path,
+        item_id=item_id,
+        checklist="sauna-kit",
+        checklist_items=["Towel"],
+        now=now,
+    )
+    assert reattached["anchors"][0]["checklist"] == "sauna-kit"
+    assert reattached["anchors"][0]["checklist_items"] == []
+    assert reattached["anchors"][0]["checklist_kind"] == "reference"
+
+    undone = undo_session(tmp_path, now=now)
+    assert undone["anchors"][0]["checklist"] is None
+    assert undone["anchors"][0]["checklist_items"] == ["Passport", "Charger"]
+
+
+def test_day_template_seeded_checklist_detaches_the_same_way(tmp_path: Path) -> None:
+    _write_defaults(tmp_path)
+    _write_checklist_library(tmp_path)
+    _write_tuesday_template(tmp_path)
+    now = datetime(2026, 8, 10, 22, 0)
+
+    seeded = apply_template(tmp_path, now=now)
+    anchor = next(a for a in seeded["anchors"] if a["name"] == "Standup")
+    assert anchor["checklist"] == "morning-out"
+    library_file = tmp_path / "data" / "checklists" / "morning-out.toml"
+    # apply_template's own fixture (`_write_checklist_library`) doesn't
+    # define "morning-out"; give it a real Library entry to detach from.
+    library_file.write_text(
+        'name = "Morning out"\nitems = ["Keys", "Badge"]\n', encoding="utf-8"
+    )
+    reseeded = session_view(tmp_path, now=now)
+    anchor = next(a for a in reseeded["anchors"] if a["name"] == "Standup")
+    before = library_file.read_bytes()
+
+    detached = edit_anchor(
+        tmp_path,
+        item_id=anchor["id"],
+        checklist="morning-out",
+        checklist_items=["Keys", "Badge", "Umbrella"],
+        now=now,
+    )
+    view_anchor = next(a for a in detached["anchors"] if a["name"] == "Standup")
+
+    assert view_anchor["checklist"] is None
+    assert view_anchor["checklist_items"] == ["Keys", "Badge", "Umbrella"]
+    assert view_anchor["checklist_kind"] == "literal"
+    assert library_file.read_bytes() == before
+
+
+def test_daily_activity_checklist_detaches_leaving_its_template_unchanged(
+    tmp_path: Path,
+) -> None:
+    _write_defaults(tmp_path)
+    _write_checklist_library(tmp_path)
+    save_activity_template(
+        tmp_path,
+        activity_id="gym-routine",
+        name="Gym routine",
+        duration_minutes=60,
+        checklist="gym-bag",
+        daily=True,
+    )
+    now = datetime(2026, 8, 10, 22, 0)
+
+    view = session_view(tmp_path, now=now)
+    flex = next(f for f in view["flexes"] if f["name"] == "Gym routine")
+    assert flex["checklist"] == "gym-bag"
+    activity_file = activity_templates_dir(tmp_path / "data") / "gym-routine.toml"
+    activity_before = activity_file.read_bytes()
+    library_file = tmp_path / "data" / "checklists" / "gym-bag.toml"
+    library_before = library_file.read_bytes()
+
+    detached = edit_flex(
+        tmp_path,
+        item_id=flex["id"],
+        checklist="gym-bag",
+        checklist_items=["Towel", "Lock", "Extra socks"],
+        now=now,
+    )
+
+    assert detached["flexes"][0]["checklist"] is None
+    assert detached["flexes"][0]["checklist_items"] == ["Towel", "Lock", "Extra socks"]
+    assert detached["flexes"][0]["checklist_kind"] == "literal"
+    assert library_file.read_bytes() == library_before
+    assert activity_file.read_bytes() == activity_before
 
 
 def test_adding_flex_attaches_a_picked_or_name_match_checklist(
