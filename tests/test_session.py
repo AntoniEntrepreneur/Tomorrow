@@ -2318,6 +2318,25 @@ def test_apply_named_day_template_is_a_no_op_when_template_is_missing(
     view = apply_named_day_template(tmp_path, output_dir=tmp_path / "Desktop", template_id="does-not-exist", now=now)
 
     assert view["anchors"] == []
+
+
+def test_anchor_from_activity_template_keeps_its_activity_template_id_across_reload(
+    tmp_path: Path,
+) -> None:
+    _write_defaults(tmp_path)
+    _write_activity_template(tmp_path, "standup", name="Standup", duration=15, start="07:00")
+    templates = tmp_path / "data" / "templates"
+    templates.mkdir(parents=True, exist_ok=True)
+    (templates / "tuesday.toml").write_text(
+        '[[anchor]]\nactivity = "standup"\n', encoding="utf-8"
+    )
+    now = datetime(2026, 8, 10, 22, 0)
+
+    apply_named_day_template(tmp_path, output_dir=tmp_path / "Desktop", template_id="tuesday", now=now)
+    view = session_view(tmp_path, output_dir=tmp_path / "Desktop", now=now)
+
+    assert len(view["anchors"]) == 1
+    assert view["anchors"][0]["activity_template_id"] == "standup"
     assert view["flexes"] == []
 
 
