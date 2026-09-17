@@ -443,7 +443,7 @@
         esc(entry.name) + "</option>"
       ).join("");
       return '<label>Checklist <select name="checklist"' +
-        (selected ? ' data-touched="1"' : "") + ">" +
+        (selected || rows ? ' data-touched="1"' : "") + ">" +
         '<option value="">None</option>' + options + "</select></label>" +
         '<label>One-time rows (one per line)<textarea name="checklist_items"' +
         (rows ? ' data-touched="1"' : "") + '>' + esc(rows) + "</textarea></label>";
