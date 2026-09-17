@@ -41,6 +41,7 @@ from tomorrow.day_templates import (
     named_day_template_path,
 )
 from tomorrow.library import (
+    _slugify,
     delete_activity_template,
     delete_checklist,
     delete_day_template,
@@ -783,6 +784,46 @@ def promote_draft(
         raise ValueError(kind)
 
     return _commit(repo_root, document, mutate, now=now, opener=opener)
+
+
+_ITEM_KIND_KEYS = {"anchor": "anchors", "flex": "flexes"}
+
+
+def promote_checklist(
+    repo_root: Path,
+    *,
+    item_id: str,
+    item_kind: str,
+    name: str,
+    now: datetime | None = None,
+    opener: Callable[[Request], object] = _default_opener,
+) -> dict:
+    """Save an item's one-time checklist rows to the Library under `name`.
+
+    Copy-out only: the Session item is not read again after its rows are
+    fetched and is never rewritten, so this deliberately bypasses `_commit`
+    and its undo-snapshotting. Rejects when `name`'s slug already matches an
+    existing Library Checklist, leaving that file untouched.
+    """
+
+    key = _ITEM_KIND_KEYS.get(item_kind)
+    if key is None:
+        raise ValueError(item_kind)
+    document = load_session(repo_root, now=now)
+    item = _item_by_id(document[key], item_id)
+    rows = list(item.get("checklist_items") or ())
+
+    trimmed = name.strip()
+    if not trimmed:
+        raise ValueError("Checklist name cannot be blank.")
+
+    data_dir = repo_root / "data"
+    slug = _slugify(trimmed)
+    if slug in load_checklist_library(data_dir):
+        raise ValueError(f'A Checklist named "{trimmed}" already exists.')
+
+    save_checklist(repo_root, checklist_id=slug, name=trimmed, items=rows)
+    return session_view(repo_root, now=now, opener=opener)
 
 
 def _is_duplicate_of_seed_entry(
@@ -1574,6 +1615,21 @@ class SessionHandler(BaseHTTPRequestHandler):
                     **self._view_args(),
                 )
             except ValueError as exc:
+                self._send_json(400, {"error": str(exc)})
+                return
+            self._send_json(200, view)
+            return
+        if path == "/api/promote-checklist":
+            payload = self._read_json()
+            try:
+                view = promote_checklist(
+                    self.server.repo_root,
+                    item_id=payload["id"],
+                    item_kind=payload["kind"],
+                    name=payload.get("name") or "",
+                    **self._view_args(),
+                )
+            except (ValueError, KeyError) as exc:
                 self._send_json(400, {"error": str(exc)})
                 return
             self._send_json(200, view)
