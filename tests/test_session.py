@@ -10,6 +10,7 @@ from tomorrow.domain import (
     Anchor,
     Draft,
     Flex,
+    FlexDoesNotFitBlocker,
     PlanBlockedError,
     describe_blocker,
     finalize_plan,
@@ -863,6 +864,96 @@ def test_anchor_outside_new_bounds_is_a_live_blocker(tmp_path: Path) -> None:
         describe_blocker(blocker) for blocker in expected.blockers
     ]
     assert view["blockers"]
+
+
+def test_flex_that_no_longer_fits_after_bounds_shrink_stays_as_overflow(
+    tmp_path: Path,
+) -> None:
+    _write_defaults(tmp_path)
+    now = datetime(2026, 8, 10, 22, 0)
+    added = add_flex(tmp_path, output_dir=tmp_path / "Desktop", name="Read", duration_minutes=60, now=now
+    )
+    flex_id = added["flexes"][0]["id"]
+    placed = place_flex(tmp_path, output_dir=tmp_path / "Desktop", item_id=flex_id, start="21:00", now=now
+    )
+    assert placed["blockers"] == []
+
+    view = edit_bounds(tmp_path, output_dir=tmp_path / "Desktop", sleep="21:30", now=now)
+    document = json.loads(
+        (tmp_path / "data" / "session.json").read_text(encoding="utf-8")
+    )
+
+    read = Flex(name="Read", duration=timedelta(minutes=60), start=parse_clock("21:00"))
+    expected = finalize_plan(
+        bounds=DayBounds(wake="06:30", sleep="21:30"),
+        drafts=[],
+        anchors=[],
+        flexes=[read],
+    )
+
+    assert not expected.ok
+    assert view["blockers"] == [
+        describe_blocker(blocker) for blocker in expected.blockers
+    ]
+    assert view["blockers"]
+
+    # The Flex is retained in the stored document rather than dropped.
+    assert document["flexes"] == [
+        {
+            "id": flex_id,
+            "name": "Read",
+            "duration_minutes": 60,
+            "start": "21:00",
+            "checklist": None,
+        }
+    ]
+    assert view["flexes"] == document["flexes"]
+
+    with pytest.raises(PlanBlockedError) as excinfo:
+        submit_session(tmp_path, output_dir=tmp_path / "Desktop", now=now)
+    assert any(
+        describe_blocker(blocker) == "Flex 'Read' (21:00–22:00) does not fit in its Gap."
+        for blocker in excinfo.value.blockers
+    )
+
+
+def test_no_flex_is_silently_omitted_from_finalized_output(tmp_path: Path) -> None:
+    _write_defaults(tmp_path)
+    now = datetime(2026, 8, 10, 22, 0)
+    fits = add_flex(tmp_path, output_dir=tmp_path / "Desktop", name="Stretch", duration_minutes=15, now=now
+    )
+    fits_id = fits["flexes"][0]["id"]
+    place_flex(tmp_path, output_dir=tmp_path / "Desktop", item_id=fits_id, start="07:00", now=now)
+
+    overflow = add_flex(tmp_path, output_dir=tmp_path / "Desktop", name="Read", duration_minutes=60, now=now
+    )
+    overflow_id = next(
+        item["id"] for item in overflow["flexes"] if item["name"] == "Read"
+    )
+    place_flex(tmp_path, output_dir=tmp_path / "Desktop", item_id=overflow_id, start="21:00", now=now)
+
+    view = edit_bounds(tmp_path, output_dir=tmp_path / "Desktop", sleep="21:30", now=now)
+
+    # Both Flexes remain in the document: one placeable, one overflowing.
+    stored_names = {item["name"] for item in view["flexes"]}
+    assert stored_names == {"Stretch", "Read"}
+
+    stretch = Flex(name="Stretch", duration=timedelta(minutes=15), start=parse_clock("07:00"))
+    read = Flex(name="Read", duration=timedelta(minutes=60), start=parse_clock("21:00"))
+    expected = finalize_plan(
+        bounds=DayBounds(wake="06:30", sleep="21:30"),
+        drafts=[],
+        anchors=[],
+        flexes=[stretch, read],
+    )
+
+    assert any(
+        isinstance(blocker, FlexDoesNotFitBlocker) and blocker.flex.name == "Read"
+        for blocker in expected.blockers
+    )
+    assert view["blockers"] == [
+        describe_blocker(blocker) for blocker in expected.blockers
+    ]
 
 
 def test_submit_of_clean_session_with_anchors_writes_plan_html(
