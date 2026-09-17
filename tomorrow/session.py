@@ -1012,6 +1012,33 @@ def edit_bounds(
             ) + timedelta(minutes=delta_minutes)
             anchor["start"] = shifted_start.strftime("%H:%M")
 
+        def collides_with_another(index: int) -> bool:
+            anchor = anchors[index]
+            anchor_start = start_minutes(index)
+            anchor_end = end_minutes(index)
+            for other_index, other in enumerate(anchors):
+                if other_index == index:
+                    continue
+                other_start = start_minutes(other_index)
+                other_end = end_minutes(other_index)
+                if anchor_start < other_end and other_start < anchor_end:
+                    return True
+            return False
+
+        def demote_to_flex(index: int) -> None:
+            anchor = anchors.pop(index)
+            current["flexes"].append(
+                {
+                    "id": uuid.uuid4().hex,
+                    "name": anchor["name"],
+                    "duration_minutes": anchor["duration_minutes"],
+                    "start": None,
+                    "checklist": anchor.get("checklist"),
+                    "source": anchor.get("source"),
+                    "activity_template_id": anchor.get("activity_template_id"),
+                }
+            )
+
         if wake is not None and earliest is not None:
             new_wake = parse_clock(wake)
             delta_minutes = (
@@ -1019,6 +1046,10 @@ def edit_bounds(
             )
             if delta_minutes != 0:
                 shift(earliest, delta_minutes)
+                if collides_with_another(earliest):
+                    demote_to_flex(earliest)
+                    if latest is not None and latest > earliest:
+                        latest -= 1
 
         if sleep is not None and latest is not None and latest != earliest:
             new_sleep = parse_clock(sleep)
@@ -1027,6 +1058,8 @@ def edit_bounds(
             )
             if delta_minutes != 0:
                 shift(latest, delta_minutes)
+                if collides_with_another(latest):
+                    demote_to_flex(latest)
 
     return _commit(repo_root, document, mutate, output_dir=output_dir, now=now, opener=opener)
 

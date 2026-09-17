@@ -3193,3 +3193,174 @@ def test_apply_does_not_remove_a_hand_added_flex_with_matching_name(
     applied = apply_template(tmp_path, output_dir=tmp_path / "Desktop", now=_now())
     assert applied["template_offer"] == "pending"
     assert [f["name"] for f in applied["flexes"]].count("Deep Work") == 2
+
+
+def test_wake_shift_collision_demotes_shifted_anchor_to_flex(tmp_path: Path) -> None:
+    _write_defaults(tmp_path)
+    now = datetime(2026, 8, 10, 22, 0)
+    edit_bounds(tmp_path, output_dir=tmp_path / "Desktop", wake="06:00", sleep="22:00", now=now)
+    add_anchor(
+        tmp_path, output_dir=tmp_path / "Desktop", name="Stretch", start="06:00", duration_minutes=15, now=now
+    )
+    add_anchor(
+        tmp_path, output_dir=tmp_path / "Desktop", name="Meeting", start="09:10", duration_minutes=30, now=now
+    )
+
+    view = edit_bounds(tmp_path, output_dir=tmp_path / "Desktop", wake="09:00", now=now)
+
+    assert [a["name"] for a in view["anchors"]] == ["Meeting"]
+    meeting = next(a for a in view["anchors"] if a["name"] == "Meeting")
+    assert meeting["start"] == "09:10"
+    stretch = next(f for f in view["flexes"] if f["name"] == "Stretch")
+    assert stretch["start"] is None
+    assert stretch["duration_minutes"] == 15
+
+
+def test_demoted_flex_preserves_checklist_source_and_activity_template_id(
+    tmp_path: Path,
+) -> None:
+    _write_defaults(tmp_path)
+    _write_activity_template(tmp_path, "standup", name="Standup", duration=15, start="06:00")
+    templates = tmp_path / "data" / "templates"
+    templates.mkdir(parents=True, exist_ok=True)
+    (templates / "tuesday.toml").write_text('[[anchor]]\nactivity = "standup"\n', encoding="utf-8")
+    now = datetime(2026, 8, 10, 22, 0)
+    edit_bounds(tmp_path, output_dir=tmp_path / "Desktop", wake="06:00", sleep="22:00", now=now)
+    apply_named_day_template(tmp_path, output_dir=tmp_path / "Desktop", template_id="tuesday", now=now)
+    add_anchor(
+        tmp_path, output_dir=tmp_path / "Desktop", name="Meeting", start="09:10", duration_minutes=30, now=now
+    )
+
+    view = edit_bounds(tmp_path, output_dir=tmp_path / "Desktop", wake="09:00", now=now)
+
+    assert [a["name"] for a in view["anchors"]] == ["Meeting"]
+    standup = next(f for f in view["flexes"] if f["name"] == "Standup")
+    assert standup["start"] is None
+    assert standup["duration_minutes"] == 15
+    assert standup["activity_template_id"] == "standup"
+
+
+def test_sleep_shift_collision_demotes_shifted_anchor_to_flex(tmp_path: Path) -> None:
+    _write_defaults(tmp_path)
+    now = datetime(2026, 8, 10, 22, 0)
+    edit_bounds(tmp_path, output_dir=tmp_path / "Desktop", wake="06:00", sleep="22:00", now=now)
+    add_anchor(
+        tmp_path, output_dir=tmp_path / "Desktop", name="Wind-down", start="21:45", duration_minutes=15, now=now
+    )
+    add_anchor(
+        tmp_path, output_dir=tmp_path / "Desktop", name="Call", start="21:00", duration_minutes=20, now=now
+    )
+
+    view = edit_bounds(tmp_path, output_dir=tmp_path / "Desktop", sleep="21:15", now=now)
+
+    assert [a["name"] for a in view["anchors"]] == ["Call"]
+    call = next(a for a in view["anchors"] if a["name"] == "Call")
+    assert call["start"] == "21:00"
+    wind_down = next(f for f in view["flexes"] if f["name"] == "Wind-down")
+    assert wind_down["start"] is None
+    assert wind_down["duration_minutes"] == 15
+
+
+def test_wake_and_sleep_anchors_each_independently_demote_on_collision(
+    tmp_path: Path,
+) -> None:
+    _write_defaults(tmp_path)
+    now = datetime(2026, 8, 10, 22, 0)
+    edit_bounds(tmp_path, output_dir=tmp_path / "Desktop", wake="06:00", sleep="22:00", now=now)
+    add_anchor(
+        tmp_path, output_dir=tmp_path / "Desktop", name="Stretch", start="06:00", duration_minutes=15, now=now
+    )
+    add_anchor(
+        tmp_path, output_dir=tmp_path / "Desktop", name="Meeting", start="09:10", duration_minutes=30, now=now
+    )
+    add_anchor(
+        tmp_path, output_dir=tmp_path / "Desktop", name="Wind-down", start="21:45", duration_minutes=15, now=now
+    )
+    add_anchor(
+        tmp_path, output_dir=tmp_path / "Desktop", name="Call", start="21:00", duration_minutes=20, now=now
+    )
+
+    view = edit_bounds(tmp_path, output_dir=tmp_path / "Desktop", wake="09:00", sleep="21:15", now=now)
+
+    anchor_names = {a["name"] for a in view["anchors"]}
+    flex_names = {f["name"] for f in view["flexes"]}
+    assert anchor_names == {"Meeting", "Call"}
+    assert flex_names == {"Stretch", "Wind-down"}
+
+
+def test_wake_shift_landing_exactly_adjacent_is_not_a_collision(tmp_path: Path) -> None:
+    _write_defaults(tmp_path)
+    now = datetime(2026, 8, 10, 22, 0)
+    edit_bounds(tmp_path, output_dir=tmp_path / "Desktop", wake="06:00", sleep="22:00", now=now)
+    add_anchor(
+        tmp_path, output_dir=tmp_path / "Desktop", name="Stretch", start="06:00", duration_minutes=15, now=now
+    )
+    add_anchor(
+        tmp_path, output_dir=tmp_path / "Desktop", name="Meeting", start="09:15", duration_minutes=30, now=now
+    )
+
+    view = edit_bounds(tmp_path, output_dir=tmp_path / "Desktop", wake="09:00", now=now)
+
+    stretch = next(a for a in view["anchors"] if a["name"] == "Stretch")
+    assert stretch["start"] == "09:00"
+    assert view["flexes"] == []
+
+
+def test_demoted_flex_is_persisted_on_fresh_read(tmp_path: Path) -> None:
+    _write_defaults(tmp_path)
+    now = datetime(2026, 8, 10, 22, 0)
+    edit_bounds(tmp_path, output_dir=tmp_path / "Desktop", wake="06:00", sleep="22:00", now=now)
+    add_anchor(
+        tmp_path, output_dir=tmp_path / "Desktop", name="Stretch", start="06:00", duration_minutes=15, now=now
+    )
+    add_anchor(
+        tmp_path, output_dir=tmp_path / "Desktop", name="Meeting", start="09:10", duration_minutes=30, now=now
+    )
+    edit_bounds(tmp_path, output_dir=tmp_path / "Desktop", wake="09:00", now=now)
+
+    document = json.loads((tmp_path / "data" / "session.json").read_text(encoding="utf-8"))
+
+    assert [a["name"] for a in document["anchors"]] == ["Meeting"]
+    stretch = next(f for f in document["flexes"] if f["name"] == "Stretch")
+    assert stretch["start"] is None
+
+
+def test_demoted_flex_surfaces_as_unplaced_blocker_when_it_has_nowhere_to_go(
+    tmp_path: Path,
+) -> None:
+    _write_defaults(tmp_path)
+    now = datetime(2026, 8, 10, 22, 0)
+    edit_bounds(tmp_path, output_dir=tmp_path / "Desktop", wake="06:00", sleep="22:00", now=now)
+    add_anchor(
+        tmp_path, output_dir=tmp_path / "Desktop", name="Stretch", start="06:00", duration_minutes=15, now=now
+    )
+    add_anchor(
+        tmp_path, output_dir=tmp_path / "Desktop", name="Meeting", start="09:00", duration_minutes=780, now=now
+    )
+
+    view = edit_bounds(tmp_path, output_dir=tmp_path / "Desktop", wake="09:00", now=now)
+
+    assert [a["name"] for a in view["anchors"]] == ["Meeting"]
+    stretch = next(f for f in view["flexes"] if f["name"] == "Stretch")
+    assert stretch["start"] is None
+    assert any("Stretch" in blocker for blocker in view["blockers"])
+
+
+def test_demoted_flex_can_be_placed_into_the_remaining_gap(tmp_path: Path) -> None:
+    _write_defaults(tmp_path)
+    now = datetime(2026, 8, 10, 22, 0)
+    edit_bounds(tmp_path, output_dir=tmp_path / "Desktop", wake="06:00", sleep="22:00", now=now)
+    add_anchor(
+        tmp_path, output_dir=tmp_path / "Desktop", name="Stretch", start="06:00", duration_minutes=15, now=now
+    )
+    add_anchor(
+        tmp_path, output_dir=tmp_path / "Desktop", name="Meeting", start="09:10", duration_minutes=30, now=now
+    )
+    view = edit_bounds(tmp_path, output_dir=tmp_path / "Desktop", wake="09:00", now=now)
+    stretch_id = next(f["id"] for f in view["flexes"] if f["name"] == "Stretch")
+
+    placed = place_flex(tmp_path, output_dir=tmp_path / "Desktop", item_id=stretch_id, start="09:40", now=now)
+
+    stretch = next(f for f in placed["flexes"] if f["id"] == stretch_id)
+    assert stretch["start"] == "09:40"
+    assert not any("Stretch" in blocker for blocker in placed["blockers"])
