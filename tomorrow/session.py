@@ -351,35 +351,78 @@ def _library_checklist_rows(repo_root: Path, checklist_id: str | None) -> tuple[
     return entry.items if entry is not None else None
 
 
-def _resolve_checklist_fields(
+def _resolve_checklist(
     repo_root: Path,
     name: str,
+    *,
     checklist: str | None | object,
     checklist_items: object,
+    current_checklist: str | None | object = _UNSET,
+    current_checklist_items: object = (),
 ) -> tuple[str | None, tuple[str, ...]]:
-    """Resolve the (checklist, checklist_items) pair for a new item.
+    """Resolve the (checklist, checklist_items) pair for a new or edited item.
 
-    At most one of the two is ever non-empty. Typed rows that exactly match
-    an explicitly selected Library Checklist's current rows (the untouched
-    prefill from attaching it) keep the item a reference. Any other
+    At most one of the two is ever non-empty. `current_checklist` is
+    `_UNSET` for a brand-new item -- there's nothing yet to "re-attach away
+    from" -- or the item's existing `checklist` value (possibly `None`) for
+    an edit; `current_checklist_items` is that item's existing typed rows,
+    used only to gate the auto-suggest fallback.
+
+    For an edit, explicitly changing the checklist select to a different
+    value (including clearing it) always wins outright, discarding whatever
+    the rows editor holds, per the "re-attaching overwrites typed rows"
+    rule (Undo recovers them, not a confirmation dialog).
+
+    Otherwise: typed rows that exactly match the (explicitly selected, or
+    already-attached) Library Checklist's current rows -- the untouched
+    prefill from attaching it -- keep the item a reference. Any other
     non-blank typed rows win outright as literal, one-time rows (no Library
-    lookup, no auto-suggest). Otherwise this falls back to the existing
-    Library-reference resolution (`_attached_checklist`), unchanged.
+    lookup, no auto-suggest). With no rows at all, this falls back to the
+    existing Library-reference resolution: the explicit checklist if one
+    was given, otherwise the item's current checklist, otherwise an
+    auto-suggestion from the name (only when the item has nothing at all).
     """
+
+    if (
+        current_checklist is not _UNSET
+        and checklist is not _UNSET
+        and checklist != current_checklist
+    ):
+        return checklist, ()  # type: ignore[return-value]
 
     if checklist_items is not _UNSET:
         cleaned = _clean_checklist_items(checklist_items)
         if cleaned:
-            if checklist not in (_UNSET, None):
-                if _library_checklist_rows(repo_root, checklist) == cleaned:  # type: ignore[arg-type]
-                    return checklist, ()  # type: ignore[return-value]
+            reference = (
+                checklist
+                if checklist is not _UNSET
+                else (None if current_checklist is _UNSET else current_checklist)
+            )
+            if reference and _library_checklist_rows(repo_root, reference) == cleaned:  # type: ignore[arg-type]
+                # Rows match the referenced Checklist's current rows
+                # verbatim: nothing was actually edited (e.g. a plain
+                # re-save, or the untouched prefill from attaching it), so
+                # the reference stays attached.
+                return reference, ()  # type: ignore[return-value]
+            # The rows differ from what the referenced Checklist holds (or
+            # there was no reference at all): go literal. One rule, no
+            # provenance marker, no merge with the Library.
             return None, cleaned
         if checklist is _UNSET:
             # Rows were explicitly supplied but empty: an explicit "no
             # checklist" rather than "auto-suggest one from the name".
             return None, ()
-    attached = _attached_checklist(repo_root, name, checklist)
-    return attached, ()
+
+    if checklist is not _UNSET:
+        return checklist, ()  # type: ignore[return-value]
+
+    if current_checklist is _UNSET:
+        return suggest_checklist(name, load_checklist_library(repo_root / "data")), ()
+
+    if not current_checklist and not current_checklist_items:
+        return suggest_checklist(name, load_checklist_library(repo_root / "data")), ()
+
+    return current_checklist, tuple(current_checklist_items)  # type: ignore[return-value]
 
 
 def add_anchor(
@@ -394,7 +437,9 @@ def add_anchor(
     opener: Callable[[Request], object] = _default_opener,
 ) -> dict:
     document = load_session(repo_root, now=now)
-    attached, items = _resolve_checklist_fields(repo_root, name, checklist, checklist_items)
+    attached, items = _resolve_checklist(
+        repo_root, name, checklist=checklist, checklist_items=checklist_items
+    )
 
     def mutate(current: dict) -> None:
         current["anchors"].append(
@@ -422,7 +467,9 @@ def add_flex(
     opener: Callable[[Request], object] = _default_opener,
 ) -> dict:
     document = load_session(repo_root, now=now)
-    attached, items = _resolve_checklist_fields(repo_root, name, checklist, checklist_items)
+    attached, items = _resolve_checklist(
+        repo_root, name, checklist=checklist, checklist_items=checklist_items
+    )
 
     def mutate(current: dict) -> None:
         current["flexes"].append(
@@ -965,45 +1012,16 @@ def _apply_item_checklist(
     checklist: object,
     checklist_items: object = _UNSET,
 ) -> None:
-    current_checklist = item.get("checklist")
-    if checklist is not _UNSET and checklist != current_checklist:
-        # The select was changed to a different Checklist (or cleared): that
-        # always wins outright, discarding whatever the rows editor holds,
-        # per the "re-attaching overwrites typed rows" rule (Undo recovers
-        # them, not a confirmation dialog).
-        item["checklist"] = checklist
-        item["checklist_items"] = []
-        return
-    if checklist_items is not _UNSET:
-        cleaned = _clean_checklist_items(checklist_items)
-        if cleaned:
-            reference = checklist if checklist is not _UNSET else current_checklist
-            if reference and _library_checklist_rows(repo_root, reference) == cleaned:
-                # Rows match the referenced Checklist's current rows
-                # verbatim: nothing was actually edited (e.g. a plain
-                # re-save), so the reference stays attached.
-                item["checklist"] = reference
-                item["checklist_items"] = []
-                return
-            # The rows editor was edited away from what the referenced
-            # Checklist holds (or there was no reference at all): detach.
-            # One rule, no provenance marker, no merge with the Library.
-            item["checklist_items"] = list(cleaned)
-            item["checklist"] = None
-            return
-        item["checklist_items"] = []
-        if checklist is _UNSET:
-            # Rows explicitly cleared to empty: leave the item with no
-            # checklist at all, rather than falling through to auto-suggest.
-            item["checklist"] = None
-            return
-    if checklist is not _UNSET:
-        item["checklist"] = checklist
-        item["checklist_items"] = []
-    elif not item.get("checklist") and not item.get("checklist_items"):
-        item["checklist"] = suggest_checklist(
-            name, load_checklist_library(repo_root / "data")
-        )
+    checklist_value, checklist_items_value = _resolve_checklist(
+        repo_root,
+        name,
+        checklist=checklist,
+        checklist_items=checklist_items,
+        current_checklist=item.get("checklist"),
+        current_checklist_items=item.get("checklist_items") or (),
+    )
+    item["checklist"] = checklist_value
+    item["checklist_items"] = list(checklist_items_value)
 
 
 def edit_flex(
