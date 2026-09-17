@@ -911,17 +911,25 @@
     }
 
     function sheetPromote(item) {
+      const strippedName = item.stripped_name || item.name;
+      const clashCaption = item.clash_caption || null;
+      const suggestedStart = clashCaption ? "" : (item.suggested_start || "09:00");
+      const suggestedEnd = item.suggested_end || null;
+      // 30 mirrors DEFAULT_SUGGESTED_DURATION_MINUTES in tomorrow/session.py.
+      const suggestedDuration = item.suggested_duration_minutes || 30;
+      const defaultKind = item.default_kind || "anchor";
       openSheet(
         "<h2>Promote Draft · " + esc(item.name) + "</h2>" +
         '<p class="hint">A new opaque id is minted. The Draft’s id does not leak.</p>' +
-        '<form id="promote-draft" data-id="' + esc(item.id) + '">' +
-        '<label>Name <input name="name" required value="' + esc(item.name) + '"></label>' +
+        '<form id="promote-draft" data-id="' + esc(item.id) + '" data-original-name="' + esc(item.name) + '" data-stripped-name="' + esc(strippedName) + '">' +
+        '<label>Name <input name="name" required value="' + esc(strippedName) + '"></label>' +
         '<label>Promote to <select name="kind">' +
-        '<option value="anchor">Anchor</option>' +
-        '<option value="flex">Flex</option>' +
+        '<option value="anchor"' + (defaultKind === "anchor" ? " selected" : "") + '>Anchor</option>' +
+        '<option value="flex"' + (defaultKind === "flex" ? " selected" : "") + '>Flex</option>' +
         '<option value="todo">To-do</option>' +
         "</select></label>" +
-        durationFields("09:00", 30, "promote-start-label") +
+        durationFields(suggestedStart, suggestedDuration, "promote-start-label") +
+        (clashCaption ? '<p class="field-error" id="promote-clash-caption">' + esc(clashCaption) + "</p>" : "") +
         '<p class="hint" id="promote-flex-hint" hidden>Flex lands unplaced in the tray. Place it whenever you notice a Gap.</p>' +
         '<p class="hint" id="promote-todo-hint" hidden>To-do needs nothing else — its note carries over if it has one.</p>' +
         checklistField("") +
@@ -931,10 +939,23 @@
       );
       const form = document.getElementById("promote-draft");
       initDurationToggle(form);
+      if (suggestedEnd) {
+        setDurationMode(form, "end");
+        form.end.value = suggestedEnd;
+      }
       const kind = form.querySelector('[name="kind"]');
       kind.addEventListener("change", () => syncPromoteFields(form));
       syncPromoteFields(form);
-      maybeSuggestChecklist(form);
+      // A field the name-parse actually supplied must win over the same
+      // field supplied by a matching Activity Template, so mark it touched
+      // before suggestFromName runs (autofill only overwrites untouched
+      // fields).
+      const nameSuppliedFields = [];
+      if (item.suggested_start) nameSuppliedFields.push("start");
+      if (item.suggested_end) nameSuppliedFields.push("end");
+      if (item.suggested_duration_minutes) nameSuppliedFields.push("duration_minutes");
+      markTouched(form, nameSuppliedFields);
+      suggestFromName(form);
     }
 
     function sheetEditDraft(item) {
@@ -950,6 +971,9 @@
     function syncPromoteFields(form) {
       const asFlex = form.kind.value === "flex";
       const asTodo = form.kind.value === "todo";
+      if (form.dataset.originalName !== undefined) {
+        form.name.value = asTodo ? form.dataset.originalName : form.dataset.strippedName;
+      }
       form.start.required = !asFlex && !asTodo;
       document.getElementById("promote-start-label").hidden = asFlex || asTodo;
       document.getElementById("promote-flex-hint").hidden = !asFlex;

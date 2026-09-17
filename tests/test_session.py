@@ -8,6 +8,7 @@ import pytest
 
 from tomorrow.domain import (
     Anchor,
+    AnchorOverlapBlocker,
     Draft,
     Flex,
     FlexDoesNotFitBlocker,
@@ -19,6 +20,7 @@ from tomorrow.domain import (
 from tomorrow.activity_templates import activity_templates_dir
 from tomorrow.defaults import DayBounds
 from tomorrow.library import save_activity_template
+from tomorrow.name_times import parse_name_time
 from tomorrow.plan import PLAN_FILENAME
 from tomorrow.session import (
     add_anchor,
@@ -218,6 +220,307 @@ def test_imported_draft_note_shows_in_session_and_becomes_todo_note_on_promotion
     promoted = promote_draft(tmp_path, output_dir=tmp_path / "Desktop", item_id=draft["id"], kind="todo", now=datetime(2026, 8, 10, 22, 0)
     )
     assert promoted["todos"][0]["note"] == "555-1234"
+
+
+def test_imported_draft_with_a_name_time_ships_stripped_name_and_suggested_start(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from tomorrow.icloud import ClassifiedIcloudItems, ImportedItem
+
+    _write_defaults(tmp_path)
+
+    def fake_import(data_dir, plan_date, *, existing_anchors):
+        return ClassifiedIcloudItems(
+            anchors=[],
+            drafts=[ImportedItem(name="Tutoring 16:30")],
+        )
+
+    monkeypatch.setattr("tomorrow.session.try_import_icloud_items", fake_import)
+
+    seeded = session_view(tmp_path, output_dir=tmp_path / "Desktop", now=datetime(2026, 8, 10, 22, 0))
+    draft = seeded["drafts"][0]
+    assert draft["name"] == "Tutoring 16:30"
+    assert draft["stripped_name"] == "Tutoring"
+    assert draft["suggested_start"] == "16:30"
+
+
+def test_draft_with_a_name_range_ships_suggested_end(
+    tmp_path: Path,
+) -> None:
+    _write_defaults(tmp_path)
+
+    view = add_draft(
+        tmp_path,
+        output_dir=tmp_path / "Desktop",
+        name="Tutoring 16:30-18:00",
+        now=datetime(2026, 8, 10, 22, 0),
+    )
+    draft = view["drafts"][0]
+    assert draft["name"] == "Tutoring 16:30-18:00"
+    assert draft["stripped_name"] == "Tutoring"
+    assert draft["suggested_start"] == "16:30"
+    assert draft["suggested_end"] == "18:00"
+
+
+def test_hand_added_draft_with_a_name_time_gets_the_same_treatment_as_imported(
+    tmp_path: Path,
+) -> None:
+    _write_defaults(tmp_path)
+
+    view = add_draft(
+        tmp_path,
+        output_dir=tmp_path / "Desktop",
+        name="Gym 6pm",
+        now=datetime(2026, 8, 10, 22, 0),
+    )
+    draft = view["drafts"][0]
+    assert draft["name"] == "Gym 6pm"
+    assert draft["stripped_name"] == "Gym"
+    assert draft["suggested_start"] == "18:00"
+
+
+def test_draft_with_no_time_in_name_ships_no_suggestion_and_is_left_alone(
+    tmp_path: Path,
+) -> None:
+    _write_defaults(tmp_path)
+
+    view = add_draft(
+        tmp_path,
+        output_dir=tmp_path / "Desktop",
+        name="Pick up prescription",
+        now=datetime(2026, 8, 10, 22, 0),
+    )
+    draft = view["drafts"][0]
+    assert draft["name"] == "Pick up prescription"
+    assert draft["stripped_name"] == "Pick up prescription"
+    assert draft["suggested_start"] is None
+
+
+def test_draft_with_a_start_defaults_to_anchor(tmp_path: Path) -> None:
+    _write_defaults(tmp_path)
+
+    view = add_draft(
+        tmp_path,
+        output_dir=tmp_path / "Desktop",
+        name="Tutoring 16:30",
+        now=datetime(2026, 8, 10, 22, 0),
+    )
+    draft = view["drafts"][0]
+    assert draft["default_kind"] == "anchor"
+
+
+def test_draft_with_a_range_defaults_to_anchor(tmp_path: Path) -> None:
+    _write_defaults(tmp_path)
+
+    view = add_draft(
+        tmp_path,
+        output_dir=tmp_path / "Desktop",
+        name="Tutoring 16:30-18:00",
+        now=datetime(2026, 8, 10, 22, 0),
+    )
+    draft = view["drafts"][0]
+    assert draft["default_kind"] == "anchor"
+
+
+def test_draft_with_duration_only_defaults_to_flex(tmp_path: Path) -> None:
+    _write_defaults(tmp_path)
+
+    view = add_draft(
+        tmp_path,
+        output_dir=tmp_path / "Desktop",
+        name="Gym 45m",
+        now=datetime(2026, 8, 10, 22, 0),
+    )
+    draft = view["drafts"][0]
+    assert draft["default_kind"] == "flex"
+    assert draft["suggested_duration_minutes"] == 45
+    assert draft["suggested_start"] is None
+
+
+def test_draft_with_nothing_detected_defaults_to_flex(tmp_path: Path) -> None:
+    _write_defaults(tmp_path)
+
+    view = add_draft(
+        tmp_path,
+        output_dir=tmp_path / "Desktop",
+        name="Pick up prescription",
+        now=datetime(2026, 8, 10, 22, 0),
+    )
+    draft = view["drafts"][0]
+    assert draft["default_kind"] == "flex"
+
+
+def test_draft_with_duration_alongside_start_ships_both_suggestions(
+    tmp_path: Path,
+) -> None:
+    _write_defaults(tmp_path)
+
+    view = add_draft(
+        tmp_path,
+        output_dir=tmp_path / "Desktop",
+        name="Tutoring 16:30 (90 min)",
+        now=datetime(2026, 8, 10, 22, 0),
+    )
+    draft = view["drafts"][0]
+    assert draft["name"] == "Tutoring 16:30 (90 min)"
+    assert draft["stripped_name"] == "Tutoring"
+    assert draft["suggested_start"] == "16:30"
+    assert draft["suggested_duration_minutes"] == 90
+
+
+def test_draft_with_duration_only_ships_duration_and_no_start(
+    tmp_path: Path,
+) -> None:
+    _write_defaults(tmp_path)
+
+    view = add_draft(
+        tmp_path,
+        output_dir=tmp_path / "Desktop",
+        name="Gym 45m",
+        now=datetime(2026, 8, 10, 22, 0),
+    )
+    draft = view["drafts"][0]
+    assert draft["name"] == "Gym 45m"
+    assert draft["stripped_name"] == "Gym"
+    assert draft["suggested_start"] is None
+    assert draft["suggested_duration_minutes"] == 45
+
+
+def test_suggested_start_clashing_with_an_anchor_is_withheld_with_a_caption(
+    tmp_path: Path,
+) -> None:
+    _write_defaults(tmp_path)
+    now = datetime(2026, 8, 10, 22, 0)
+    add_anchor(
+        tmp_path,
+        output_dir=tmp_path / "Desktop",
+        name="Tutoring",
+        start="16:00",
+        duration_minutes=60,
+        now=now,
+    )
+    view = add_draft(
+        tmp_path,
+        output_dir=tmp_path / "Desktop",
+        name="Tutoring 16:30",
+        now=now,
+    )
+    draft = view["drafts"][-1]
+    assert draft["stripped_name"] == "Tutoring"
+    assert draft["suggested_start"] is None
+
+    tutoring_anchor = Anchor(name="Tutoring", start=parse_clock("16:00"), duration=timedelta(minutes=60))
+    candidate = Anchor(name="Tutoring", start=parse_clock("16:30"), duration=timedelta(minutes=30))
+    expected_caption = describe_blocker(
+        AnchorOverlapBlocker(first=candidate, second=tutoring_anchor)
+    )
+    assert draft["clash_caption"] == expected_caption
+    assert "Tutoring" in draft["clash_caption"]
+    assert "16:00" in draft["clash_caption"] and "17:00" in draft["clash_caption"]
+
+
+def test_clash_span_uses_a_parsed_ranges_real_length_not_the_default(
+    tmp_path: Path,
+) -> None:
+    _write_defaults(tmp_path)
+    now = datetime(2026, 8, 10, 22, 0)
+    add_anchor(
+        tmp_path,
+        output_dir=tmp_path / "Desktop",
+        name="Curfew check-in",
+        start="23:15",
+        duration_minutes=15,
+        now=now,
+    )
+    # A 30-minute test would miss this: 22:00 + 30min ends at 22:30, well
+    # before the 23:15 Anchor. Only the range's real 90-minute length (ending
+    # 23:30) actually overlaps it.
+    view = add_draft(
+        tmp_path,
+        output_dir=tmp_path / "Desktop",
+        name="Party 22:00-23:30",
+        now=now,
+    )
+    draft = view["drafts"][-1]
+    assert draft["suggested_start"] is None
+    assert draft["clash_caption"] is not None
+
+
+def test_clash_span_defaults_to_thirty_minutes_with_no_parsed_length(
+    tmp_path: Path,
+) -> None:
+    _write_defaults(tmp_path)
+    now = datetime(2026, 8, 10, 22, 0)
+    add_anchor(
+        tmp_path,
+        output_dir=tmp_path / "Desktop",
+        name="Standup",
+        start="16:45",
+        duration_minutes=15,
+        now=now,
+    )
+    # A bare start with nothing else parsed is tested as 30 minutes: 16:30
+    # to 17:00 overlaps the 16:45-17:00 Anchor even though a naive point
+    # check at 16:30 alone would not.
+    view = add_draft(
+        tmp_path,
+        output_dir=tmp_path / "Desktop",
+        name="Tutoring 16:30",
+        now=now,
+    )
+    draft = view["drafts"][-1]
+    assert draft["suggested_start"] is None
+    assert draft["clash_caption"] is not None
+
+
+def test_a_placed_flex_does_not_suppress_a_clashing_looking_suggestion(
+    tmp_path: Path,
+) -> None:
+    _write_defaults(tmp_path)
+    now = datetime(2026, 8, 10, 22, 0)
+    flex_view = add_flex(
+        tmp_path,
+        output_dir=tmp_path / "Desktop",
+        name="Reading",
+        duration_minutes=60,
+        now=now,
+    )
+    flex_id = flex_view["flexes"][0]["id"]
+    place_flex(tmp_path, output_dir=tmp_path / "Desktop", item_id=flex_id, start="16:30", now=now)
+
+    view = add_draft(
+        tmp_path,
+        output_dir=tmp_path / "Desktop",
+        name="Tutoring 16:30",
+        now=now,
+    )
+    draft = view["drafts"][-1]
+    assert draft["suggested_start"] == "16:30"
+    assert "clash_caption" not in draft
+
+
+def test_non_clashing_suggestion_is_prefilled_with_no_caption(
+    tmp_path: Path,
+) -> None:
+    _write_defaults(tmp_path)
+    now = datetime(2026, 8, 10, 22, 0)
+    add_anchor(
+        tmp_path,
+        output_dir=tmp_path / "Desktop",
+        name="Gym",
+        start="18:00",
+        duration_minutes=60,
+        now=now,
+    )
+    view = add_draft(
+        tmp_path,
+        output_dir=tmp_path / "Desktop",
+        name="Tutoring 16:30",
+        now=now,
+    )
+    draft = view["drafts"][-1]
+    assert draft["suggested_start"] == "16:30"
+    assert "clash_caption" not in draft
 
 
 def test_unfinished_session_resumes_with_its_own_bounds(tmp_path: Path) -> None:
@@ -1444,7 +1747,16 @@ def test_adding_a_draft_mints_an_id_and_flushes_the_session_file(
     assert draft["name"] == "Call dentist"
     assert list(draft) == ["id", "name"]
     assert isinstance(draft["id"], str) and draft["id"]
-    assert view["drafts"] == document["drafts"]
+    assert view["drafts"] == [
+        {
+            **document["drafts"][0],
+            "stripped_name": "Call dentist",
+            "suggested_start": None,
+            "suggested_end": None,
+            "suggested_duration_minutes": None,
+            "default_kind": "flex",
+        }
+    ]
     assert "undo" not in view
     assert view["can_undo"] is True
 
@@ -2808,7 +3120,17 @@ def test_drafts_cannot_carry_a_checklist(tmp_path: Path) -> None:
     view = session_view(tmp_path, output_dir=tmp_path / "Desktop", now=datetime(2026, 8, 10, 22, 0))
     document = load_session(tmp_path, output_dir=tmp_path / "Desktop", now=datetime(2026, 8, 10, 22, 0))
 
-    assert view["drafts"] == [{"id": "d1", "name": "Gym"}]
+    assert view["drafts"] == [
+        {
+            "id": "d1",
+            "name": "Gym",
+            "stripped_name": "Gym",
+            "suggested_start": None,
+            "suggested_end": None,
+            "suggested_duration_minutes": None,
+            "default_kind": "flex",
+        }
+    ]
     assert "checklist" not in view["drafts"][0]
     assert "checklist" not in document["drafts"][0]
 
@@ -3220,6 +3542,36 @@ def test_suggest_activity_returns_none_when_nothing_matches(tmp_path: Path) -> N
     _write_defaults(tmp_path)
 
     assert suggest_activity(tmp_path, "Nothing here") is None
+
+
+def test_suggest_activity_matches_stripped_name_from_a_timed_draft_name(
+    tmp_path: Path,
+) -> None:
+    """A Draft named 'Tutoring 16:30' ships stripped_name 'Tutoring' (see
+    name_times parsing, ticket #78); a real client sends that stripped name
+    to /api/suggest-activity, so suggest_activity must match it against an
+    Activity Template named 'Tutoring', carrying over that template's own
+    start/duration/checklist bundle (the JS precedence fix in sheetPromote
+    ensures the parsed 16:30 wins over the template's own start client-side)."""
+
+    _write_defaults(tmp_path)
+    _write_checklist_library(tmp_path)
+    _write_activity_template(tmp_path, "tutoring", name="Tutoring", duration=90, start="17:00")
+
+    result = parse_name_time("Tutoring 16:30")
+    assert result.stripped_name == "Tutoring"
+    assert result.start is not None
+
+    suggestion = suggest_activity(tmp_path, result.stripped_name)
+
+    assert suggestion == {
+        "kind": "activity",
+        "activity_id": "tutoring",
+        "name": "Tutoring",
+        "start": "17:00",
+        "duration_minutes": 90,
+        "checklist": None,
+    }
 
 
 def test_refresh_icloud_items_adds_new_items_to_an_existing_session(
