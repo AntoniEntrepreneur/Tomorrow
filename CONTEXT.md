@@ -69,7 +69,7 @@ An Activity Template marked daily. Added to every new Session, and re-added on e
 _Avoid_: Habit, routine, required
 
 **Checklist**:
-A named reusable list of things to bring or do, attached to a Plan item and shown with that item on the finished Plan. On the finished Plan, rows can be checked off during the day. A Day Template entry or an Activity Template may pre-attach a Checklist. Deleting a Checklist or Activity Template still referenced by a Day Template entry, or still attached to an item in an in-progress Session, is allowed — the reference goes stale rather than blocking the deletion.
+A list of things to bring or do, attached to a Plan item and shown with that item on the finished Plan. It comes in two kinds: a named, reusable Checklist that lives in the Library and is attached by reference, or a one-time list of rows typed directly onto a single Anchor or Flex, belonging only to that Session item and never written to the Library. On the finished Plan, rows can be checked off during the day either way; a one-time list's bundle is labelled by its item's name rather than a Checklist name. A Day Template entry or an Activity Template may pre-attach a Library Checklist only — reusable objects never carry one-time rows. Editing the rows of an item that references a Library Checklist detaches it, converting the item to its own one-time copy; promoting a one-time list copies its rows out into a new Library Checklist without changing the item. Deleting a Checklist or Activity Template still referenced by a Day Template entry, or still attached to an item in an in-progress Session, is allowed — the reference goes stale rather than blocking the deletion.
 _Avoid_: Packing list, subtasks (unless they are literally checklist rows)
 
 **Drop**:
