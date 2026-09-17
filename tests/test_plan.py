@@ -6,7 +6,6 @@ from tomorrow.domain import Anchor, Flex
 from tomorrow.plan import (
     default_plan_date,
     format_plan_date,
-    plan_filename,
     render_plan,
 )
 
@@ -27,8 +26,13 @@ def test_format_plan_date_uses_english_long_form() -> None:
     assert format_plan_date(date(2026, 8, 11)) == "Tuesday, 11 August 2026"
 
 
-def test_plan_filename_uses_iso_date() -> None:
-    assert plan_filename(date(2026, 8, 11)) == "2026-08-11.html"
+def test_render_plan_carries_its_plan_date_marker() -> None:
+    html = render_plan(
+        plan_date=date(2026, 8, 11),
+        bounds=DayBounds(wake="06:30", sleep="23:00"),
+    )
+
+    assert '<meta name="tomorrow-plan" content="2026-08-11">' in html
 
 
 def test_render_plan_shows_date_and_day_bounds() -> None:

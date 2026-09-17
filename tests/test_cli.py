@@ -9,6 +9,7 @@ import time
 import pytest
 
 from tomorrow.cli import main
+from tomorrow.plan import PLAN_FILENAME
 from tomorrow.session import SESSION_HOST, SESSION_PORT, bind_session_server, run_session
 
 
@@ -18,7 +19,34 @@ def _write_defaults(tmp_path: Path) -> None:
     (data_dir / "defaults.toml").write_text(
         'wake = "06:30"\nsleep = "23:00"\n', encoding="utf-8"
     )
-    (tmp_path / "plans").mkdir()
+
+
+def _desktop_dir(tmp_path: Path) -> Path:
+    return tmp_path / "Desktop"
+
+
+def _plan_path(tmp_path: Path) -> Path:
+    return _desktop_dir(tmp_path) / PLAN_FILENAME
+
+
+def _write_desktop_plan(tmp_path: Path, plan_date: str) -> Path:
+    desktop = _desktop_dir(tmp_path)
+    desktop.mkdir(parents=True, exist_ok=True)
+    path = _plan_path(tmp_path)
+    path.write_text(
+        f'<html><head><meta name="tomorrow-plan" content="{plan_date}"></head>'
+        f"<body>{plan_date}</body></html>",
+        encoding="utf-8",
+    )
+    return path
+
+
+def _write_foreign_desktop_file(tmp_path: Path) -> Path:
+    desktop = _desktop_dir(tmp_path)
+    desktop.mkdir(parents=True, exist_ok=True)
+    path = _plan_path(tmp_path)
+    path.write_text("<html><body>not ours</body></html>", encoding="utf-8")
+    return path
 
 
 def _write_tuesday_template(tmp_path: Path) -> None:
@@ -58,7 +86,7 @@ def test_main_finds_clone_data_when_cwd_is_elsewhere(
     monkeypatch.chdir(tmp_path)
     seen: dict[str, Path] = {}
 
-    def fake_run_session(repo_root: Path, *, now=None, opener=None) -> None:
+    def fake_run_session(repo_root: Path, *, output_dir=None, now=None, opener=None) -> None:
         seen["repo_root"] = repo_root
 
     monkeypatch.setattr("tomorrow.cli.run_session", fake_run_session)
@@ -116,7 +144,7 @@ def test_run_session_prints_plan_date_url_and_instruction(
         "tomorrow.session.bind_session_server", lambda *_args, **_kwargs: FakeServer()
     )
 
-    run_session(tmp_path, now=datetime(2026, 8, 10, 22, 0))
+    run_session(tmp_path, output_dir=_desktop_dir(tmp_path), now=datetime(2026, 8, 10, 22, 0))
     output = capsys.readouterr().out
 
     assert "Tuesday, 11 August 2026" in output
@@ -138,7 +166,7 @@ def test_busy_port_prints_and_exits_without_hunting(
     occupant.bind((SESSION_HOST, SESSION_PORT))
     occupant.listen(1)
     try:
-        run_session(tmp_path, now=datetime(2026, 8, 10, 22, 0))
+        run_session(tmp_path, output_dir=_desktop_dir(tmp_path), now=datetime(2026, 8, 10, 22, 0))
     finally:
         occupant.close()
 
@@ -146,11 +174,15 @@ def test_busy_port_prints_and_exits_without_hunting(
     assert "8765" in output
     assert "already in use" in output.lower() or "in use" in output
     assert opened == []
-    assert list((tmp_path / "plans").iterdir()) == []
+    assert not _plan_path(tmp_path).exists()
 
 
 def _start_server(tmp_path: Path, *, now: datetime | None = None):
-    server = bind_session_server(tmp_path, now=now or datetime(2026, 8, 10, 22, 0))
+    server = bind_session_server(
+        tmp_path,
+        output_dir=_desktop_dir(tmp_path),
+        now=now or datetime(2026, 8, 10, 22, 0),
+    )
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     deadline = time.monotonic() + 2
@@ -296,16 +328,85 @@ def test_submit_writes_plan_opens_file_and_exits(
         return server
 
     monkeypatch.setattr("tomorrow.session.bind_session_server", bind_then_submit)
-    run_session(tmp_path, now=datetime(2026, 8, 10, 22, 0))
+    run_session(tmp_path, output_dir=_desktop_dir(tmp_path), now=datetime(2026, 8, 10, 22, 0))
 
-    plan_path = tmp_path / "plans" / "2026-08-11.html"
+    plan_path = _plan_path(tmp_path)
     output = capsys.readouterr().out
     assert plan_path.exists()
+    assert plan_path.name == "🌅 Tomorrow Plan.html"
+    assert '<meta name="tomorrow-plan" content="2026-08-11">' in plan_path.read_text(
+        encoding="utf-8"
+    )
     assert str(plan_path) in output
     assert opened[0] == "http://127.0.0.1:8765"
     assert opened[1] == plan_path.as_uri()
     assert opened[1].startswith("file:")
     assert "http://" not in opened[1]
+
+
+def test_second_submit_overwrites_rather_than_adding_another(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _write_defaults(tmp_path)
+    monkeypatch.setattr("tomorrow.session.webbrowser.open", lambda _url: None)
+    server, thread = _start_server(tmp_path)
+    try:
+        status, _body = _http("POST", "/api/submit")
+        assert status == 200
+    finally:
+        _stop_server(server, thread)
+
+    desktop = _desktop_dir(tmp_path)
+    assert [entry.name for entry in desktop.iterdir()] == ["🌅 Tomorrow Plan.html"]
+
+    server, thread = _start_server(tmp_path)
+    try:
+        status, _body = _http("POST", "/api/submit")
+        assert status == 200
+    finally:
+        _stop_server(server, thread)
+
+    assert [entry.name for entry in desktop.iterdir()] == ["🌅 Tomorrow Plan.html"]
+
+
+def test_foreign_desktop_file_blocks_session_at_start(tmp_path: Path) -> None:
+    _write_defaults(tmp_path)
+    foreign_path = _write_foreign_desktop_file(tmp_path)
+    original_bytes = foreign_path.read_bytes()
+
+    server, thread = _start_server(tmp_path)
+    try:
+        status, body = _http("GET", "/api/session")
+    finally:
+        _stop_server(server, thread)
+
+    payload = json.loads(body)
+    assert status == 200
+    assert any("Tomorrow Plan.html" in blocker for blocker in payload["blockers"])
+    assert any(
+        "move or rename" in blocker.lower() for blocker in payload["blockers"]
+    )
+    assert foreign_path.read_bytes() == original_bytes
+
+
+def test_foreign_desktop_file_blocks_submit_over_http(tmp_path: Path) -> None:
+    _write_defaults(tmp_path)
+    foreign_path = _write_foreign_desktop_file(tmp_path)
+    original_bytes = foreign_path.read_bytes()
+
+    server, thread = _start_server(tmp_path)
+    try:
+        status, body = _http("POST", "/api/submit")
+    finally:
+        _stop_server(server, thread)
+
+    payload = json.loads(body)
+    assert status == 409
+    assert any("Tomorrow Plan.html" in blocker for blocker in payload["blockers"])
+    assert foreign_path.read_bytes() == original_bytes
+    assert [entry.name for entry in foreign_path.parent.iterdir()] == [
+        "🌅 Tomorrow Plan.html"
+    ]
 
 
 def test_submit_refuses_blocked_session_over_http(tmp_path: Path) -> None:
@@ -333,13 +434,13 @@ def test_submit_refuses_blocked_session_over_http(tmp_path: Path) -> None:
     payload = json.loads(body)
     assert status == 409
     assert payload["blockers"]
-    assert list((tmp_path / "plans").iterdir()) == []
+    assert not _plan_path(tmp_path).exists()
 
 
 def test_reset_over_http_blanks_session_and_keeps_plan_html(tmp_path: Path) -> None:
     _write_defaults(tmp_path)
-    plan_path = tmp_path / "plans" / "2026-08-11.html"
-    plan_path.write_text("<html>existing plan</html>", encoding="utf-8")
+    plan_path = _write_desktop_plan(tmp_path, "2026-08-11")
+    existing_plan_html = plan_path.read_text(encoding="utf-8")
     (tmp_path / "data" / "session.json").write_text(
         json.dumps(
             {
@@ -374,7 +475,7 @@ def test_reset_over_http_blanks_session_and_keeps_plan_html(tmp_path: Path) -> N
     assert payload["can_redo"] is False
     assert flushed["drafts"] == []
     assert flushed["bounds"] == {"wake": "06:30", "sleep": "23:00"}
-    assert plan_path.read_text(encoding="utf-8") == "<html>existing plan</html>"
+    assert plan_path.read_text(encoding="utf-8") == existing_plan_html
 
 
 def test_ctrl_c_stops_without_writing_a_plan(
@@ -395,9 +496,9 @@ def test_ctrl_c_stops_without_writing_a_plan(
     monkeypatch.setattr(
         "tomorrow.session.bind_session_server", lambda *_args, **_kwargs: FakeServer()
     )
-    run_session(tmp_path, now=datetime(2026, 8, 10, 22, 0))
+    run_session(tmp_path, output_dir=_desktop_dir(tmp_path), now=datetime(2026, 8, 10, 22, 0))
 
-    assert list((tmp_path / "plans").iterdir()) == []
+    assert not _plan_path(tmp_path).exists()
 
 
 def test_add_anchor_over_http_returns_session_without_undo_stacks(
@@ -893,12 +994,6 @@ def test_checklist_library_and_item_attach_over_http(tmp_path: Path) -> None:
     assert flushed["flexes"][0]["checklist"] is None
 
 
-def _write_plan(tmp_path: Path, plan_date: str) -> Path:
-    path = tmp_path / "plans" / f"{plan_date}.html"
-    path.write_text(f"<html>{plan_date}</html>", encoding="utf-8")
-    return path
-
-
 def _write_session(tmp_path: Path, plan_date: str) -> None:
     (tmp_path / "data" / "session.json").write_text(
         json.dumps(
@@ -1113,14 +1208,19 @@ def test_defaults_set_no_note_when_no_session_for_plan_date(
     assert "Reset" not in output
 
 
-def test_plan_command_opens_tomorrows_plan_and_deletes_yesterdays(
+def _patch_desktop_dir(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(
+        "tomorrow.cli.discover_desktop_dir", lambda: _desktop_dir(tmp_path)
+    )
+
+
+def test_plan_command_opens_tomorrows_plan(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     _write_defaults(tmp_path)
     monkeypatch.setattr("tomorrow.cli.discover_repo_root", lambda: tmp_path)
-    _write_plan(tmp_path, "2026-08-09")
-    _write_plan(tmp_path, "2026-08-10")
-    tomorrow_path = _write_plan(tmp_path, "2026-08-11")
+    _patch_desktop_dir(monkeypatch, tmp_path)
+    tomorrow_path = _write_desktop_plan(tmp_path, "2026-08-11")
     opened: list[str] = []
     monkeypatch.setattr("tomorrow.cli.webbrowser.open", lambda url: opened.append(url))
 
@@ -1129,15 +1229,15 @@ def test_plan_command_opens_tomorrows_plan_and_deletes_yesterdays(
     output = capsys.readouterr().out
     assert opened == [tomorrow_path.as_uri()]
     assert str(tomorrow_path) in output
-    assert not (tmp_path / "plans" / "2026-08-09.html").exists()
 
 
-def test_plan_command_opens_todays_plan_when_no_tomorrow(
+def test_plan_command_opens_todays_plan(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     _write_defaults(tmp_path)
     monkeypatch.setattr("tomorrow.cli.discover_repo_root", lambda: tmp_path)
-    today_path = _write_plan(tmp_path, "2026-08-10")
+    _patch_desktop_dir(monkeypatch, tmp_path)
+    today_path = _write_desktop_plan(tmp_path, "2026-08-10")
     opened: list[str] = []
     monkeypatch.setattr("tomorrow.cli.webbrowser.open", lambda url: opened.append(url))
 
@@ -1148,11 +1248,30 @@ def test_plan_command_opens_todays_plan_when_no_tomorrow(
     assert str(today_path) in output
 
 
+def test_plan_command_reaps_a_stale_plan(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _write_defaults(tmp_path)
+    monkeypatch.setattr("tomorrow.cli.discover_repo_root", lambda: tmp_path)
+    _patch_desktop_dir(monkeypatch, tmp_path)
+    stale_path = _write_desktop_plan(tmp_path, "2026-08-09")
+    opened: list[str] = []
+    monkeypatch.setattr("tomorrow.cli.webbrowser.open", lambda url: opened.append(url))
+
+    main(argv=["plan"], now=datetime(2026, 8, 10, 12, 0))
+
+    output = capsys.readouterr().out
+    assert not stale_path.exists()
+    assert "No Plan for today or tomorrow" in output
+    assert opened == []
+
+
 def test_plan_command_prints_message_when_none_exists(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     _write_defaults(tmp_path)
     monkeypatch.setattr("tomorrow.cli.discover_repo_root", lambda: tmp_path)
+    _patch_desktop_dir(monkeypatch, tmp_path)
     opened: list[str] = []
     monkeypatch.setattr("tomorrow.cli.webbrowser.open", lambda url: opened.append(url))
 
