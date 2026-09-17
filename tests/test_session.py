@@ -276,6 +276,42 @@ def test_draft_with_no_time_in_name_ships_no_suggestion_and_is_left_alone(
     assert draft["suggested_start"] is None
 
 
+def test_draft_with_duration_alongside_start_ships_both_suggestions(
+    tmp_path: Path,
+) -> None:
+    _write_defaults(tmp_path)
+
+    view = add_draft(
+        tmp_path,
+        output_dir=tmp_path / "Desktop",
+        name="Tutoring 16:30 (90 min)",
+        now=datetime(2026, 8, 10, 22, 0),
+    )
+    draft = view["drafts"][0]
+    assert draft["name"] == "Tutoring 16:30 (90 min)"
+    assert draft["stripped_name"] == "Tutoring"
+    assert draft["suggested_start"] == "16:30"
+    assert draft["suggested_duration_minutes"] == 90
+
+
+def test_draft_with_duration_only_ships_duration_and_no_start(
+    tmp_path: Path,
+) -> None:
+    _write_defaults(tmp_path)
+
+    view = add_draft(
+        tmp_path,
+        output_dir=tmp_path / "Desktop",
+        name="Gym 45m",
+        now=datetime(2026, 8, 10, 22, 0),
+    )
+    draft = view["drafts"][0]
+    assert draft["name"] == "Gym 45m"
+    assert draft["stripped_name"] == "Gym"
+    assert draft["suggested_start"] is None
+    assert draft["suggested_duration_minutes"] == 45
+
+
 def test_unfinished_session_resumes_with_its_own_bounds(tmp_path: Path) -> None:
     _write_defaults(tmp_path)
     saved = {
@@ -1501,7 +1537,12 @@ def test_adding_a_draft_mints_an_id_and_flushes_the_session_file(
     assert list(draft) == ["id", "name"]
     assert isinstance(draft["id"], str) and draft["id"]
     assert view["drafts"] == [
-        {**document["drafts"][0], "stripped_name": "Call dentist", "suggested_start": None}
+        {
+            **document["drafts"][0],
+            "stripped_name": "Call dentist",
+            "suggested_start": None,
+            "suggested_duration_minutes": None,
+        }
     ]
     assert "undo" not in view
     assert view["can_undo"] is True
@@ -2867,7 +2908,13 @@ def test_drafts_cannot_carry_a_checklist(tmp_path: Path) -> None:
     document = load_session(tmp_path, output_dir=tmp_path / "Desktop", now=datetime(2026, 8, 10, 22, 0))
 
     assert view["drafts"] == [
-        {"id": "d1", "name": "Gym", "stripped_name": "Gym", "suggested_start": None}
+        {
+            "id": "d1",
+            "name": "Gym",
+            "stripped_name": "Gym",
+            "suggested_start": None,
+            "suggested_duration_minutes": None,
+        }
     ]
     assert "checklist" not in view["drafts"][0]
     assert "checklist" not in document["drafts"][0]

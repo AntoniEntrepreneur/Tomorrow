@@ -913,6 +913,7 @@
     function sheetPromote(item) {
       const strippedName = item.stripped_name || item.name;
       const suggestedStart = item.suggested_start || "09:00";
+      const suggestedDuration = item.suggested_duration_minutes || 30;
       openSheet(
         "<h2>Promote Draft · " + esc(item.name) + "</h2>" +
         '<p class="hint">A new opaque id is minted. The Draft’s id does not leak.</p>' +
@@ -923,7 +924,7 @@
         '<option value="flex">Flex</option>' +
         '<option value="todo">To-do</option>' +
         "</select></label>" +
-        durationFields(suggestedStart, 30, "promote-start-label") +
+        durationFields(suggestedStart, suggestedDuration, "promote-start-label") +
         '<p class="hint" id="promote-flex-hint" hidden>Flex lands unplaced in the tray. Place it whenever you notice a Gap.</p>' +
         '<p class="hint" id="promote-todo-hint" hidden>To-do needs nothing else — its note carries over if it has one.</p>' +
         checklistField("") +
