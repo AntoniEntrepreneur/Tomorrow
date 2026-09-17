@@ -18,6 +18,7 @@ from tomorrow.domain import (
 from tomorrow.activity_templates import activity_templates_dir
 from tomorrow.defaults import DayBounds
 from tomorrow.library import save_activity_template
+from tomorrow.plan import PLAN_FILENAME
 from tomorrow.session import (
     add_anchor,
     add_draft,
@@ -52,13 +53,16 @@ from tomorrow.session import (
 )
 
 
+def _output_dir(tmp_path: Path) -> Path:
+    return tmp_path / "Desktop"
+
+
 def _write_defaults(tmp_path: Path) -> None:
     data_dir = tmp_path / "data"
     data_dir.mkdir()
     (data_dir / "defaults.toml").write_text(
         'wake = "06:30"\nsleep = "23:00"\n', encoding="utf-8"
     )
-    (tmp_path / "plans").mkdir()
 
 
 
@@ -109,7 +113,7 @@ checklist = "sauna-kit"
 def test_missing_session_file_opens_as_blank_session(tmp_path: Path) -> None:
     _write_defaults(tmp_path)
 
-    document = load_session(tmp_path, now=datetime(2026, 8, 10, 22, 0))
+    document = load_session(tmp_path, output_dir=tmp_path / "Desktop", now=datetime(2026, 8, 10, 22, 0))
 
     assert document == {
         "plan_date": "2026-08-11",
@@ -145,7 +149,7 @@ def test_blank_session_seeds_icloud_anchors_and_drafts(
 
     monkeypatch.setattr("tomorrow.session.try_import_icloud_items", fake_import)
 
-    document = load_session(tmp_path, now=datetime(2026, 8, 10, 22, 0))
+    document = load_session(tmp_path, output_dir=tmp_path / "Desktop", now=datetime(2026, 8, 10, 22, 0))
 
     assert len(seen_calls) == 1
     assert document["anchors"][0]["name"] == "Standup"
@@ -171,23 +175,23 @@ def test_dropped_icloud_draft_stays_dropped_through_undo_but_returns_on_reset(
 
     monkeypatch.setattr("tomorrow.session.try_import_icloud_items", fake_import)
 
-    seeded = session_view(tmp_path, now=datetime(2026, 8, 10, 22, 0))
+    seeded = session_view(tmp_path, output_dir=tmp_path / "Desktop", now=datetime(2026, 8, 10, 22, 0))
     draft_id = seeded["drafts"][0]["id"]
-    dropped = drop_draft(tmp_path, item_id=draft_id, now=datetime(2026, 8, 10, 22, 0))
-    undone = undo_session(tmp_path, now=datetime(2026, 8, 10, 22, 0))
+    dropped = drop_draft(tmp_path, output_dir=tmp_path / "Desktop", item_id=draft_id, now=datetime(2026, 8, 10, 22, 0))
+    undone = undo_session(tmp_path, output_dir=tmp_path / "Desktop", now=datetime(2026, 8, 10, 22, 0))
 
     assert dropped["drafts"] == []
     assert undone["drafts"] == [seeded["drafts"][0]]
 
-    redone = redo_session(tmp_path, now=datetime(2026, 8, 10, 22, 0))
+    redone = redo_session(tmp_path, output_dir=tmp_path / "Desktop", now=datetime(2026, 8, 10, 22, 0))
     assert redone["drafts"] == []
 
-    reset = reset_session(tmp_path, now=datetime(2026, 8, 10, 22, 0))
+    reset = reset_session(tmp_path, output_dir=tmp_path / "Desktop", now=datetime(2026, 8, 10, 22, 0))
     assert [draft["name"] for draft in reset["drafts"]] == ["Call dentist"]
     assert reset["drafts"][0]["source"] == "icloud"
     assert call_count == 2
 
-    undone_reset = undo_session(tmp_path, now=datetime(2026, 8, 10, 22, 0))
+    undone_reset = undo_session(tmp_path, output_dir=tmp_path / "Desktop", now=datetime(2026, 8, 10, 22, 0))
     assert undone_reset["drafts"] == []
 
 
@@ -206,12 +210,11 @@ def test_imported_draft_note_shows_in_session_and_becomes_todo_note_on_promotion
 
     monkeypatch.setattr("tomorrow.session.try_import_icloud_items", fake_import)
 
-    seeded = session_view(tmp_path, now=datetime(2026, 8, 10, 22, 0))
+    seeded = session_view(tmp_path, output_dir=tmp_path / "Desktop", now=datetime(2026, 8, 10, 22, 0))
     draft = seeded["drafts"][0]
     assert draft["note"] == "555-1234"
 
-    promoted = promote_draft(
-        tmp_path, item_id=draft["id"], kind="todo", now=datetime(2026, 8, 10, 22, 0)
+    promoted = promote_draft(tmp_path, output_dir=tmp_path / "Desktop", item_id=draft["id"], kind="todo", now=datetime(2026, 8, 10, 22, 0)
     )
     assert promoted["todos"][0]["note"] == "555-1234"
 
@@ -229,7 +232,7 @@ def test_unfinished_session_resumes_with_its_own_bounds(tmp_path: Path) -> None:
     }
     _write_session(tmp_path, saved)
 
-    document = load_session(tmp_path, now=datetime(2026, 8, 10, 22, 0))
+    document = load_session(tmp_path, output_dir=tmp_path / "Desktop", now=datetime(2026, 8, 10, 22, 0))
 
     assert document == {**saved, "todos": []}
     assert document["bounds"] != {"wake": "06:30", "sleep": "23:00"}
@@ -268,7 +271,7 @@ def test_rolled_plan_date_replaces_session_with_blank_and_empty_undo(
         },
     )
 
-    document = load_session(tmp_path, now=datetime(2026, 8, 16, 22, 0))
+    document = load_session(tmp_path, output_dir=tmp_path / "Desktop", now=datetime(2026, 8, 16, 22, 0))
     flushed = json.loads((tmp_path / "data" / "session.json").read_text(encoding="utf-8"))
 
     blank = {
@@ -289,8 +292,8 @@ def test_rolled_plan_date_replaces_session_with_blank_and_empty_undo(
 def test_blank_session_plan_date_follows_wake_based_rule(tmp_path: Path) -> None:
     _write_defaults(tmp_path)
 
-    pre_wake = load_session(tmp_path, now=datetime(2026, 8, 12, 0, 30))
-    after_wake = load_session(tmp_path, now=datetime(2026, 8, 12, 8, 0))
+    pre_wake = load_session(tmp_path, output_dir=tmp_path / "Desktop", now=datetime(2026, 8, 12, 0, 30))
+    after_wake = load_session(tmp_path, output_dir=tmp_path / "Desktop", now=datetime(2026, 8, 12, 8, 0))
 
     assert pre_wake["plan_date"] == "2026-08-12"
     assert after_wake["plan_date"] == "2026-08-13"
@@ -300,7 +303,7 @@ def test_blank_session_plan_date_follows_wake_based_rule(tmp_path: Path) -> None
 def test_session_view_omits_undo_stacks_and_reports_flags(tmp_path: Path) -> None:
     _write_defaults(tmp_path)
 
-    view = session_view(tmp_path, now=datetime(2026, 8, 10, 22, 0))
+    view = session_view(tmp_path, output_dir=tmp_path / "Desktop", now=datetime(2026, 8, 10, 22, 0))
 
     assert "undo" not in view
     assert view["can_undo"] is False
@@ -325,9 +328,9 @@ def test_session_view_omits_undo_stacks_and_reports_flags(tmp_path: Path) -> Non
 def test_submit_of_blank_session_writes_plan_html(tmp_path: Path) -> None:
     _write_defaults(tmp_path)
 
-    path = submit_session(tmp_path, now=datetime(2026, 8, 10, 22, 0))
+    path = submit_session(tmp_path, output_dir=tmp_path / "Desktop", now=datetime(2026, 8, 10, 22, 0))
 
-    assert path == tmp_path / "plans" / "2026-08-11.html"
+    assert path == tmp_path / "Desktop" / PLAN_FILENAME
     content = path.read_text(encoding="utf-8")
     assert "Tuesday, 11 August 2026" in content
     assert "Wake 06:30" in content
@@ -352,9 +355,9 @@ def test_submit_refuses_when_a_draft_remains(tmp_path: Path) -> None:
     )
 
     with pytest.raises(PlanBlockedError):
-        submit_session(tmp_path, now=datetime(2026, 8, 10, 22, 0))
+        submit_session(tmp_path, output_dir=tmp_path / "Desktop", now=datetime(2026, 8, 10, 22, 0))
 
-    assert list((tmp_path / "plans").iterdir()) == []
+    assert not (tmp_path / "Desktop" / PLAN_FILENAME).exists()
 
 
 def test_session_view_shows_weather_name_and_one_liner(tmp_path: Path) -> None:
@@ -375,10 +378,9 @@ def test_session_view_shows_weather_name_and_one_liner(tmp_path: Path) -> None:
     def fake_opener(_request):
         return BytesIO(json.dumps(payload).encode("utf-8"))
 
-    view = session_view(
-        tmp_path, now=datetime(2026, 8, 10, 22, 0), opener=fake_opener
+    view = session_view(tmp_path, output_dir=tmp_path / "Desktop", now=datetime(2026, 8, 10, 22, 0), opener=fake_opener
     )
-    document = load_session(tmp_path, now=datetime(2026, 8, 10, 22, 0))
+    document = load_session(tmp_path, output_dir=tmp_path / "Desktop", now=datetime(2026, 8, 10, 22, 0))
 
     assert view["weather_name"] == "Warsaw"
     assert view["weather_one_liner"] == "18° / 24° · partly cloudy"
@@ -399,8 +401,7 @@ def test_session_view_keeps_weather_name_when_fetch_fails(tmp_path: Path) -> Non
     def failing_opener(_request):
         raise URLError("offline")
 
-    view = session_view(
-        tmp_path, now=datetime(2026, 8, 10, 22, 0), opener=failing_opener
+    view = session_view(tmp_path, output_dir=tmp_path / "Desktop", now=datetime(2026, 8, 10, 22, 0), opener=failing_opener
     )
 
     assert view["weather_name"] == "Warsaw"
@@ -427,8 +428,7 @@ def test_session_view_omits_coordinates_when_weather_has_no_name(
     def fake_opener(_request):
         return BytesIO(json.dumps(payload).encode("utf-8"))
 
-    view = session_view(
-        tmp_path, now=datetime(2026, 8, 10, 22, 0), opener=fake_opener
+    view = session_view(tmp_path, output_dir=tmp_path / "Desktop", now=datetime(2026, 8, 10, 22, 0), opener=fake_opener
     )
 
     assert view["weather_name"] is None
@@ -455,8 +455,7 @@ def test_submit_writes_weather_one_liner_not_location_name(tmp_path: Path) -> No
     def fake_opener(_request):
         return BytesIO(json.dumps(payload).encode("utf-8"))
 
-    path = submit_session(
-        tmp_path, now=datetime(2026, 8, 10, 22, 0), opener=fake_opener
+    path = submit_session(tmp_path, output_dir=tmp_path / "Desktop", now=datetime(2026, 8, 10, 22, 0), opener=fake_opener
     )
     content = path.read_text(encoding="utf-8")
 
@@ -475,8 +474,7 @@ def test_submit_writes_plan_when_weather_fetch_times_out(tmp_path: Path) -> None
     def timed_out_opener(_request):
         raise TimeoutError("slow")
 
-    path = submit_session(
-        tmp_path, now=datetime(2026, 8, 10, 22, 0), opener=timed_out_opener
+    path = submit_session(tmp_path, output_dir=tmp_path / "Desktop", now=datetime(2026, 8, 10, 22, 0), opener=timed_out_opener
     )
     content = path.read_text(encoding="utf-8")
 
@@ -517,7 +515,7 @@ def test_reset_blanks_session_for_the_same_plan_date(tmp_path: Path) -> None:
         },
     )
 
-    view = reset_session(tmp_path, now=datetime(2026, 8, 10, 22, 0))
+    view = reset_session(tmp_path, output_dir=tmp_path / "Desktop", now=datetime(2026, 8, 10, 22, 0))
     flushed = json.loads((tmp_path / "data" / "session.json").read_text(encoding="utf-8"))
 
     assert flushed["plan_date"] == "2026-08-11"
@@ -544,8 +542,14 @@ def test_reset_blanks_session_for_the_same_plan_date(tmp_path: Path) -> None:
 
 def test_reset_does_not_delete_plan_html(tmp_path: Path) -> None:
     _write_defaults(tmp_path)
-    plan_path = tmp_path / "plans" / "2026-08-11.html"
-    plan_path.write_text("<html>existing plan</html>", encoding="utf-8")
+    plan_path = tmp_path / "Desktop" / PLAN_FILENAME
+    plan_path.parent.mkdir(parents=True, exist_ok=True)
+    plan_path.write_text(
+        '<html><head><meta name="tomorrow-plan" content="2026-08-11"></head>'
+        "<body>existing plan</body></html>",
+        encoding="utf-8",
+    )
+    existing_plan_html = plan_path.read_text(encoding="utf-8")
     _write_session(
         tmp_path,
         {
@@ -559,9 +563,9 @@ def test_reset_does_not_delete_plan_html(tmp_path: Path) -> None:
         },
     )
 
-    reset_session(tmp_path, now=datetime(2026, 8, 10, 22, 0))
+    reset_session(tmp_path, output_dir=tmp_path / "Desktop", now=datetime(2026, 8, 10, 22, 0))
 
-    assert plan_path.read_text(encoding="utf-8") == "<html>existing plan</html>"
+    assert plan_path.read_text(encoding="utf-8") == existing_plan_html
 
 
 def test_submit_does_not_end_session_or_blank_it(tmp_path: Path) -> None:
@@ -577,8 +581,8 @@ def test_submit_does_not_end_session_or_blank_it(tmp_path: Path) -> None:
     }
     _write_session(tmp_path, saved)
 
-    plan_path = submit_session(tmp_path, now=datetime(2026, 8, 10, 22, 0))
-    resumed = load_session(tmp_path, now=datetime(2026, 8, 10, 22, 0))
+    plan_path = submit_session(tmp_path, output_dir=tmp_path / "Desktop", now=datetime(2026, 8, 10, 22, 0))
+    resumed = load_session(tmp_path, output_dir=tmp_path / "Desktop", now=datetime(2026, 8, 10, 22, 0))
 
     assert plan_path.exists()
     assert resumed == {**saved, "todos": []}
@@ -587,7 +591,7 @@ def test_submit_does_not_end_session_or_blank_it(tmp_path: Path) -> None:
     assert resumed["undo"]["past"] == [{"plan_date": "2026-08-11"}]
 
 
-def test_later_submit_overwrites_the_same_plan_date_file(tmp_path: Path) -> None:
+def test_later_submit_overwrites_the_same_desktop_file(tmp_path: Path) -> None:
     _write_defaults(tmp_path)
     _write_session(
         tmp_path,
@@ -601,7 +605,7 @@ def test_later_submit_overwrites_the_same_plan_date_file(tmp_path: Path) -> None
             "undo": {"past": [], "future": []},
         },
     )
-    first = submit_session(tmp_path, now=datetime(2026, 8, 10, 22, 0))
+    first = submit_session(tmp_path, output_dir=tmp_path / "Desktop", now=datetime(2026, 8, 10, 22, 0))
     _write_session(
         tmp_path,
         {
@@ -615,34 +619,45 @@ def test_later_submit_overwrites_the_same_plan_date_file(tmp_path: Path) -> None
         },
     )
 
-    second = submit_session(tmp_path, now=datetime(2026, 8, 10, 22, 0))
+    second = submit_session(tmp_path, output_dir=tmp_path / "Desktop", now=datetime(2026, 8, 10, 22, 0))
     content = second.read_text(encoding="utf-8")
 
     assert second == first
-    assert list((tmp_path / "plans").glob("*.html")) == [second]
+    assert [entry.name for entry in second.parent.iterdir()] == [PLAN_FILENAME]
     assert "Wake 07:15" in content
     assert "Sleep 22:00" in content
     assert "Wake 06:30" not in content
 
 
-def test_plans_before_today_are_deleted_and_today_or_later_are_kept(
-    tmp_path: Path,
-) -> None:
+def _write_marked_plan(output_dir: Path, plan_date: str) -> Path:
+    output_dir.mkdir(parents=True, exist_ok=True)
+    path = output_dir / PLAN_FILENAME
+    path.write_text(
+        f'<html><head><meta name="tomorrow-plan" content="{plan_date}"></head>'
+        f"<body>{plan_date}</body></html>",
+        encoding="utf-8",
+    )
+    return path
+
+
+def test_a_stale_plan_is_deleted_at_session_start(tmp_path: Path) -> None:
     _write_defaults(tmp_path)
-    plans = tmp_path / "plans"
-    (plans / "2026-08-10.html").write_text("yesterday", encoding="utf-8")
-    (plans / "2026-08-16.html").write_text("today", encoding="utf-8")
-    (plans / "2026-08-17.html").write_text("tomorrow", encoding="utf-8")
-    (plans / ".gitkeep").write_text("", encoding="utf-8")
+    output_dir = tmp_path / "Desktop"
+    plan_path = _write_marked_plan(output_dir, "2026-08-10")
 
-    load_session(tmp_path, now=datetime(2026, 8, 16, 22, 0))
+    load_session(tmp_path, output_dir=output_dir, now=datetime(2026, 8, 16, 22, 0))
 
-    remaining = {path.name: path.read_text(encoding="utf-8") for path in plans.iterdir()}
-    assert remaining == {
-        ".gitkeep": "",
-        "2026-08-16.html": "today",
-        "2026-08-17.html": "tomorrow",
-    }
+    assert not plan_path.exists()
+
+
+def test_a_current_plan_is_kept_at_session_start(tmp_path: Path) -> None:
+    _write_defaults(tmp_path)
+    output_dir = tmp_path / "Desktop"
+    plan_path = _write_marked_plan(output_dir, "2026-08-16")
+
+    load_session(tmp_path, output_dir=output_dir, now=datetime(2026, 8, 16, 22, 0))
+
+    assert plan_path.exists()
 
 
 def test_adding_an_anchor_mints_an_id_and_flushes_the_session_file(
@@ -650,8 +665,7 @@ def test_adding_an_anchor_mints_an_id_and_flushes_the_session_file(
 ) -> None:
     _write_defaults(tmp_path)
 
-    view = add_anchor(
-        tmp_path,
+    view = add_anchor(tmp_path, output_dir=tmp_path / "Desktop",
         name="Gym",
         start="18:00",
         duration_minutes=90,
@@ -678,11 +692,9 @@ def test_overlapping_anchors_show_the_same_blockers_as_finalize_plan(
 ) -> None:
     _write_defaults(tmp_path)
     now = datetime(2026, 8, 10, 22, 0)
-    add_anchor(
-        tmp_path, name="Gym", start="18:00", duration_minutes=90, now=now
+    add_anchor(tmp_path, output_dir=tmp_path / "Desktop", name="Gym", start="18:00", duration_minutes=90, now=now
     )
-    view = add_anchor(
-        tmp_path, name="Dinner", start="18:30", duration_minutes=60, now=now
+    view = add_anchor(tmp_path, output_dir=tmp_path / "Desktop", name="Dinner", start="18:30", duration_minutes=60, now=now
     )
 
     gym = Anchor(
@@ -708,13 +720,11 @@ def test_editing_an_anchor_updates_name_clock_and_duration_and_flushes(
 ) -> None:
     _write_defaults(tmp_path)
     now = datetime(2026, 8, 10, 22, 0)
-    added = add_anchor(
-        tmp_path, name="Gym", start="18:00", duration_minutes=90, now=now
+    added = add_anchor(tmp_path, output_dir=tmp_path / "Desktop", name="Gym", start="18:00", duration_minutes=90, now=now
     )
     item_id = added["anchors"][0]["id"]
 
-    view = edit_anchor(
-        tmp_path,
+    view = edit_anchor(tmp_path, output_dir=tmp_path / "Desktop",
         item_id=item_id,
         name="Weights",
         start="19:00",
@@ -742,12 +752,11 @@ def test_editing_an_anchor_updates_name_clock_and_duration_and_flushes(
 def test_an_anchor_is_removed_by_editing_it_away(tmp_path: Path) -> None:
     _write_defaults(tmp_path)
     now = datetime(2026, 8, 10, 22, 0)
-    added = add_anchor(
-        tmp_path, name="Gym", start="18:00", duration_minutes=90, now=now
+    added = add_anchor(tmp_path, output_dir=tmp_path / "Desktop", name="Gym", start="18:00", duration_minutes=90, now=now
     )
     item_id = added["anchors"][0]["id"]
 
-    view = edit_anchor(tmp_path, item_id=item_id, remove=True, now=now)
+    view = edit_anchor(tmp_path, output_dir=tmp_path / "Desktop", item_id=item_id, remove=True, now=now)
     document = json.loads(
         (tmp_path / "data" / "session.json").read_text(encoding="utf-8")
     )
@@ -763,7 +772,7 @@ def test_changing_session_bounds_flushes_and_does_not_rewrite_defaults(
     _write_defaults(tmp_path)
     now = datetime(2026, 8, 10, 22, 0)
 
-    view = edit_bounds(tmp_path, wake="07:00", sleep="22:00", now=now)
+    view = edit_bounds(tmp_path, output_dir=tmp_path / "Desktop", wake="07:00", sleep="22:00", now=now)
     document = json.loads(
         (tmp_path / "data" / "session.json").read_text(encoding="utf-8")
     )
@@ -778,8 +787,7 @@ def test_changing_session_bounds_flushes_and_does_not_rewrite_defaults(
 def test_gaps_update_when_bounds_change(tmp_path: Path) -> None:
     _write_defaults(tmp_path)
     now = datetime(2026, 8, 10, 22, 0)
-    added = add_anchor(
-        tmp_path, name="Gym", start="18:00", duration_minutes=90, now=now
+    added = add_anchor(tmp_path, output_dir=tmp_path / "Desktop", name="Gym", start="18:00", duration_minutes=90, now=now
     )
 
     assert added["gaps"] == [
@@ -787,7 +795,7 @@ def test_gaps_update_when_bounds_change(tmp_path: Path) -> None:
         {"start": "19:30", "end": "23:00", "duration_minutes": 210},
     ]
 
-    tightened = edit_bounds(tmp_path, sleep="20:00", now=now)
+    tightened = edit_bounds(tmp_path, output_dir=tmp_path / "Desktop", sleep="20:00", now=now)
 
     assert tightened["gaps"] == [
         {"start": "06:30", "end": "18:00", "duration_minutes": 690},
@@ -798,10 +806,9 @@ def test_gaps_update_when_bounds_change(tmp_path: Path) -> None:
 def test_gaps_span_midnight_when_sleep_is_before_wake(tmp_path: Path) -> None:
     _write_defaults(tmp_path)
     now = datetime(2026, 8, 10, 22, 0)
-    edit_bounds(tmp_path, wake="07:00", sleep="01:00", now=now)
+    edit_bounds(tmp_path, output_dir=tmp_path / "Desktop", wake="07:00", sleep="01:00", now=now)
 
-    view = add_anchor(
-        tmp_path, name="Dinner", start="19:00", duration_minutes=60, now=now
+    view = add_anchor(tmp_path, output_dir=tmp_path / "Desktop", name="Dinner", start="19:00", duration_minutes=60, now=now
     )
 
     assert view["bounds"] == {
@@ -823,11 +830,11 @@ def test_gaps_span_midnight_when_sleep_is_before_wake(tmp_path: Path) -> None:
 def test_flex_placed_in_gap_after_midnight_is_not_a_blocker(tmp_path: Path) -> None:
     _write_defaults(tmp_path)
     now = datetime(2026, 8, 10, 22, 0)
-    edit_bounds(tmp_path, wake="07:00", sleep="01:00", now=now)
-    added = add_flex(tmp_path, name="Read", duration_minutes=30, now=now)
+    edit_bounds(tmp_path, output_dir=tmp_path / "Desktop", wake="07:00", sleep="01:00", now=now)
+    added = add_flex(tmp_path, output_dir=tmp_path / "Desktop", name="Read", duration_minutes=30, now=now)
     flex_id = added["flexes"][0]["id"]
 
-    view = place_flex(tmp_path, item_id=flex_id, start="00:15", now=now)
+    view = place_flex(tmp_path, output_dir=tmp_path / "Desktop", item_id=flex_id, start="00:15", now=now)
 
     assert view["blockers"] == []
 
@@ -835,23 +842,23 @@ def test_flex_placed_in_gap_after_midnight_is_not_a_blocker(tmp_path: Path) -> N
 def test_submit_blocks_when_wake_equals_sleep(tmp_path: Path) -> None:
     _write_defaults(tmp_path)
     now = datetime(2026, 8, 10, 22, 0)
-    edit_bounds(tmp_path, wake="07:00", sleep="07:00", now=now)
+    edit_bounds(tmp_path, output_dir=tmp_path / "Desktop", wake="07:00", sleep="07:00", now=now)
 
-    view = edit_bounds(tmp_path, sleep="07:00", now=now)
+    view = edit_bounds(tmp_path, output_dir=tmp_path / "Desktop", sleep="07:00", now=now)
 
     assert view["blockers"] == [
         "Wake and sleep are both 07:00, leaving a zero-length day."
     ]
     with pytest.raises(PlanBlockedError):
-        submit_session(tmp_path, now=now)
+        submit_session(tmp_path, output_dir=tmp_path / "Desktop", now=now)
 
 
 def test_anchor_outside_new_bounds_is_a_live_blocker(tmp_path: Path) -> None:
     _write_defaults(tmp_path)
     now = datetime(2026, 8, 10, 22, 0)
-    add_anchor(tmp_path, name="Gym", start="18:00", duration_minutes=90, now=now)
+    add_anchor(tmp_path, output_dir=tmp_path / "Desktop", name="Gym", start="18:00", duration_minutes=90, now=now)
 
-    view = edit_bounds(tmp_path, sleep="18:30", now=now)
+    view = edit_bounds(tmp_path, output_dir=tmp_path / "Desktop", sleep="18:30", now=now)
     gym = Anchor(
         name="Gym", start=parse_clock("18:00"), duration=timedelta(minutes=90)
     )
@@ -872,12 +879,12 @@ def test_submit_of_clean_session_with_anchors_writes_plan_html(
 ) -> None:
     _write_defaults(tmp_path)
     now = datetime(2026, 8, 10, 22, 0)
-    add_anchor(tmp_path, name="Gym", start="18:00", duration_minutes=90, now=now)
+    add_anchor(tmp_path, output_dir=tmp_path / "Desktop", name="Gym", start="18:00", duration_minutes=90, now=now)
 
-    path = submit_session(tmp_path, now=now)
+    path = submit_session(tmp_path, output_dir=tmp_path / "Desktop", now=now)
     content = path.read_text(encoding="utf-8")
 
-    assert path == tmp_path / "plans" / "2026-08-11.html"
+    assert path == tmp_path / "Desktop" / PLAN_FILENAME
     assert "Gym" in content
     assert "18:00" in content
     assert "19:30" in content
@@ -887,20 +894,19 @@ def test_submit_of_clean_session_with_anchors_writes_plan_html(
 def test_submit_refuses_while_anchor_blockers_remain(tmp_path: Path) -> None:
     _write_defaults(tmp_path)
     now = datetime(2026, 8, 10, 22, 0)
-    add_anchor(tmp_path, name="Gym", start="18:00", duration_minutes=90, now=now)
-    add_anchor(tmp_path, name="Dinner", start="18:30", duration_minutes=60, now=now)
+    add_anchor(tmp_path, output_dir=tmp_path / "Desktop", name="Gym", start="18:00", duration_minutes=90, now=now)
+    add_anchor(tmp_path, output_dir=tmp_path / "Desktop", name="Dinner", start="18:30", duration_minutes=60, now=now)
 
     with pytest.raises(PlanBlockedError):
-        submit_session(tmp_path, now=now)
+        submit_session(tmp_path, output_dir=tmp_path / "Desktop", now=now)
 
-    assert list((tmp_path / "plans").iterdir()) == []
+    assert not (tmp_path / "Desktop" / PLAN_FILENAME).exists()
 
 
 def test_adding_flex_mints_an_id_stays_unplaced_and_flushes(tmp_path: Path) -> None:
     _write_defaults(tmp_path)
 
-    view = add_flex(
-        tmp_path,
+    view = add_flex(tmp_path, output_dir=tmp_path / "Desktop",
         name="Walk",
         duration_minutes=30,
         now=datetime(2026, 8, 10, 22, 0),
@@ -924,8 +930,7 @@ def test_adding_flex_mints_an_id_stays_unplaced_and_flushes(tmp_path: Path) -> N
 def test_unplaced_flex_shows_the_same_blocker_as_finalize_plan(tmp_path: Path) -> None:
     _write_defaults(tmp_path)
 
-    view = add_flex(
-        tmp_path,
+    view = add_flex(tmp_path, output_dir=tmp_path / "Desktop",
         name="Walk",
         duration_minutes=30,
         now=datetime(2026, 8, 10, 22, 0),
@@ -948,10 +953,10 @@ def test_placing_flex_into_a_gap_flushes_and_clears_the_unplaced_blocker(
 ) -> None:
     _write_defaults(tmp_path)
     now = datetime(2026, 8, 10, 22, 0)
-    added = add_flex(tmp_path, name="Walk", duration_minutes=30, now=now)
+    added = add_flex(tmp_path, output_dir=tmp_path / "Desktop", name="Walk", duration_minutes=30, now=now)
     item_id = added["flexes"][0]["id"]
 
-    view = place_flex(tmp_path, item_id=item_id, start="07:15", now=now)
+    view = place_flex(tmp_path, output_dir=tmp_path / "Desktop", item_id=item_id, start="07:15", now=now)
     document = json.loads(
         (tmp_path / "data" / "session.json").read_text(encoding="utf-8")
     )
@@ -973,10 +978,10 @@ def test_placing_flex_into_a_gap_flushes_and_clears_the_unplaced_blocker(
 def test_placed_flex_that_does_not_fit_is_a_live_blocker(tmp_path: Path) -> None:
     _write_defaults(tmp_path)
     now = datetime(2026, 8, 10, 22, 0)
-    added = add_flex(tmp_path, name="Deep work", duration_minutes=90, now=now)
+    added = add_flex(tmp_path, output_dir=tmp_path / "Desktop", name="Deep work", duration_minutes=90, now=now)
     item_id = added["flexes"][0]["id"]
 
-    view = place_flex(tmp_path, item_id=item_id, start="22:00", now=now)
+    view = place_flex(tmp_path, output_dir=tmp_path / "Desktop", item_id=item_id, start="22:00", now=now)
     expected = finalize_plan(
         bounds=DayBounds(wake="06:30", sleep="23:00"),
         drafts=[],
@@ -1001,11 +1006,11 @@ def test_changing_duration_flushes_and_can_clear_a_does_not_fit_blocker(
 ) -> None:
     _write_defaults(tmp_path)
     now = datetime(2026, 8, 10, 22, 0)
-    added = add_flex(tmp_path, name="Deep work", duration_minutes=90, now=now)
+    added = add_flex(tmp_path, output_dir=tmp_path / "Desktop", name="Deep work", duration_minutes=90, now=now)
     item_id = added["flexes"][0]["id"]
-    place_flex(tmp_path, item_id=item_id, start="22:00", now=now)
+    place_flex(tmp_path, output_dir=tmp_path / "Desktop", item_id=item_id, start="22:00", now=now)
 
-    view = change_flex_duration(tmp_path, item_id=item_id, duration_minutes=45, now=now)
+    view = change_flex_duration(tmp_path, output_dir=tmp_path / "Desktop", item_id=item_id, duration_minutes=45, now=now)
     document = json.loads(
         (tmp_path / "data" / "session.json").read_text(encoding="utf-8")
     )
@@ -1019,10 +1024,10 @@ def test_changing_duration_flushes_and_can_clear_a_does_not_fit_blocker(
 def test_changing_duration_unplaced_flex_leaves_it_unplaced(tmp_path: Path) -> None:
     _write_defaults(tmp_path)
     now = datetime(2026, 8, 10, 22, 0)
-    added = add_flex(tmp_path, name="Walk", duration_minutes=45, now=now)
+    added = add_flex(tmp_path, output_dir=tmp_path / "Desktop", name="Walk", duration_minutes=45, now=now)
     item_id = added["flexes"][0]["id"]
 
-    view = change_flex_duration(tmp_path, item_id=item_id, duration_minutes=20, now=now)
+    view = change_flex_duration(tmp_path, output_dir=tmp_path / "Desktop", item_id=item_id, duration_minutes=20, now=now)
     document = json.loads(
         (tmp_path / "data" / "session.json").read_text(encoding="utf-8")
     )
@@ -1036,10 +1041,10 @@ def test_changing_duration_unplaced_flex_leaves_it_unplaced(tmp_path: Path) -> N
 def test_dropping_flex_removes_it_from_the_session_and_flushes(tmp_path: Path) -> None:
     _write_defaults(tmp_path)
     now = datetime(2026, 8, 10, 22, 0)
-    added = add_flex(tmp_path, name="Walk", duration_minutes=30, now=now)
+    added = add_flex(tmp_path, output_dir=tmp_path / "Desktop", name="Walk", duration_minutes=30, now=now)
     item_id = added["flexes"][0]["id"]
 
-    view = drop_flex(tmp_path, item_id=item_id, now=now)
+    view = drop_flex(tmp_path, output_dir=tmp_path / "Desktop", item_id=item_id, now=now)
     document = json.loads(
         (tmp_path / "data" / "session.json").read_text(encoding="utf-8")
     )
@@ -1052,14 +1057,13 @@ def test_dropping_flex_removes_it_from_the_session_and_flushes(tmp_path: Path) -
 def test_drop_cannot_vanish_an_anchor(tmp_path: Path) -> None:
     _write_defaults(tmp_path)
     now = datetime(2026, 8, 10, 22, 0)
-    added = add_anchor(
-        tmp_path, name="Gym", start="18:00", duration_minutes=90, now=now
+    added = add_anchor(tmp_path, output_dir=tmp_path / "Desktop", name="Gym", start="18:00", duration_minutes=90, now=now
     )
-    add_flex(tmp_path, name="Walk", duration_minutes=30, now=now)
+    add_flex(tmp_path, output_dir=tmp_path / "Desktop", name="Walk", duration_minutes=30, now=now)
     anchor_id = added["anchors"][0]["id"]
 
     with pytest.raises(KeyError):
-        drop_flex(tmp_path, item_id=anchor_id, now=now)
+        drop_flex(tmp_path, output_dir=tmp_path / "Desktop", item_id=anchor_id, now=now)
     document = json.loads(
         (tmp_path / "data" / "session.json").read_text(encoding="utf-8")
     )
@@ -1072,24 +1076,24 @@ def test_drop_cannot_vanish_an_anchor(tmp_path: Path) -> None:
 def test_submit_refuses_while_flex_blockers_remain(tmp_path: Path) -> None:
     _write_defaults(tmp_path)
     now = datetime(2026, 8, 10, 22, 0)
-    add_flex(tmp_path, name="Walk", duration_minutes=30, now=now)
+    add_flex(tmp_path, output_dir=tmp_path / "Desktop", name="Walk", duration_minutes=30, now=now)
 
     with pytest.raises(PlanBlockedError):
-        submit_session(tmp_path, now=now)
+        submit_session(tmp_path, output_dir=tmp_path / "Desktop", now=now)
 
-    assert list((tmp_path / "plans").iterdir()) == []
+    assert not (tmp_path / "Desktop" / PLAN_FILENAME).exists()
 
 
 def test_submit_of_honestly_placed_flex_writes_plan_html(tmp_path: Path) -> None:
     _write_defaults(tmp_path)
     now = datetime(2026, 8, 10, 22, 0)
-    added = add_flex(tmp_path, name="Walk", duration_minutes=30, now=now)
-    place_flex(tmp_path, item_id=added["flexes"][0]["id"], start="07:15", now=now)
+    added = add_flex(tmp_path, output_dir=tmp_path / "Desktop", name="Walk", duration_minutes=30, now=now)
+    place_flex(tmp_path, output_dir=tmp_path / "Desktop", item_id=added["flexes"][0]["id"], start="07:15", now=now)
 
-    path = submit_session(tmp_path, now=now)
+    path = submit_session(tmp_path, output_dir=tmp_path / "Desktop", now=now)
     content = path.read_text(encoding="utf-8")
 
-    assert path == tmp_path / "plans" / "2026-08-11.html"
+    assert path == tmp_path / "Desktop" / PLAN_FILENAME
     assert "Walk" in content
     assert "07:15" in content
     assert 'class="block flex"' in content
@@ -1098,10 +1102,10 @@ def test_submit_of_honestly_placed_flex_writes_plan_html(tmp_path: Path) -> None
 def test_dropped_flex_is_absent_from_the_submitted_plan(tmp_path: Path) -> None:
     _write_defaults(tmp_path)
     now = datetime(2026, 8, 10, 22, 0)
-    added = add_flex(tmp_path, name="Walk", duration_minutes=30, now=now)
-    drop_flex(tmp_path, item_id=added["flexes"][0]["id"], now=now)
+    added = add_flex(tmp_path, output_dir=tmp_path / "Desktop", name="Walk", duration_minutes=30, now=now)
+    drop_flex(tmp_path, output_dir=tmp_path / "Desktop", item_id=added["flexes"][0]["id"], now=now)
 
-    path = submit_session(tmp_path, now=now)
+    path = submit_session(tmp_path, output_dir=tmp_path / "Desktop", now=now)
     content = path.read_text(encoding="utf-8")
 
     assert "Walk" not in content
@@ -1114,8 +1118,7 @@ def test_adding_a_draft_mints_an_id_and_flushes_the_session_file(
 ) -> None:
     _write_defaults(tmp_path)
 
-    view = add_draft(
-        tmp_path,
+    view = add_draft(tmp_path, output_dir=tmp_path / "Desktop",
         name="Call dentist",
         now=datetime(2026, 8, 10, 22, 0),
     )
@@ -1138,8 +1141,7 @@ def test_leftover_draft_shows_the_same_blocker_as_finalize_plan(
 ) -> None:
     _write_defaults(tmp_path)
 
-    view = add_draft(
-        tmp_path,
+    view = add_draft(tmp_path, output_dir=tmp_path / "Desktop",
         name="Call dentist",
         now=datetime(2026, 8, 10, 22, 0),
     )
@@ -1160,12 +1162,11 @@ def test_adding_anchor_or_flex_still_works_while_a_draft_is_present(
 ) -> None:
     _write_defaults(tmp_path)
     now = datetime(2026, 8, 10, 22, 0)
-    add_draft(tmp_path, name="Call dentist", now=now)
+    add_draft(tmp_path, output_dir=tmp_path / "Desktop", name="Call dentist", now=now)
 
-    anchored = add_anchor(
-        tmp_path, name="Gym", start="18:00", duration_minutes=90, now=now
+    anchored = add_anchor(tmp_path, output_dir=tmp_path / "Desktop", name="Gym", start="18:00", duration_minutes=90, now=now
     )
-    flexed = add_flex(tmp_path, name="Walk", duration_minutes=30, now=now)
+    flexed = add_flex(tmp_path, output_dir=tmp_path / "Desktop", name="Walk", duration_minutes=30, now=now)
     document = json.loads(
         (tmp_path / "data" / "session.json").read_text(encoding="utf-8")
     )
@@ -1183,10 +1184,10 @@ def test_dropping_a_draft_removes_it_from_the_session_and_flushes(
 ) -> None:
     _write_defaults(tmp_path)
     now = datetime(2026, 8, 10, 22, 0)
-    added = add_draft(tmp_path, name="Call dentist", now=now)
+    added = add_draft(tmp_path, output_dir=tmp_path / "Desktop", name="Call dentist", now=now)
     item_id = added["drafts"][0]["id"]
 
-    view = drop_draft(tmp_path, item_id=item_id, now=now)
+    view = drop_draft(tmp_path, output_dir=tmp_path / "Desktop", item_id=item_id, now=now)
     document = json.loads(
         (tmp_path / "data" / "session.json").read_text(encoding="utf-8")
     )
@@ -1199,10 +1200,10 @@ def test_dropping_a_draft_removes_it_from_the_session_and_flushes(
 def test_dropped_draft_is_absent_from_the_submitted_plan(tmp_path: Path) -> None:
     _write_defaults(tmp_path)
     now = datetime(2026, 8, 10, 22, 0)
-    added = add_draft(tmp_path, name="Call dentist", now=now)
-    drop_draft(tmp_path, item_id=added["drafts"][0]["id"], now=now)
+    added = add_draft(tmp_path, output_dir=tmp_path / "Desktop", name="Call dentist", now=now)
+    drop_draft(tmp_path, output_dir=tmp_path / "Desktop", item_id=added["drafts"][0]["id"], now=now)
 
-    path = submit_session(tmp_path, now=now)
+    path = submit_session(tmp_path, output_dir=tmp_path / "Desktop", now=now)
     content = path.read_text(encoding="utf-8")
 
     assert "Call dentist" not in content
@@ -1213,14 +1214,13 @@ def test_dropped_draft_is_absent_from_the_submitted_plan(tmp_path: Path) -> None
 def test_drop_cannot_vanish_an_anchor_via_drop_draft(tmp_path: Path) -> None:
     _write_defaults(tmp_path)
     now = datetime(2026, 8, 10, 22, 0)
-    added = add_anchor(
-        tmp_path, name="Gym", start="18:00", duration_minutes=90, now=now
+    added = add_anchor(tmp_path, output_dir=tmp_path / "Desktop", name="Gym", start="18:00", duration_minutes=90, now=now
     )
-    add_draft(tmp_path, name="Call dentist", now=now)
+    add_draft(tmp_path, output_dir=tmp_path / "Desktop", name="Call dentist", now=now)
     anchor_id = added["anchors"][0]["id"]
 
     with pytest.raises(KeyError):
-        drop_draft(tmp_path, item_id=anchor_id, now=now)
+        drop_draft(tmp_path, output_dir=tmp_path / "Desktop", item_id=anchor_id, now=now)
     document = json.loads(
         (tmp_path / "data" / "session.json").read_text(encoding="utf-8")
     )
@@ -1234,11 +1234,10 @@ def test_promoting_a_draft_to_anchor_mints_a_new_id_and_does_not_leak(
 ) -> None:
     _write_defaults(tmp_path)
     now = datetime(2026, 8, 10, 22, 0)
-    added = add_draft(tmp_path, name="Call dentist", now=now)
+    added = add_draft(tmp_path, output_dir=tmp_path / "Desktop", name="Call dentist", now=now)
     draft_id = added["drafts"][0]["id"]
 
-    view = promote_draft(
-        tmp_path,
+    view = promote_draft(tmp_path, output_dir=tmp_path / "Desktop",
         item_id=draft_id,
         kind="anchor",
         start="09:00",
@@ -1269,11 +1268,10 @@ def test_promoting_a_draft_to_flex_mints_a_new_id_and_stays_unplaced(
 ) -> None:
     _write_defaults(tmp_path)
     now = datetime(2026, 8, 10, 22, 0)
-    added = add_draft(tmp_path, name="Walk", now=now)
+    added = add_draft(tmp_path, output_dir=tmp_path / "Desktop", name="Walk", now=now)
     draft_id = added["drafts"][0]["id"]
 
-    view = promote_draft(
-        tmp_path,
+    view = promote_draft(tmp_path, output_dir=tmp_path / "Desktop",
         item_id=draft_id,
         kind="flex",
         duration_minutes=30,
@@ -1301,10 +1299,10 @@ def test_promoting_a_draft_to_flex_mints_a_new_id_and_stays_unplaced(
 def test_editing_a_draft_renames_it_and_flushes(tmp_path: Path) -> None:
     _write_defaults(tmp_path)
     now = datetime(2026, 8, 10, 22, 0)
-    added = add_draft(tmp_path, name="Call dentist", now=now)
+    added = add_draft(tmp_path, output_dir=tmp_path / "Desktop", name="Call dentist", now=now)
     draft_id = added["drafts"][0]["id"]
 
-    view = edit_draft(tmp_path, item_id=draft_id, name="Call dentist re: crown", now=now)
+    view = edit_draft(tmp_path, output_dir=tmp_path / "Desktop", item_id=draft_id, name="Call dentist re: crown", now=now)
     document = json.loads(
         (tmp_path / "data" / "session.json").read_text(encoding="utf-8")
     )
@@ -1317,10 +1315,10 @@ def test_editing_a_draft_renames_it_and_flushes(tmp_path: Path) -> None:
 def test_editing_a_draft_trims_whitespace(tmp_path: Path) -> None:
     _write_defaults(tmp_path)
     now = datetime(2026, 8, 10, 22, 0)
-    added = add_draft(tmp_path, name="Call dentist", now=now)
+    added = add_draft(tmp_path, output_dir=tmp_path / "Desktop", name="Call dentist", now=now)
     draft_id = added["drafts"][0]["id"]
 
-    view = edit_draft(tmp_path, item_id=draft_id, name="  Trimmed  ", now=now)
+    view = edit_draft(tmp_path, output_dir=tmp_path / "Desktop", item_id=draft_id, name="  Trimmed  ", now=now)
 
     assert view["drafts"][0]["name"] == "Trimmed"
 
@@ -1330,14 +1328,14 @@ def test_editing_a_draft_to_blank_name_is_rejected_without_mutating(
 ) -> None:
     _write_defaults(tmp_path)
     now = datetime(2026, 8, 10, 22, 0)
-    added = add_draft(tmp_path, name="Call dentist", now=now)
+    added = add_draft(tmp_path, output_dir=tmp_path / "Desktop", name="Call dentist", now=now)
     draft_id = added["drafts"][0]["id"]
     before = json.loads(
         (tmp_path / "data" / "session.json").read_text(encoding="utf-8")
     )
 
     with pytest.raises(ValueError):
-        edit_draft(tmp_path, item_id=draft_id, name="   ", now=now)
+        edit_draft(tmp_path, output_dir=tmp_path / "Desktop", item_id=draft_id, name="   ", now=now)
 
     document = json.loads(
         (tmp_path / "data" / "session.json").read_text(encoding="utf-8")
@@ -1349,10 +1347,10 @@ def test_editing_a_draft_to_blank_name_is_rejected_without_mutating(
 def test_editing_an_unknown_draft_raises_key_error(tmp_path: Path) -> None:
     _write_defaults(tmp_path)
     now = datetime(2026, 8, 10, 22, 0)
-    add_draft(tmp_path, name="Call dentist", now=now)
+    add_draft(tmp_path, output_dir=tmp_path / "Desktop", name="Call dentist", now=now)
 
     with pytest.raises(KeyError):
-        edit_draft(tmp_path, item_id="missing", name="New name", now=now)
+        edit_draft(tmp_path, output_dir=tmp_path / "Desktop", item_id="missing", name="New name", now=now)
 
 
 def test_editing_an_unknown_draft_with_a_blank_name_still_raises_key_error(
@@ -1360,23 +1358,23 @@ def test_editing_an_unknown_draft_with_a_blank_name_still_raises_key_error(
 ) -> None:
     _write_defaults(tmp_path)
     now = datetime(2026, 8, 10, 22, 0)
-    add_draft(tmp_path, name="Call dentist", now=now)
+    add_draft(tmp_path, output_dir=tmp_path / "Desktop", name="Call dentist", now=now)
 
     with pytest.raises(KeyError):
-        edit_draft(tmp_path, item_id="missing", name="   ", now=now)
+        edit_draft(tmp_path, output_dir=tmp_path / "Desktop", item_id="missing", name="   ", now=now)
 
 
 def test_undo_and_redo_revert_and_reapply_a_draft_rename(tmp_path: Path) -> None:
     _write_defaults(tmp_path)
     now = datetime(2026, 8, 10, 22, 0)
-    added = add_draft(tmp_path, name="Call dentist", now=now)
+    added = add_draft(tmp_path, output_dir=tmp_path / "Desktop", name="Call dentist", now=now)
     draft_id = added["drafts"][0]["id"]
-    edit_draft(tmp_path, item_id=draft_id, name="Call dentist re: crown", now=now)
+    edit_draft(tmp_path, output_dir=tmp_path / "Desktop", item_id=draft_id, name="Call dentist re: crown", now=now)
 
-    undone = undo_session(tmp_path, now=now)
+    undone = undo_session(tmp_path, output_dir=tmp_path / "Desktop", now=now)
     assert undone["drafts"][0]["name"] == "Call dentist"
 
-    redone = redo_session(tmp_path, now=now)
+    redone = redo_session(tmp_path, output_dir=tmp_path / "Desktop", now=now)
     assert redone["drafts"][0]["name"] == "Call dentist re: crown"
 
 
@@ -1385,11 +1383,10 @@ def test_promoting_a_draft_with_a_new_name_carries_the_new_name(
 ) -> None:
     _write_defaults(tmp_path)
     now = datetime(2026, 8, 10, 22, 0)
-    added = add_draft(tmp_path, name="Call dentist", now=now)
+    added = add_draft(tmp_path, output_dir=tmp_path / "Desktop", name="Call dentist", now=now)
     draft_id = added["drafts"][0]["id"]
 
-    view = promote_draft(
-        tmp_path,
+    view = promote_draft(tmp_path, output_dir=tmp_path / "Desktop",
         item_id=draft_id,
         kind="anchor",
         start="09:00",
@@ -1406,12 +1403,11 @@ def test_promoting_a_draft_with_a_blank_new_name_is_rejected_without_mutating(
 ) -> None:
     _write_defaults(tmp_path)
     now = datetime(2026, 8, 10, 22, 0)
-    added = add_draft(tmp_path, name="Call dentist", now=now)
+    added = add_draft(tmp_path, output_dir=tmp_path / "Desktop", name="Call dentist", now=now)
     draft_id = added["drafts"][0]["id"]
 
     with pytest.raises(ValueError):
-        promote_draft(
-            tmp_path,
+        promote_draft(tmp_path, output_dir=tmp_path / "Desktop",
             item_id=draft_id,
             kind="anchor",
             start="09:00",
@@ -1440,13 +1436,12 @@ def test_promoting_an_icloud_draft_carries_its_source(tmp_path: Path) -> None:
                 drafts=[ImportedItem(name="Call dentist")]
             ),
         )
-        seeded = load_session(tmp_path, now=now)
+        seeded = load_session(tmp_path, output_dir=tmp_path / "Desktop", now=now)
     finally:
         monkeypatch.undo()
 
     draft_id = seeded["drafts"][0]["id"]
-    view = promote_draft(
-        tmp_path,
+    view = promote_draft(tmp_path, output_dir=tmp_path / "Desktop",
         item_id=draft_id,
         kind="anchor",
         start="09:00",
@@ -1462,11 +1457,10 @@ def test_promoting_an_icloud_draft_carries_its_source(tmp_path: Path) -> None:
 def test_promoting_a_typed_draft_carries_no_source(tmp_path: Path) -> None:
     _write_defaults(tmp_path)
     now = datetime(2026, 8, 10, 22, 0)
-    added = add_draft(tmp_path, name="Call dentist", now=now)
+    added = add_draft(tmp_path, output_dir=tmp_path / "Desktop", name="Call dentist", now=now)
     draft_id = added["drafts"][0]["id"]
 
-    view = promote_draft(
-        tmp_path,
+    view = promote_draft(tmp_path, output_dir=tmp_path / "Desktop",
         item_id=draft_id,
         kind="anchor",
         start="09:00",
@@ -1481,11 +1475,10 @@ def test_promoting_a_draft_with_explicit_checklist_attaches_it(tmp_path: Path) -
     _write_defaults(tmp_path)
     _write_checklist_library(tmp_path)
     now = datetime(2026, 8, 10, 22, 0)
-    added = add_draft(tmp_path, name="Call dentist", now=now)
+    added = add_draft(tmp_path, output_dir=tmp_path / "Desktop", name="Call dentist", now=now)
     draft_id = added["drafts"][0]["id"]
 
-    view = promote_draft(
-        tmp_path,
+    view = promote_draft(tmp_path, output_dir=tmp_path / "Desktop",
         item_id=draft_id,
         kind="flex",
         duration_minutes=30,
@@ -1502,11 +1495,10 @@ def test_promoting_a_draft_with_explicit_none_checklist_attaches_nothing(
     _write_defaults(tmp_path)
     _write_checklist_library(tmp_path)
     now = datetime(2026, 8, 10, 22, 0)
-    added = add_draft(tmp_path, name="Gym bag", now=now)
+    added = add_draft(tmp_path, output_dir=tmp_path / "Desktop", name="Gym bag", now=now)
     draft_id = added["drafts"][0]["id"]
 
-    view = promote_draft(
-        tmp_path,
+    view = promote_draft(tmp_path, output_dir=tmp_path / "Desktop",
         item_id=draft_id,
         kind="flex",
         duration_minutes=30,
@@ -1523,11 +1515,10 @@ def test_promoting_a_draft_suggests_checklist_from_renamed_name(
     _write_defaults(tmp_path)
     _write_checklist_library(tmp_path)
     now = datetime(2026, 8, 10, 22, 0)
-    added = add_draft(tmp_path, name="Errand", now=now)
+    added = add_draft(tmp_path, output_dir=tmp_path / "Desktop", name="Errand", now=now)
     draft_id = added["drafts"][0]["id"]
 
-    view = promote_draft(
-        tmp_path,
+    view = promote_draft(tmp_path, output_dir=tmp_path / "Desktop",
         item_id=draft_id,
         kind="flex",
         duration_minutes=30,
@@ -1543,11 +1534,10 @@ def test_undo_of_rename_during_promote_restores_the_original_draft(
 ) -> None:
     _write_defaults(tmp_path)
     now = datetime(2026, 8, 10, 22, 0)
-    added = add_draft(tmp_path, name="Call dentist", now=now)
+    added = add_draft(tmp_path, output_dir=tmp_path / "Desktop", name="Call dentist", now=now)
     draft_id = added["drafts"][0]["id"]
 
-    promote_draft(
-        tmp_path,
+    promote_draft(tmp_path, output_dir=tmp_path / "Desktop",
         item_id=draft_id,
         kind="anchor",
         start="09:00",
@@ -1556,7 +1546,7 @@ def test_undo_of_rename_during_promote_restores_the_original_draft(
         now=now,
     )
 
-    undone = undo_session(tmp_path, now=now)
+    undone = undo_session(tmp_path, output_dir=tmp_path / "Desktop", now=now)
 
     assert undone["anchors"] == []
     assert undone["drafts"][0]["id"] == draft_id
@@ -1566,12 +1556,12 @@ def test_undo_of_rename_during_promote_restores_the_original_draft(
 def test_submit_refuses_while_any_draft_remains_after_add(tmp_path: Path) -> None:
     _write_defaults(tmp_path)
     now = datetime(2026, 8, 10, 22, 0)
-    add_draft(tmp_path, name="Call dentist", now=now)
+    add_draft(tmp_path, output_dir=tmp_path / "Desktop", name="Call dentist", now=now)
 
     with pytest.raises(PlanBlockedError):
-        submit_session(tmp_path, now=now)
+        submit_session(tmp_path, output_dir=tmp_path / "Desktop", now=now)
 
-    assert list((tmp_path / "plans").iterdir()) == []
+    assert not (tmp_path / "Desktop" / PLAN_FILENAME).exists()
 
 
 def test_blank_session_offers_weekday_template_when_file_exists(
@@ -1580,7 +1570,7 @@ def test_blank_session_offers_weekday_template_when_file_exists(
     _write_defaults(tmp_path)
     _write_tuesday_template(tmp_path)
 
-    view = session_view(tmp_path, now=datetime(2026, 8, 10, 22, 0))
+    view = session_view(tmp_path, output_dir=tmp_path / "Desktop", now=datetime(2026, 8, 10, 22, 0))
 
     assert view["template_offer"] == "pending"
     assert view["show_template_offer"] is True
@@ -1594,7 +1584,7 @@ def test_blank_session_does_not_offer_template_when_weekday_file_is_missing(
 ) -> None:
     _write_defaults(tmp_path)
 
-    view = session_view(tmp_path, now=datetime(2026, 8, 10, 22, 0))
+    view = session_view(tmp_path, output_dir=tmp_path / "Desktop", now=datetime(2026, 8, 10, 22, 0))
 
     assert view["template_offer"] == "pending"
     assert view["show_template_offer"] is False
@@ -1607,7 +1597,7 @@ def test_accepting_template_copies_anchors_and_unplaced_flex_and_flushes(
     _write_tuesday_template(tmp_path)
     now = datetime(2026, 8, 10, 22, 0)
 
-    view = apply_template(tmp_path, now=now)
+    view = apply_template(tmp_path, output_dir=tmp_path / "Desktop", now=now)
     document = json.loads(
         (tmp_path / "data" / "session.json").read_text(encoding="utf-8")
     )
@@ -1647,9 +1637,9 @@ def test_declining_template_persists_through_an_empty_session(
     _write_tuesday_template(tmp_path)
     now = datetime(2026, 8, 10, 22, 0)
 
-    declined = decline_template(tmp_path, now=now)
-    added = add_flex(tmp_path, name="Walk", duration_minutes=30, now=now)
-    emptied = drop_flex(tmp_path, item_id=added["flexes"][0]["id"], now=now)
+    declined = decline_template(tmp_path, output_dir=tmp_path / "Desktop", now=now)
+    added = add_flex(tmp_path, output_dir=tmp_path / "Desktop", name="Walk", duration_minutes=30, now=now)
+    emptied = drop_flex(tmp_path, output_dir=tmp_path / "Desktop", item_id=added["flexes"][0]["id"], now=now)
     document = json.loads(
         (tmp_path / "data" / "session.json").read_text(encoding="utf-8")
     )
@@ -1674,7 +1664,7 @@ def test_template_offer_hides_while_the_session_has_items(
     _write_tuesday_template(tmp_path)
     now = datetime(2026, 8, 10, 22, 0)
 
-    view = add_flex(tmp_path, name="Walk", duration_minutes=30, now=now)
+    view = add_flex(tmp_path, output_dir=tmp_path / "Desktop", name="Walk", duration_minutes=30, now=now)
 
     assert view["template_offer"] == "pending"
     assert view["show_template_offer"] is False
@@ -1697,7 +1687,7 @@ def test_template_offer_hides_when_a_draft_remains(tmp_path: Path) -> None:
         },
     )
 
-    view = session_view(tmp_path, now=datetime(2026, 8, 10, 22, 0))
+    view = session_view(tmp_path, output_dir=tmp_path / "Desktop", now=datetime(2026, 8, 10, 22, 0))
 
     assert view["template_offer"] == "pending"
     assert view["show_template_offer"] is False
@@ -1712,7 +1702,7 @@ def test_offer_uses_this_weekdays_template_file_only(tmp_path: Path) -> None:
         encoding="utf-8",
     )
 
-    view = session_view(tmp_path, now=datetime(2026, 8, 10, 22, 0))
+    view = session_view(tmp_path, output_dir=tmp_path / "Desktop", now=datetime(2026, 8, 10, 22, 0))
 
     assert view["plan_date"] == "2026-08-11"
     assert view["show_template_offer"] is False
@@ -1724,9 +1714,9 @@ def test_accepting_template_does_not_seed_a_session_that_already_has_items(
     _write_defaults(tmp_path)
     _write_tuesday_template(tmp_path)
     now = datetime(2026, 8, 10, 22, 0)
-    added = add_flex(tmp_path, name="Walk", duration_minutes=30, now=now)
+    added = add_flex(tmp_path, output_dir=tmp_path / "Desktop", name="Walk", duration_minutes=30, now=now)
 
-    view = apply_template(tmp_path, now=now)
+    view = apply_template(tmp_path, output_dir=tmp_path / "Desktop", now=now)
     document = json.loads(
         (tmp_path / "data" / "session.json").read_text(encoding="utf-8")
     )
@@ -1744,9 +1734,9 @@ def test_reset_returns_template_offer_to_pending_and_offers_again(
     _write_defaults(tmp_path)
     _write_tuesday_template(tmp_path)
     now = datetime(2026, 8, 10, 22, 0)
-    apply_template(tmp_path, now=now)
+    apply_template(tmp_path, output_dir=tmp_path / "Desktop", now=now)
 
-    view = reset_session(tmp_path, now=now)
+    view = reset_session(tmp_path, output_dir=tmp_path / "Desktop", now=now)
     document = json.loads(
         (tmp_path / "data" / "session.json").read_text(encoding="utf-8")
     )
@@ -1764,13 +1754,13 @@ def test_accepted_then_empty_session_does_not_look_like_pending(
     _write_defaults(tmp_path)
     _write_tuesday_template(tmp_path)
     now = datetime(2026, 8, 10, 22, 0)
-    seeded = apply_template(tmp_path, now=now)
+    seeded = apply_template(tmp_path, output_dir=tmp_path / "Desktop", now=now)
     for flex in list(seeded["flexes"]):
-        drop_flex(tmp_path, item_id=flex["id"], now=now)
+        drop_flex(tmp_path, output_dir=tmp_path / "Desktop", item_id=flex["id"], now=now)
     for anchor in list(seeded["anchors"]):
-        edit_anchor(tmp_path, item_id=anchor["id"], remove=True, now=now)
+        edit_anchor(tmp_path, output_dir=tmp_path / "Desktop", item_id=anchor["id"], remove=True, now=now)
 
-    view = session_view(tmp_path, now=now)
+    view = session_view(tmp_path, output_dir=tmp_path / "Desktop", now=now)
     document = json.loads(
         (tmp_path / "data" / "session.json").read_text(encoding="utf-8")
     )
@@ -1789,7 +1779,7 @@ def test_session_view_exposes_checklist_library_names_and_rows(
     _write_defaults(tmp_path)
     _write_checklist_library(tmp_path)
 
-    view = session_view(tmp_path, now=datetime(2026, 8, 10, 22, 0))
+    view = session_view(tmp_path, output_dir=tmp_path / "Desktop", now=datetime(2026, 8, 10, 22, 0))
 
     # Rows ride along so the session editor can prefill the rows textarea
     # when a Library Checklist is attached or picked from the select.
@@ -1805,8 +1795,7 @@ def test_adding_an_anchor_attaches_a_picked_checklist_and_flushes(
     _write_defaults(tmp_path)
     _write_checklist_library(tmp_path)
 
-    view = add_anchor(
-        tmp_path,
+    view = add_anchor(tmp_path, output_dir=tmp_path / "Desktop",
         name="Standup",
         start="09:00",
         duration_minutes=30,
@@ -1828,8 +1817,7 @@ def test_adding_an_anchor_attaches_a_name_match_checklist_by_default(
     _write_defaults(tmp_path)
     _write_checklist_library(tmp_path)
 
-    view = add_anchor(
-        tmp_path,
+    view = add_anchor(tmp_path, output_dir=tmp_path / "Desktop",
         name="Gym",
         start="18:00",
         duration_minutes=90,
@@ -1849,8 +1837,7 @@ def test_adding_an_anchor_can_decline_the_name_match_checklist(
     _write_defaults(tmp_path)
     _write_checklist_library(tmp_path)
 
-    view = add_anchor(
-        tmp_path,
+    view = add_anchor(tmp_path, output_dir=tmp_path / "Desktop",
         name="Gym",
         start="18:00",
         duration_minutes=90,
@@ -1871,8 +1858,7 @@ def test_editing_an_anchor_can_change_or_clear_its_checklist(
     _write_defaults(tmp_path)
     _write_checklist_library(tmp_path)
     now = datetime(2026, 8, 10, 22, 0)
-    added = add_anchor(
-        tmp_path,
+    added = add_anchor(tmp_path, output_dir=tmp_path / "Desktop",
         name="Gym",
         start="18:00",
         duration_minutes=90,
@@ -1880,10 +1866,9 @@ def test_editing_an_anchor_can_change_or_clear_its_checklist(
     )
     item_id = added["anchors"][0]["id"]
 
-    changed = edit_anchor(
-        tmp_path, item_id=item_id, checklist="sauna-kit", now=now
+    changed = edit_anchor(tmp_path, output_dir=tmp_path / "Desktop", item_id=item_id, checklist="sauna-kit", now=now
     )
-    cleared = edit_anchor(tmp_path, item_id=item_id, checklist=None, now=now)
+    cleared = edit_anchor(tmp_path, output_dir=tmp_path / "Desktop", item_id=item_id, checklist=None, now=now)
     flushed = json.loads(
         (tmp_path / "data" / "session.json").read_text(encoding="utf-8")
     )
@@ -1900,8 +1885,7 @@ def test_editing_an_anchor_without_a_checklist_still_suggests_on_name(
     _write_defaults(tmp_path)
     _write_checklist_library(tmp_path)
     now = datetime(2026, 8, 10, 22, 0)
-    added = add_anchor(
-        tmp_path,
+    added = add_anchor(tmp_path, output_dir=tmp_path / "Desktop",
         name="Standup",
         start="09:00",
         duration_minutes=30,
@@ -1910,7 +1894,7 @@ def test_editing_an_anchor_without_a_checklist_still_suggests_on_name(
     )
     item_id = added["anchors"][0]["id"]
 
-    view = edit_anchor(tmp_path, item_id=item_id, name="Gym", now=now)
+    view = edit_anchor(tmp_path, output_dir=tmp_path / "Desktop", item_id=item_id, name="Gym", now=now)
     flushed = json.loads(
         (tmp_path / "data" / "session.json").read_text(encoding="utf-8")
     )
@@ -1952,7 +1936,7 @@ def test_pre_attached_checklist_stays_without_a_re_prompt(tmp_path: Path) -> Non
         },
     )
 
-    renamed = edit_anchor(tmp_path, item_id="a1", name="Sauna", now=now)
+    renamed = edit_anchor(tmp_path, output_dir=tmp_path / "Desktop", item_id="a1", name="Sauna", now=now)
     flushed = json.loads(
         (tmp_path / "data" / "session.json").read_text(encoding="utf-8")
     )
@@ -1970,6 +1954,7 @@ def test_typed_rows_on_an_anchor_survive_reload_and_reach_the_plan(
 
     view = add_anchor(
         tmp_path,
+        output_dir=tmp_path / "Desktop",
         name="6am Taxi",
         start="07:00",
         duration_minutes=15,
@@ -1994,7 +1979,7 @@ def test_typed_rows_on_an_anchor_survive_reload_and_reach_the_plan(
         "Boarding pass",
     ]
 
-    reloaded = session_view(tmp_path, now=now)
+    reloaded = session_view(tmp_path, output_dir=tmp_path / "Desktop", now=now)
     assert reloaded["anchors"][0]["checklist_items"] == [
         "Passport",
         "Charger",
@@ -2002,8 +1987,8 @@ def test_typed_rows_on_an_anchor_survive_reload_and_reach_the_plan(
     ]
     assert not (tmp_path / "data" / "checklists").exists()
 
-    submit_session(tmp_path, now=now)
-    plan_html = (tmp_path / "plans" / "2026-08-11.html").read_text(encoding="utf-8")
+    plan_path = submit_session(tmp_path, output_dir=tmp_path / "Desktop", now=now)
+    plan_html = plan_path.read_text(encoding="utf-8")
     assert '"6am Taxi"' in plan_html
     assert '"Passport"' in plan_html
     assert '"Charger"' in plan_html
@@ -2016,6 +2001,7 @@ def test_typed_rows_on_a_flex_reach_the_plan_once_placed(tmp_path: Path) -> None
 
     added = add_flex(
         tmp_path,
+        output_dir=tmp_path / "Desktop",
         name="Gym",
         duration_minutes=60,
         checklist_items=["Towel", "Water bottle"],
@@ -2024,9 +2010,9 @@ def test_typed_rows_on_a_flex_reach_the_plan_once_placed(tmp_path: Path) -> None
     item_id = added["flexes"][0]["id"]
     assert added["flexes"][0]["checklist_kind"] == "literal"
 
-    place_flex(tmp_path, item_id=item_id, start="07:00", now=now)
-    submit_session(tmp_path, now=now)
-    plan_html = (tmp_path / "plans" / "2026-08-11.html").read_text(encoding="utf-8")
+    place_flex(tmp_path, output_dir=tmp_path / "Desktop", item_id=item_id, start="07:00", now=now)
+    plan_path = submit_session(tmp_path, output_dir=tmp_path / "Desktop", now=now)
+    plan_html = plan_path.read_text(encoding="utf-8")
 
     assert '"Gym"' in plan_html
     assert '"Towel"' in plan_html
@@ -2041,6 +2027,7 @@ def test_zero_non_blank_rows_leaves_the_item_with_no_checklist_at_all(
 
     view = add_anchor(
         tmp_path,
+        output_dir=tmp_path / "Desktop",
         name="Standup",
         start="09:00",
         duration_minutes=30,
@@ -2060,6 +2047,7 @@ def test_at_most_one_of_checklist_and_checklist_items_is_set(tmp_path: Path) -> 
 
     with_rows = add_anchor(
         tmp_path,
+        output_dir=tmp_path / "Desktop",
         name="6am Taxi",
         start="06:00",
         duration_minutes=15,
@@ -2072,6 +2060,7 @@ def test_at_most_one_of_checklist_and_checklist_items_is_set(tmp_path: Path) -> 
 
     with_reference = add_anchor(
         tmp_path,
+        output_dir=tmp_path / "Desktop",
         name="Sauna trip",
         start="20:00",
         duration_minutes=45,
@@ -2090,6 +2079,7 @@ def test_typed_rows_survive_renaming_the_item(tmp_path: Path) -> None:
 
     added = add_anchor(
         tmp_path,
+        output_dir=tmp_path / "Desktop",
         name="6am Taxi",
         start="06:00",
         duration_minutes=15,
@@ -2100,7 +2090,7 @@ def test_typed_rows_survive_renaming_the_item(tmp_path: Path) -> None:
 
     # Renaming to "Gym" would ordinarily trigger a name-match checklist
     # suggestion (see _write_checklist_library) but must not clobber rows.
-    renamed = edit_anchor(tmp_path, item_id=item_id, name="Gym", now=now)
+    renamed = edit_anchor(tmp_path, output_dir=tmp_path / "Desktop", item_id=item_id, name="Gym", now=now)
 
     assert renamed["anchors"][0]["checklist"] is None
     assert renamed["anchors"][0]["checklist_items"] == ["Passport"]
@@ -2112,6 +2102,7 @@ def test_reset_clears_typed_rows_along_with_everything_else(tmp_path: Path) -> N
 
     add_anchor(
         tmp_path,
+        output_dir=tmp_path / "Desktop",
         name="6am Taxi",
         start="06:00",
         duration_minutes=15,
@@ -2119,7 +2110,7 @@ def test_reset_clears_typed_rows_along_with_everything_else(tmp_path: Path) -> N
         now=now,
     )
 
-    view = reset_session(tmp_path, now=now)
+    view = reset_session(tmp_path, output_dir=tmp_path / "Desktop", now=now)
 
     assert view["anchors"] == []
 
@@ -2130,6 +2121,7 @@ def test_undo_restores_typed_rows_after_an_edit(tmp_path: Path) -> None:
 
     added = add_anchor(
         tmp_path,
+        output_dir=tmp_path / "Desktop",
         name="6am Taxi",
         start="06:00",
         duration_minutes=15,
@@ -2140,13 +2132,14 @@ def test_undo_restores_typed_rows_after_an_edit(tmp_path: Path) -> None:
 
     edited = edit_anchor(
         tmp_path,
+        output_dir=tmp_path / "Desktop",
         item_id=item_id,
         checklist_items=["Passport", "Charger"],
         now=now,
     )
     assert edited["anchors"][0]["checklist_items"] == ["Passport", "Charger"]
 
-    undone = undo_session(tmp_path, now=now)
+    undone = undo_session(tmp_path, output_dir=tmp_path / "Desktop", now=now)
     assert undone["anchors"][0]["checklist_items"] == ["Passport"]
 
 
@@ -2174,7 +2167,7 @@ def test_old_session_file_without_checklist_items_still_loads(tmp_path: Path) ->
         },
     )
 
-    view = session_view(tmp_path, now=now)
+    view = session_view(tmp_path, output_dir=tmp_path / "Desktop", now=now)
 
     assert view["anchors"][0]["checklist"] == "gym-bag"
     assert view["anchors"][0]["checklist_kind"] == "reference"
@@ -2188,6 +2181,7 @@ def test_editing_the_rows_of_a_referenced_checklist_detaches_it(
     now = datetime(2026, 8, 10, 22, 0)
     added = add_anchor(
         tmp_path,
+        output_dir=tmp_path / "Desktop",
         name="6am Taxi",
         start="06:00",
         duration_minutes=15,
@@ -2200,6 +2194,7 @@ def test_editing_the_rows_of_a_referenced_checklist_detaches_it(
 
     edited = edit_anchor(
         tmp_path,
+        output_dir=tmp_path / "Desktop",
         item_id=item_id,
         checklist="gym-bag",
         checklist_items=["Towel", "Lock", "Passport"],
@@ -2225,6 +2220,7 @@ def test_resubmitting_unedited_prefilled_rows_keeps_the_reference(
     now = datetime(2026, 8, 10, 22, 0)
     added = add_anchor(
         tmp_path,
+        output_dir=tmp_path / "Desktop",
         name="Gym",
         start="18:00",
         duration_minutes=90,
@@ -2238,6 +2234,7 @@ def test_resubmitting_unedited_prefilled_rows_keeps_the_reference(
     # Checklist's own rows back unchanged, which must not count as an edit.
     resubmitted = edit_anchor(
         tmp_path,
+        output_dir=tmp_path / "Desktop",
         item_id=item_id,
         checklist="gym-bag",
         checklist_items=["Towel", "Lock"],
@@ -2257,6 +2254,7 @@ def test_a_detached_item_shows_a_blank_reference_not_the_former_name(
     now = datetime(2026, 8, 10, 22, 0)
     added = add_flex(
         tmp_path,
+        output_dir=tmp_path / "Desktop",
         name="Gym",
         duration_minutes=60,
         checklist="gym-bag",
@@ -2266,6 +2264,7 @@ def test_a_detached_item_shows_a_blank_reference_not_the_former_name(
 
     detached = edit_flex(
         tmp_path,
+        output_dir=tmp_path / "Desktop",
         item_id=item_id,
         checklist="gym-bag",
         checklist_items=["Towel"],
@@ -2282,6 +2281,7 @@ def test_a_later_library_edit_does_not_reach_a_detached_item(tmp_path: Path) -> 
     now = datetime(2026, 8, 10, 22, 0)
     added = add_anchor(
         tmp_path,
+        output_dir=tmp_path / "Desktop",
         name="Gym",
         start="18:00",
         duration_minutes=90,
@@ -2291,6 +2291,7 @@ def test_a_later_library_edit_does_not_reach_a_detached_item(tmp_path: Path) -> 
     item_id = added["anchors"][0]["id"]
     edit_anchor(
         tmp_path,
+        output_dir=tmp_path / "Desktop",
         item_id=item_id,
         checklist="gym-bag",
         checklist_items=["Towel", "Lock", "Sauna cap"],
@@ -2302,7 +2303,7 @@ def test_a_later_library_edit_does_not_reach_a_detached_item(tmp_path: Path) -> 
         'name = "Gym bag"\nitems = ["Towel", "Lock", "New rule"]\n', encoding="utf-8"
     )
 
-    view = session_view(tmp_path, now=now)
+    view = session_view(tmp_path, output_dir=tmp_path / "Desktop", now=now)
     assert view["anchors"][0]["checklist"] is None
     assert view["anchors"][0]["checklist_items"] == ["Towel", "Lock", "Sauna cap"]
 
@@ -2315,6 +2316,7 @@ def test_reattaching_from_the_select_overwrites_typed_rows_and_undo_restores_the
     now = datetime(2026, 8, 10, 22, 0)
     added = add_anchor(
         tmp_path,
+        output_dir=tmp_path / "Desktop",
         name="6am Taxi",
         start="06:00",
         duration_minutes=15,
@@ -2325,6 +2327,7 @@ def test_reattaching_from_the_select_overwrites_typed_rows_and_undo_restores_the
 
     reattached = edit_anchor(
         tmp_path,
+        output_dir=tmp_path / "Desktop",
         item_id=item_id,
         checklist="sauna-kit",
         checklist_items=["Towel"],
@@ -2334,7 +2337,7 @@ def test_reattaching_from_the_select_overwrites_typed_rows_and_undo_restores_the
     assert reattached["anchors"][0]["checklist_items"] == []
     assert reattached["anchors"][0]["checklist_kind"] == "reference"
 
-    undone = undo_session(tmp_path, now=now)
+    undone = undo_session(tmp_path, output_dir=tmp_path / "Desktop", now=now)
     assert undone["anchors"][0]["checklist"] is None
     assert undone["anchors"][0]["checklist_items"] == ["Passport", "Charger"]
 
@@ -2345,7 +2348,7 @@ def test_day_template_seeded_checklist_detaches_the_same_way(tmp_path: Path) -> 
     _write_tuesday_template(tmp_path)
     now = datetime(2026, 8, 10, 22, 0)
 
-    seeded = apply_template(tmp_path, now=now)
+    seeded = apply_template(tmp_path, output_dir=tmp_path / "Desktop", now=now)
     anchor = next(a for a in seeded["anchors"] if a["name"] == "Standup")
     assert anchor["checklist"] == "morning-out"
     library_file = tmp_path / "data" / "checklists" / "morning-out.toml"
@@ -2354,12 +2357,13 @@ def test_day_template_seeded_checklist_detaches_the_same_way(tmp_path: Path) -> 
     library_file.write_text(
         'name = "Morning out"\nitems = ["Keys", "Badge"]\n', encoding="utf-8"
     )
-    reseeded = session_view(tmp_path, now=now)
+    reseeded = session_view(tmp_path, output_dir=tmp_path / "Desktop", now=now)
     anchor = next(a for a in reseeded["anchors"] if a["name"] == "Standup")
     before = library_file.read_bytes()
 
     detached = edit_anchor(
         tmp_path,
+        output_dir=tmp_path / "Desktop",
         item_id=anchor["id"],
         checklist="morning-out",
         checklist_items=["Keys", "Badge", "Umbrella"],
@@ -2388,7 +2392,7 @@ def test_daily_activity_checklist_detaches_leaving_its_template_unchanged(
     )
     now = datetime(2026, 8, 10, 22, 0)
 
-    view = session_view(tmp_path, now=now)
+    view = session_view(tmp_path, output_dir=tmp_path / "Desktop", now=now)
     flex = next(f for f in view["flexes"] if f["name"] == "Gym routine")
     assert flex["checklist"] == "gym-bag"
     activity_file = activity_templates_dir(tmp_path / "data") / "gym-routine.toml"
@@ -2398,6 +2402,7 @@ def test_daily_activity_checklist_detaches_leaving_its_template_unchanged(
 
     detached = edit_flex(
         tmp_path,
+        output_dir=tmp_path / "Desktop",
         item_id=flex["id"],
         checklist="gym-bag",
         checklist_items=["Towel", "Lock", "Extra socks"],
@@ -2418,16 +2423,14 @@ def test_adding_flex_attaches_a_picked_or_name_match_checklist(
     _write_checklist_library(tmp_path)
     now = datetime(2026, 8, 10, 22, 0)
 
-    picked = add_flex(
-        tmp_path,
+    picked = add_flex(tmp_path, output_dir=tmp_path / "Desktop",
         name="Walk",
         duration_minutes=30,
         checklist="sauna-kit",
         now=now,
     )
-    suggested = add_flex(tmp_path, name="Gym", duration_minutes=60, now=now)
-    declined = add_flex(
-        tmp_path,
+    suggested = add_flex(tmp_path, output_dir=tmp_path / "Desktop", name="Gym", duration_minutes=60, now=now)
+    declined = add_flex(tmp_path, output_dir=tmp_path / "Desktop",
         name="Gym",
         duration_minutes=45,
         checklist=None,
@@ -2453,16 +2456,14 @@ def test_editing_flex_can_change_clear_or_suggest_a_checklist(
     _write_defaults(tmp_path)
     _write_checklist_library(tmp_path)
     now = datetime(2026, 8, 10, 22, 0)
-    added = add_flex(
-        tmp_path, name="Walk", duration_minutes=30, checklist=None, now=now
+    added = add_flex(tmp_path, output_dir=tmp_path / "Desktop", name="Walk", duration_minutes=30, checklist=None, now=now
     )
     item_id = added["flexes"][0]["id"]
 
-    changed = edit_flex(tmp_path, item_id=item_id, checklist="sauna-kit", now=now)
-    suggested = edit_flex(
-        tmp_path, item_id=item_id, name="Gym", checklist=None, now=now
+    changed = edit_flex(tmp_path, output_dir=tmp_path / "Desktop", item_id=item_id, checklist="sauna-kit", now=now)
+    suggested = edit_flex(tmp_path, output_dir=tmp_path / "Desktop", item_id=item_id, name="Gym", checklist=None, now=now
     )
-    named = edit_flex(tmp_path, item_id=item_id, name="Gym", now=now)
+    named = edit_flex(tmp_path, output_dir=tmp_path / "Desktop", item_id=item_id, name="Gym", now=now)
     flushed = json.loads(
         (tmp_path / "data" / "session.json").read_text(encoding="utf-8")
     )
@@ -2491,8 +2492,8 @@ def test_drafts_cannot_carry_a_checklist(tmp_path: Path) -> None:
         },
     )
 
-    view = session_view(tmp_path, now=datetime(2026, 8, 10, 22, 0))
-    document = load_session(tmp_path, now=datetime(2026, 8, 10, 22, 0))
+    view = session_view(tmp_path, output_dir=tmp_path / "Desktop", now=datetime(2026, 8, 10, 22, 0))
+    document = load_session(tmp_path, output_dir=tmp_path / "Desktop", now=datetime(2026, 8, 10, 22, 0))
 
     assert view["drafts"] == [{"id": "d1", "name": "Gym"}]
     assert "checklist" not in view["drafts"][0]
@@ -2502,10 +2503,10 @@ def test_drafts_cannot_carry_a_checklist(tmp_path: Path) -> None:
 def test_undo_of_add_restores_the_previous_session(tmp_path: Path) -> None:
     _write_defaults(tmp_path)
     now = datetime(2026, 8, 10, 22, 0)
-    added = add_flex(tmp_path, name="Walk", duration_minutes=30, now=now)
+    added = add_flex(tmp_path, output_dir=tmp_path / "Desktop", name="Walk", duration_minutes=30, now=now)
 
-    view = undo_session(tmp_path, now=now)
-    document = load_session(tmp_path, now=now)
+    view = undo_session(tmp_path, output_dir=tmp_path / "Desktop", now=now)
+    document = load_session(tmp_path, output_dir=tmp_path / "Desktop", now=now)
 
     assert added["flexes"][0]["name"] == "Walk"
     assert view["flexes"] == []
@@ -2522,11 +2523,11 @@ def test_undo_of_add_restores_the_previous_session(tmp_path: Path) -> None:
 def test_redo_restores_the_undone_session(tmp_path: Path) -> None:
     _write_defaults(tmp_path)
     now = datetime(2026, 8, 10, 22, 0)
-    added = add_flex(tmp_path, name="Walk", duration_minutes=30, now=now)
-    undo_session(tmp_path, now=now)
+    added = add_flex(tmp_path, output_dir=tmp_path / "Desktop", name="Walk", duration_minutes=30, now=now)
+    undo_session(tmp_path, output_dir=tmp_path / "Desktop", now=now)
 
-    view = redo_session(tmp_path, now=now)
-    document = load_session(tmp_path, now=now)
+    view = redo_session(tmp_path, output_dir=tmp_path / "Desktop", now=now)
+    document = load_session(tmp_path, output_dir=tmp_path / "Desktop", now=now)
 
     assert view["flexes"] == added["flexes"]
     assert view["flexes"][0]["id"] == added["flexes"][0]["id"]
@@ -2540,12 +2541,12 @@ def test_redo_restores_the_undone_session(tmp_path: Path) -> None:
 def test_a_new_mutation_after_undo_clears_redo(tmp_path: Path) -> None:
     _write_defaults(tmp_path)
     now = datetime(2026, 8, 10, 22, 0)
-    add_flex(tmp_path, name="Walk", duration_minutes=30, now=now)
-    undo_session(tmp_path, now=now)
-    add_draft(tmp_path, name="Call dentist", now=now)
+    add_flex(tmp_path, output_dir=tmp_path / "Desktop", name="Walk", duration_minutes=30, now=now)
+    undo_session(tmp_path, output_dir=tmp_path / "Desktop", now=now)
+    add_draft(tmp_path, output_dir=tmp_path / "Desktop", name="Call dentist", now=now)
 
-    view = redo_session(tmp_path, now=now)
-    document = load_session(tmp_path, now=now)
+    view = redo_session(tmp_path, output_dir=tmp_path / "Desktop", now=now)
+    document = load_session(tmp_path, output_dir=tmp_path / "Desktop", now=now)
 
     assert [draft["name"] for draft in view["drafts"]] == ["Call dentist"]
     assert view["flexes"] == []
@@ -2557,7 +2558,7 @@ def test_undo_of_empty_stack_is_a_noop(tmp_path: Path) -> None:
     _write_defaults(tmp_path)
     now = datetime(2026, 8, 10, 22, 0)
 
-    view = undo_session(tmp_path, now=now)
+    view = undo_session(tmp_path, output_dir=tmp_path / "Desktop", now=now)
 
     assert view["can_undo"] is False
     assert view["can_redo"] is False
@@ -2568,10 +2569,10 @@ def test_undo_of_empty_stack_is_a_noop(tmp_path: Path) -> None:
 def test_reset_is_undoable_and_restores_the_same_ids(tmp_path: Path) -> None:
     _write_defaults(tmp_path)
     now = datetime(2026, 8, 10, 22, 0)
-    added = add_flex(tmp_path, name="Walk", duration_minutes=30, now=now)
-    reset = reset_session(tmp_path, now=now)
+    added = add_flex(tmp_path, output_dir=tmp_path / "Desktop", name="Walk", duration_minutes=30, now=now)
+    reset = reset_session(tmp_path, output_dir=tmp_path / "Desktop", now=now)
 
-    view = undo_session(tmp_path, now=now)
+    view = undo_session(tmp_path, output_dir=tmp_path / "Desktop", now=now)
 
     assert reset["flexes"] == []
     assert reset["can_undo"] is True
@@ -2585,13 +2586,13 @@ def test_reset_is_undoable_and_restores_the_same_ids(tmp_path: Path) -> None:
 def test_oldest_undo_step_ages_off_after_twenty(tmp_path: Path) -> None:
     _write_defaults(tmp_path)
     now = datetime(2026, 8, 10, 22, 0)
-    first = add_draft(tmp_path, name="keep-me", now=now)
+    first = add_draft(tmp_path, output_dir=tmp_path / "Desktop", name="keep-me", now=now)
     for index in range(20):
-        add_draft(tmp_path, name=f"later-{index}", now=now)
+        add_draft(tmp_path, output_dir=tmp_path / "Desktop", name=f"later-{index}", now=now)
 
     for _ in range(20):
-        undo_session(tmp_path, now=now)
-    view = undo_session(tmp_path, now=now)
+        undo_session(tmp_path, output_dir=tmp_path / "Desktop", now=now)
+    view = undo_session(tmp_path, output_dir=tmp_path / "Desktop", now=now)
 
     names = [draft["name"] for draft in view["drafts"]]
     assert "keep-me" in names
@@ -2605,17 +2606,16 @@ def test_submit_is_not_an_undo_step_and_does_not_touch_the_stack(
 ) -> None:
     _write_defaults(tmp_path)
     now = datetime(2026, 8, 10, 22, 0)
-    added = add_anchor(
-        tmp_path, name="Gym", start="18:00", duration_minutes=90, now=now
+    added = add_anchor(tmp_path, output_dir=tmp_path / "Desktop", name="Gym", start="18:00", duration_minutes=90, now=now
     )
-    before = load_session(tmp_path, now=now)
+    before = load_session(tmp_path, output_dir=tmp_path / "Desktop", now=now)
 
-    submit_session(tmp_path, now=now)
-    after = load_session(tmp_path, now=now)
+    submit_session(tmp_path, output_dir=tmp_path / "Desktop", now=now)
+    after = load_session(tmp_path, output_dir=tmp_path / "Desktop", now=now)
 
     assert after["undo"] == before["undo"]
     assert after["anchors"] == _without_kind(added["anchors"])
-    assert (tmp_path / "plans" / "2026-08-11.html").exists()
+    assert (tmp_path / "Desktop" / PLAN_FILENAME).exists()
 
 
 def test_undo_after_submit_restores_session_and_leaves_plan_html(
@@ -2623,12 +2623,12 @@ def test_undo_after_submit_restores_session_and_leaves_plan_html(
 ) -> None:
     _write_defaults(tmp_path)
     now = datetime(2026, 8, 10, 22, 0)
-    added = add_flex(tmp_path, name="Walk", duration_minutes=30, now=now)
-    drop_flex(tmp_path, item_id=added["flexes"][0]["id"], now=now)
-    plan_path = submit_session(tmp_path, now=now)
+    added = add_flex(tmp_path, output_dir=tmp_path / "Desktop", name="Walk", duration_minutes=30, now=now)
+    drop_flex(tmp_path, output_dir=tmp_path / "Desktop", item_id=added["flexes"][0]["id"], now=now)
+    plan_path = submit_session(tmp_path, output_dir=tmp_path / "Desktop", now=now)
     submitted = plan_path.read_text(encoding="utf-8")
 
-    view = undo_session(tmp_path, now=now)
+    view = undo_session(tmp_path, output_dir=tmp_path / "Desktop", now=now)
 
     assert view["flexes"] == added["flexes"]
     assert view["flexes"][0]["id"] == added["flexes"][0]["id"]
@@ -2640,9 +2640,9 @@ def test_undo_of_template_apply_is_one_step(tmp_path: Path) -> None:
     _write_defaults(tmp_path)
     _write_tuesday_template(tmp_path)
     now = datetime(2026, 8, 10, 22, 0)
-    applied = apply_template(tmp_path, now=now)
+    applied = apply_template(tmp_path, output_dir=tmp_path / "Desktop", now=now)
 
-    view = undo_session(tmp_path, now=now)
+    view = undo_session(tmp_path, output_dir=tmp_path / "Desktop", now=now)
 
     assert applied["template_offer"] == "accepted"
     assert len(applied["anchors"]) == 1
@@ -2660,46 +2660,44 @@ def test_undo_restores_edits_drop_place_change_duration_and_promote(
     _write_defaults(tmp_path)
     _write_checklist_library(tmp_path)
     now = datetime(2026, 8, 10, 22, 0)
-    flex = add_flex(tmp_path, name="Walk", duration_minutes=30, now=now)
+    flex = add_flex(tmp_path, output_dir=tmp_path / "Desktop", name="Walk", duration_minutes=30, now=now)
     flex_id = flex["flexes"][0]["id"]
-    edit_flex(
-        tmp_path,
+    edit_flex(tmp_path, output_dir=tmp_path / "Desktop",
         item_id=flex_id,
         name="Long walk",
         duration_minutes=45,
         checklist="gym-bag",
         now=now,
     )
-    undo_session(tmp_path, now=now)
-    assert session_view(tmp_path, now=now)["flexes"][0]["name"] == "Walk"
-    assert session_view(tmp_path, now=now)["flexes"][0]["checklist"] is None
+    undo_session(tmp_path, output_dir=tmp_path / "Desktop", now=now)
+    assert session_view(tmp_path, output_dir=tmp_path / "Desktop", now=now)["flexes"][0]["name"] == "Walk"
+    assert session_view(tmp_path, output_dir=tmp_path / "Desktop", now=now)["flexes"][0]["checklist"] is None
 
-    place_flex(tmp_path, item_id=flex_id, start="07:00", now=now)
-    undo_session(tmp_path, now=now)
-    assert session_view(tmp_path, now=now)["flexes"][0]["start"] is None
+    place_flex(tmp_path, output_dir=tmp_path / "Desktop", item_id=flex_id, start="07:00", now=now)
+    undo_session(tmp_path, output_dir=tmp_path / "Desktop", now=now)
+    assert session_view(tmp_path, output_dir=tmp_path / "Desktop", now=now)["flexes"][0]["start"] is None
 
-    change_flex_duration(tmp_path, item_id=flex_id, duration_minutes=10, now=now)
-    undo_session(tmp_path, now=now)
-    assert session_view(tmp_path, now=now)["flexes"][0]["duration_minutes"] == 30
+    change_flex_duration(tmp_path, output_dir=tmp_path / "Desktop", item_id=flex_id, duration_minutes=10, now=now)
+    undo_session(tmp_path, output_dir=tmp_path / "Desktop", now=now)
+    assert session_view(tmp_path, output_dir=tmp_path / "Desktop", now=now)["flexes"][0]["duration_minutes"] == 30
 
-    drop_flex(tmp_path, item_id=flex_id, now=now)
-    undo_session(tmp_path, now=now)
-    assert session_view(tmp_path, now=now)["flexes"][0]["id"] == flex_id
+    drop_flex(tmp_path, output_dir=tmp_path / "Desktop", item_id=flex_id, now=now)
+    undo_session(tmp_path, output_dir=tmp_path / "Desktop", now=now)
+    assert session_view(tmp_path, output_dir=tmp_path / "Desktop", now=now)["flexes"][0]["id"] == flex_id
 
-    edit_bounds(tmp_path, wake="07:00", now=now)
-    undo_session(tmp_path, now=now)
-    assert session_view(tmp_path, now=now)["bounds"]["wake"] == "06:30"
+    edit_bounds(tmp_path, output_dir=tmp_path / "Desktop", wake="07:00", now=now)
+    undo_session(tmp_path, output_dir=tmp_path / "Desktop", now=now)
+    assert session_view(tmp_path, output_dir=tmp_path / "Desktop", now=now)["bounds"]["wake"] == "06:30"
 
-    draft = add_draft(tmp_path, name="Call dentist", now=now)
-    promote_draft(
-        tmp_path,
+    draft = add_draft(tmp_path, output_dir=tmp_path / "Desktop", name="Call dentist", now=now)
+    promote_draft(tmp_path, output_dir=tmp_path / "Desktop",
         item_id=draft["drafts"][0]["id"],
         kind="flex",
         duration_minutes=20,
         now=now,
     )
-    undo_session(tmp_path, now=now)
-    restored = session_view(tmp_path, now=now)
+    undo_session(tmp_path, output_dir=tmp_path / "Desktop", now=now)
+    restored = session_view(tmp_path, output_dir=tmp_path / "Desktop", now=now)
     assert restored["drafts"][0]["id"] == draft["drafts"][0]["id"]
     assert restored["drafts"][0]["name"] == "Call dentist"
 
@@ -2708,9 +2706,9 @@ def test_undo_of_template_decline_restores_pending_offer(tmp_path: Path) -> None
     _write_defaults(tmp_path)
     _write_tuesday_template(tmp_path)
     now = datetime(2026, 8, 10, 22, 0)
-    declined = decline_template(tmp_path, now=now)
+    declined = decline_template(tmp_path, output_dir=tmp_path / "Desktop", now=now)
 
-    view = undo_session(tmp_path, now=now)
+    view = undo_session(tmp_path, output_dir=tmp_path / "Desktop", now=now)
 
     assert declined["template_offer"] == "declined"
     assert declined["show_template_offer"] is False
@@ -2722,12 +2720,12 @@ def test_undo_of_template_decline_restores_pending_offer(tmp_path: Path) -> None
 def test_undo_stack_survives_same_night_resume(tmp_path: Path) -> None:
     _write_defaults(tmp_path)
     evening = datetime(2026, 8, 10, 22, 0)
-    added = add_flex(tmp_path, name="Walk", duration_minutes=30, now=evening)
-    drop_flex(tmp_path, item_id=added["flexes"][0]["id"], now=evening)
+    added = add_flex(tmp_path, output_dir=tmp_path / "Desktop", name="Walk", duration_minutes=30, now=evening)
+    drop_flex(tmp_path, output_dir=tmp_path / "Desktop", item_id=added["flexes"][0]["id"], now=evening)
 
     later = datetime(2026, 8, 10, 23, 30)
-    resumed = load_session(tmp_path, now=later)
-    view = undo_session(tmp_path, now=later)
+    resumed = load_session(tmp_path, output_dir=tmp_path / "Desktop", now=later)
+    view = undo_session(tmp_path, output_dir=tmp_path / "Desktop", now=later)
 
     assert resumed["flexes"] == []
     assert len(resumed["undo"]["past"]) >= 1
@@ -2770,7 +2768,7 @@ def test_apply_named_day_template_seeds_a_blank_session(tmp_path: Path) -> None:
     _write_named_day_template(tmp_path, "travel-day")
     now = datetime(2026, 8, 10, 22, 0)
 
-    view = apply_named_day_template(tmp_path, template_id="travel-day", now=now)
+    view = apply_named_day_template(tmp_path, output_dir=tmp_path / "Desktop", template_id="travel-day", now=now)
 
     assert [anchor["name"] for anchor in view["anchors"]] == ["Travel prep"]
     assert [flex["name"] for flex in view["flexes"]] == ["Pack"]
@@ -2783,9 +2781,9 @@ def test_apply_named_day_template_is_a_no_op_when_session_has_items(
     _write_defaults(tmp_path)
     _write_named_day_template(tmp_path, "travel-day")
     now = datetime(2026, 8, 10, 22, 0)
-    added = add_flex(tmp_path, name="Walk", duration_minutes=30, now=now)
+    added = add_flex(tmp_path, output_dir=tmp_path / "Desktop", name="Walk", duration_minutes=30, now=now)
 
-    view = apply_named_day_template(tmp_path, template_id="travel-day", now=now)
+    view = apply_named_day_template(tmp_path, output_dir=tmp_path / "Desktop", template_id="travel-day", now=now)
 
     assert [flex["name"] for flex in view["flexes"]] == ["Walk"]
     assert view["flexes"][0]["id"] == added["flexes"][0]["id"]
@@ -2797,7 +2795,7 @@ def test_apply_named_day_template_is_a_no_op_when_template_is_missing(
     _write_defaults(tmp_path)
     now = datetime(2026, 8, 10, 22, 0)
 
-    view = apply_named_day_template(tmp_path, template_id="does-not-exist", now=now)
+    view = apply_named_day_template(tmp_path, output_dir=tmp_path / "Desktop", template_id="does-not-exist", now=now)
 
     assert view["anchors"] == []
     assert view["flexes"] == []
@@ -2808,7 +2806,7 @@ def test_insert_activity_template_adds_an_anchor_and_flushes(tmp_path: Path) -> 
     _write_activity_template(tmp_path, "therapy", name="Therapy", duration=50, start="16:00")
     now = datetime(2026, 8, 10, 22, 0)
 
-    view = insert_activity_template(tmp_path, activity_id="therapy", now=now)
+    view = insert_activity_template(tmp_path, output_dir=tmp_path / "Desktop", activity_id="therapy", now=now)
     document = json.loads(
         (tmp_path / "data" / "session.json").read_text(encoding="utf-8")
     )
@@ -2826,7 +2824,7 @@ def test_insert_activity_template_adds_a_flex_when_no_start(tmp_path: Path) -> N
     _write_activity_template(tmp_path, "deep-work", name="Deep work", duration=90)
     now = datetime(2026, 8, 10, 22, 0)
 
-    view = insert_activity_template(tmp_path, activity_id="deep-work", now=now)
+    view = insert_activity_template(tmp_path, output_dir=tmp_path / "Desktop", activity_id="deep-work", now=now)
 
     assert len(view["flexes"]) == 1
     assert view["flexes"][0]["name"] == "Deep work"
@@ -2841,9 +2839,9 @@ def test_insert_activity_template_works_when_session_already_has_items(
     _write_defaults(tmp_path)
     _write_activity_template(tmp_path, "deep-work", name="Deep work", duration=90)
     now = datetime(2026, 8, 10, 22, 0)
-    add_flex(tmp_path, name="Walk", duration_minutes=30, now=now)
+    add_flex(tmp_path, output_dir=tmp_path / "Desktop", name="Walk", duration_minutes=30, now=now)
 
-    view = insert_activity_template(tmp_path, activity_id="deep-work", now=now)
+    view = insert_activity_template(tmp_path, output_dir=tmp_path / "Desktop", activity_id="deep-work", now=now)
 
     assert {flex["name"] for flex in view["flexes"]} == {"Walk", "Deep work"}
 
@@ -2852,7 +2850,7 @@ def test_insert_activity_template_is_a_no_op_when_missing(tmp_path: Path) -> Non
     _write_defaults(tmp_path)
     now = datetime(2026, 8, 10, 22, 0)
 
-    view = insert_activity_template(tmp_path, activity_id="does-not-exist", now=now)
+    view = insert_activity_template(tmp_path, output_dir=tmp_path / "Desktop", activity_id="does-not-exist", now=now)
 
     assert view["anchors"] == []
     assert view["flexes"] == []
@@ -2914,10 +2912,10 @@ def test_refresh_icloud_items_adds_new_items_to_an_existing_session(
     monkeypatch.setattr("tomorrow.session.try_import_icloud_items", fake_import)
 
     now = datetime(2026, 8, 10, 22, 0)
-    load_session(tmp_path, now=now)
+    load_session(tmp_path, output_dir=tmp_path / "Desktop", now=now)
     seen.append(1)
 
-    document = refresh_icloud_items(tmp_path, now=now)
+    document = refresh_icloud_items(tmp_path, output_dir=tmp_path / "Desktop", now=now)
 
     assert [draft["name"] for draft in document["drafts"]] == [
         "Call dentist",
@@ -2939,11 +2937,11 @@ def test_refresh_icloud_items_does_not_resurrect_a_deleted_item(
     monkeypatch.setattr("tomorrow.session.try_import_icloud_items", fake_import)
 
     now = datetime(2026, 8, 10, 22, 0)
-    document = load_session(tmp_path, now=now)
+    document = load_session(tmp_path, output_dir=tmp_path / "Desktop", now=now)
     document["drafts"] = []
     save_session(tmp_path, document)
 
-    refreshed = refresh_icloud_items(tmp_path, now=now)
+    refreshed = refresh_icloud_items(tmp_path, output_dir=tmp_path / "Desktop", now=now)
 
     assert refreshed["drafts"] == []
 
@@ -2955,49 +2953,49 @@ def _now() -> datetime:
 def test_add_edit_and_drop_todo_in_insertion_order(tmp_path: Path) -> None:
     _write_defaults(tmp_path)
 
-    add_todo(tmp_path, name="Call dentist", now=_now())
-    view = add_todo(tmp_path, name="Pay rent", note="Bank transfer", now=_now())
+    add_todo(tmp_path, output_dir=tmp_path / "Desktop", name="Call dentist", now=_now())
+    view = add_todo(tmp_path, output_dir=tmp_path / "Desktop", name="Pay rent", note="Bank transfer", now=_now())
 
     assert [item["name"] for item in view["todos"]] == ["Call dentist", "Pay rent"]
     assert view["todos"][1]["note"] == "Bank transfer"
 
     first_id = view["todos"][0]["id"]
-    view = edit_todo(tmp_path, item_id=first_id, name="Call the dentist", note="555-1234", now=_now())
+    view = edit_todo(tmp_path, output_dir=tmp_path / "Desktop", item_id=first_id, name="Call the dentist", note="555-1234", now=_now())
     assert view["todos"][0]["name"] == "Call the dentist"
     assert view["todos"][0]["note"] == "555-1234"
 
-    view = drop_todo(tmp_path, item_id=first_id, now=_now())
+    view = drop_todo(tmp_path, output_dir=tmp_path / "Desktop", item_id=first_id, now=_now())
     assert [item["name"] for item in view["todos"]] == ["Pay rent"]
 
 
 def test_undo_redo_covers_todo_add_edit_drop(tmp_path: Path) -> None:
     _write_defaults(tmp_path)
 
-    view = add_todo(tmp_path, name="Call dentist", now=_now())
+    view = add_todo(tmp_path, output_dir=tmp_path / "Desktop", name="Call dentist", now=_now())
     item_id = view["todos"][0]["id"]
-    edit_todo(tmp_path, item_id=item_id, name="Call the dentist", now=_now())
-    drop_todo(tmp_path, item_id=item_id, now=_now())
+    edit_todo(tmp_path, output_dir=tmp_path / "Desktop", item_id=item_id, name="Call the dentist", now=_now())
+    drop_todo(tmp_path, output_dir=tmp_path / "Desktop", item_id=item_id, now=_now())
 
-    view = undo_session(tmp_path, now=_now())
+    view = undo_session(tmp_path, output_dir=tmp_path / "Desktop", now=_now())
     assert [item["name"] for item in view["todos"]] == ["Call the dentist"]
 
-    view = undo_session(tmp_path, now=_now())
+    view = undo_session(tmp_path, output_dir=tmp_path / "Desktop", now=_now())
     assert [item["name"] for item in view["todos"]] == ["Call dentist"]
 
-    view = undo_session(tmp_path, now=_now())
+    view = undo_session(tmp_path, output_dir=tmp_path / "Desktop", now=_now())
     assert view["todos"] == []
 
-    view = redo_session(tmp_path, now=_now())
+    view = redo_session(tmp_path, output_dir=tmp_path / "Desktop", now=_now())
     assert [item["name"] for item in view["todos"]] == ["Call dentist"]
 
 
 def test_promote_draft_to_todo_carries_imported_note(tmp_path: Path) -> None:
     _write_defaults(tmp_path)
-    add_draft(tmp_path, name="Call dentist", now=_now())
-    view = session_view(tmp_path, now=_now())
+    add_draft(tmp_path, output_dir=tmp_path / "Desktop", name="Call dentist", now=_now())
+    view = session_view(tmp_path, output_dir=tmp_path / "Desktop", now=_now())
     draft_id = view["drafts"][0]["id"]
 
-    view = promote_draft(tmp_path, item_id=draft_id, kind="todo", now=_now())
+    view = promote_draft(tmp_path, output_dir=tmp_path / "Desktop", item_id=draft_id, kind="todo", now=_now())
 
     assert view["drafts"] == []
     assert [item["name"] for item in view["todos"]] == ["Call dentist"]
@@ -3006,43 +3004,42 @@ def test_promote_draft_to_todo_carries_imported_note(tmp_path: Path) -> None:
 
 def test_todo_to_flex_and_todo_to_anchor_discard_note(tmp_path: Path) -> None:
     _write_defaults(tmp_path)
-    view = add_todo(tmp_path, name="Call dentist", note="555-1234", now=_now())
+    view = add_todo(tmp_path, output_dir=tmp_path / "Desktop", name="Call dentist", note="555-1234", now=_now())
     todo_id = view["todos"][0]["id"]
 
-    view = convert_todo_to_flex(tmp_path, item_id=todo_id, duration_minutes=30, now=_now())
+    view = convert_todo_to_flex(tmp_path, output_dir=tmp_path / "Desktop", item_id=todo_id, duration_minutes=30, now=_now())
     assert view["todos"] == []
     assert len(view["flexes"]) == 1
     assert view["flexes"][0]["name"] == "Call dentist"
     assert view["flexes"][0]["start"] is None
 
-    view = undo_session(tmp_path, now=_now())
+    view = undo_session(tmp_path, output_dir=tmp_path / "Desktop", now=_now())
     assert view["flexes"] == []
     assert view["todos"][0]["note"] == "555-1234"
 
     todo_id = view["todos"][0]["id"]
-    view = convert_todo_to_anchor(
-        tmp_path, item_id=todo_id, start="09:00", duration_minutes=30, now=_now()
+    view = convert_todo_to_anchor(tmp_path, output_dir=tmp_path / "Desktop", item_id=todo_id, start="09:00", duration_minutes=30, now=_now()
     )
     assert view["todos"] == []
     assert len(view["anchors"]) == 1
     assert view["anchors"][0]["start"] == "09:00"
 
-    view = undo_session(tmp_path, now=_now())
+    view = undo_session(tmp_path, output_dir=tmp_path / "Desktop", now=_now())
     assert view["anchors"] == []
     assert view["todos"][0]["note"] == "555-1234"
 
 
 def test_flex_to_todo_detaches_checklist_and_undo_restores_it(tmp_path: Path) -> None:
     _write_defaults(tmp_path)
-    view = add_flex(tmp_path, name="Sauna", duration_minutes=30, checklist="sauna-kit", now=_now())
+    view = add_flex(tmp_path, output_dir=tmp_path / "Desktop", name="Sauna", duration_minutes=30, checklist="sauna-kit", now=_now())
     flex_id = view["flexes"][0]["id"]
 
-    view = convert_flex_to_todo(tmp_path, item_id=flex_id, now=_now())
+    view = convert_flex_to_todo(tmp_path, output_dir=tmp_path / "Desktop", item_id=flex_id, now=_now())
     assert view["flexes"] == []
     assert view["todos"][0]["name"] == "Sauna"
     assert view["todos"][0]["note"] == ""
 
-    view = undo_session(tmp_path, now=_now())
+    view = undo_session(tmp_path, output_dir=tmp_path / "Desktop", now=_now())
     assert view["todos"] == []
     assert view["flexes"][0]["checklist"] == "sauna-kit"
 
@@ -3051,6 +3048,7 @@ def test_flex_to_todo_discards_literal_rows_and_undo_restores_them(tmp_path: Pat
     _write_defaults(tmp_path)
     view = add_flex(
         tmp_path,
+        output_dir=tmp_path / "Desktop",
         name="Pack for trip",
         duration_minutes=30,
         checklist_items=["Passport", "Charger", "Boarding pass"],
@@ -3059,13 +3057,13 @@ def test_flex_to_todo_discards_literal_rows_and_undo_restores_them(tmp_path: Pat
     flex_id = view["flexes"][0]["id"]
     assert view["flexes"][0]["checklist_kind"] == "literal"
 
-    view = convert_flex_to_todo(tmp_path, item_id=flex_id, now=_now())
+    view = convert_flex_to_todo(tmp_path, output_dir=tmp_path / "Desktop", item_id=flex_id, now=_now())
     assert view["flexes"] == []
     assert view["todos"][0]["name"] == "Pack for trip"
     assert view["todos"][0]["note"] == ""
     assert "Passport" not in view["todos"][0]["note"]
 
-    view = undo_session(tmp_path, now=_now())
+    view = undo_session(tmp_path, output_dir=tmp_path / "Desktop", now=_now())
     assert view["todos"] == []
     assert view["flexes"][0]["checklist_items"] == ["Passport", "Charger", "Boarding pass"]
     assert view["flexes"][0]["checklist_kind"] == "literal"
@@ -3073,11 +3071,11 @@ def test_flex_to_todo_discards_literal_rows_and_undo_restores_them(tmp_path: Pat
 
 def test_flex_to_todo_with_no_checklist_converts_without_incident(tmp_path: Path) -> None:
     _write_defaults(tmp_path)
-    view = add_flex(tmp_path, name="Errand", duration_minutes=30, now=_now())
+    view = add_flex(tmp_path, output_dir=tmp_path / "Desktop", name="Errand", duration_minutes=30, now=_now())
     flex_id = view["flexes"][0]["id"]
     assert view["flexes"][0]["checklist_kind"] is None
 
-    view = convert_flex_to_todo(tmp_path, item_id=flex_id, now=_now())
+    view = convert_flex_to_todo(tmp_path, output_dir=tmp_path / "Desktop", item_id=flex_id, now=_now())
     assert view["flexes"] == []
     assert view["todos"][0]["name"] == "Errand"
     assert view["todos"][0]["note"] == ""
@@ -3086,22 +3084,22 @@ def test_flex_to_todo_with_no_checklist_converts_without_incident(tmp_path: Path
 def test_reset_clears_todos_and_todos_only_session_is_not_blank(tmp_path: Path) -> None:
     _write_defaults(tmp_path)
     _write_tuesday_template(tmp_path)
-    add_todo(tmp_path, name="Call dentist", now=_now())
+    add_todo(tmp_path, output_dir=tmp_path / "Desktop", name="Call dentist", now=_now())
 
-    view = apply_named_day_template(tmp_path, template_id="tuesday", now=_now())
+    view = apply_named_day_template(tmp_path, output_dir=tmp_path / "Desktop", template_id="tuesday", now=_now())
     assert view["anchors"] == []
     assert view["flexes"] == []
     assert [item["name"] for item in view["todos"]] == ["Call dentist"]
 
-    view = reset_session(tmp_path, now=_now())
+    view = reset_session(tmp_path, output_dir=tmp_path / "Desktop", now=_now())
     assert view["todos"] == []
 
 
 def test_submit_succeeds_with_todos_and_still_refuses_with_a_draft(tmp_path: Path) -> None:
     _write_defaults(tmp_path)
-    add_todo(tmp_path, name="Call dentist", note="Ask about Friday\nBring insurance card", now=_now())
+    add_todo(tmp_path, output_dir=tmp_path / "Desktop", name="Call dentist", note="Ask about Friday\nBring insurance card", now=_now())
 
-    plan_path = submit_session(tmp_path, now=_now())
+    plan_path = submit_session(tmp_path, output_dir=tmp_path / "Desktop", now=_now())
     content = plan_path.read_text(encoding="utf-8")
 
     assert '<div class="prep-heading">To-dos</div>' in content
@@ -3109,15 +3107,15 @@ def test_submit_succeeds_with_todos_and_still_refuses_with_a_draft(tmp_path: Pat
     assert "Ask about Friday" in content
     assert "Bring insurance card" in content
 
-    add_draft(tmp_path, name="Undecided", now=_now())
+    add_draft(tmp_path, output_dir=tmp_path / "Desktop", name="Undecided", now=_now())
     with pytest.raises(PlanBlockedError):
-        submit_session(tmp_path, now=_now())
+        submit_session(tmp_path, output_dir=tmp_path / "Desktop", now=_now())
 
 
 def test_submit_omits_todos_section_when_there_are_none(tmp_path: Path) -> None:
     _write_defaults(tmp_path)
 
-    plan_path = submit_session(tmp_path, now=_now())
+    plan_path = submit_session(tmp_path, output_dir=tmp_path / "Desktop", now=_now())
     content = plan_path.read_text(encoding="utf-8")
 
     assert "To-dos" not in content
@@ -3137,11 +3135,11 @@ def test_renamed_imported_draft_keeps_its_new_name_across_a_reimport(
     monkeypatch.setattr("tomorrow.session.try_import_icloud_items", fake_import)
 
     now = datetime(2026, 8, 10, 22, 0)
-    seeded = load_session(tmp_path, now=now)
+    seeded = load_session(tmp_path, output_dir=tmp_path / "Desktop", now=now)
     draft_id = seeded["drafts"][0]["id"]
-    edit_draft(tmp_path, item_id=draft_id, name="Dentist re: crown", now=now)
+    edit_draft(tmp_path, output_dir=tmp_path / "Desktop", item_id=draft_id, name="Dentist re: crown", now=now)
 
-    refreshed = refresh_icloud_items(tmp_path, now=now)
+    refreshed = refresh_icloud_items(tmp_path, output_dir=tmp_path / "Desktop", now=now)
 
     assert len(refreshed["drafts"]) == 1
     assert refreshed["drafts"][0]["name"] == "Dentist re: crown"
@@ -3165,7 +3163,7 @@ def test_new_session_holds_one_unplaced_daily_flex_per_daily_activity(
         tmp_path, activity_id="therapy", name="Therapy", duration_minutes=50, start="16:00"
     )
 
-    view = session_view(tmp_path, now=_now())
+    view = session_view(tmp_path, output_dir=tmp_path / "Desktop", now=_now())
 
     daily_flexes = {flex["name"]: flex for flex in view["flexes"]}
     assert set(daily_flexes) == {"Deep Work", "Yoga Nidra"}
@@ -3181,30 +3179,30 @@ def test_reset_re_adds_daily_activities_and_undo_restores_prior_session(
 ) -> None:
     _write_defaults(tmp_path)
     _write_daily_activities(tmp_path)
-    session_view(tmp_path, now=_now())
+    session_view(tmp_path, output_dir=tmp_path / "Desktop", now=_now())
 
-    view = session_view(tmp_path, now=_now())
+    view = session_view(tmp_path, output_dir=tmp_path / "Desktop", now=_now())
     dropped_id = next(f["id"] for f in view["flexes"] if f["name"] == "Deep Work")
-    view = drop_flex(tmp_path, item_id=dropped_id, now=_now())
+    view = drop_flex(tmp_path, output_dir=tmp_path / "Desktop", item_id=dropped_id, now=_now())
     assert "Deep Work" not in [f["name"] for f in view["flexes"]]
 
-    reset = reset_session(tmp_path, now=_now())
+    reset = reset_session(tmp_path, output_dir=tmp_path / "Desktop", now=_now())
     assert sorted(f["name"] for f in reset["flexes"]) == ["Deep Work", "Yoga Nidra"]
 
-    undone = undo_session(tmp_path, now=_now())
+    undone = undo_session(tmp_path, output_dir=tmp_path / "Desktop", now=_now())
     assert "Deep Work" not in [f["name"] for f in undone["flexes"]]
 
 
 def test_dropping_a_daily_flex_then_undo_restores_it(tmp_path: Path) -> None:
     _write_defaults(tmp_path)
     _write_daily_activities(tmp_path)
-    view = session_view(tmp_path, now=_now())
+    view = session_view(tmp_path, output_dir=tmp_path / "Desktop", now=_now())
     item_id = next(f["id"] for f in view["flexes"] if f["name"] == "Deep Work")
 
-    dropped = drop_flex(tmp_path, item_id=item_id, now=_now())
+    dropped = drop_flex(tmp_path, output_dir=tmp_path / "Desktop", item_id=item_id, now=_now())
     assert "Deep Work" not in [f["name"] for f in dropped["flexes"]]
 
-    restored = undo_session(tmp_path, now=_now())
+    restored = undo_session(tmp_path, output_dir=tmp_path / "Desktop", now=_now())
     assert item_id in [f["id"] for f in restored["flexes"]]
 
 
@@ -3213,17 +3211,17 @@ def test_editing_activity_template_after_session_exists_does_not_change_session(
 ) -> None:
     _write_defaults(tmp_path)
     _write_daily_activities(tmp_path)
-    session_view(tmp_path, now=_now())
+    session_view(tmp_path, output_dir=tmp_path / "Desktop", now=_now())
 
     save_activity_template(
         tmp_path, activity_id="deep-work", name="Deep Work", duration_minutes=120, daily=True
     )
 
-    view = session_view(tmp_path, now=_now())
+    view = session_view(tmp_path, output_dir=tmp_path / "Desktop", now=_now())
     deep_work = next(f for f in view["flexes"] if f["name"] == "Deep Work")
     assert deep_work["duration_minutes"] == 90
 
-    reset = reset_session(tmp_path, now=_now())
+    reset = reset_session(tmp_path, output_dir=tmp_path / "Desktop", now=_now())
     deep_work = next(f for f in reset["flexes"] if f["name"] == "Deep Work")
     assert deep_work["duration_minutes"] == 120
 
@@ -3236,7 +3234,7 @@ def test_non_daily_activity_templates_are_not_added_to_new_session(
         tmp_path, activity_id="deep-work", name="Deep Work", duration_minutes=90
     )
 
-    view = session_view(tmp_path, now=_now())
+    view = session_view(tmp_path, output_dir=tmp_path / "Desktop", now=_now())
 
     assert view["flexes"] == []
 
@@ -3246,10 +3244,10 @@ def test_inserting_a_daily_activity_by_hand_adds_a_second_copy_without_source(
 ) -> None:
     _write_defaults(tmp_path)
     _write_daily_activities(tmp_path)
-    view = session_view(tmp_path, now=_now())
+    view = session_view(tmp_path, output_dir=tmp_path / "Desktop", now=_now())
     assert len([f for f in view["flexes"] if f["name"] == "Deep Work"]) == 1
 
-    view = insert_activity_template(tmp_path, activity_id="deep-work", now=_now())
+    view = insert_activity_template(tmp_path, output_dir=tmp_path / "Desktop", activity_id="deep-work", now=_now())
 
     deep_work_copies = [f for f in view["flexes"] if f["name"] == "Deep Work"]
     assert len(deep_work_copies) == 2
@@ -3263,7 +3261,7 @@ def test_weekday_offer_shows_when_session_holds_only_daily_and_icloud_items(
     _write_tuesday_template(tmp_path)
     _write_daily_activities(tmp_path)
 
-    view = session_view(tmp_path, now=_now())
+    view = session_view(tmp_path, output_dir=tmp_path / "Desktop", now=_now())
 
     assert view["flexes"]
     assert view["show_template_offer"] is True
@@ -3272,13 +3270,13 @@ def test_weekday_offer_shows_when_session_holds_only_daily_and_icloud_items(
 def test_plan_html_does_not_include_daily_source_marker(tmp_path: Path) -> None:
     _write_defaults(tmp_path)
     _write_daily_activities(tmp_path)
-    view = session_view(tmp_path, now=_now())
+    view = session_view(tmp_path, output_dir=tmp_path / "Desktop", now=_now())
     item_id = next(f["id"] for f in view["flexes"] if f["name"] == "Deep Work")
-    place_flex(tmp_path, item_id=item_id, start="07:00", now=_now())
+    place_flex(tmp_path, output_dir=tmp_path / "Desktop", item_id=item_id, start="07:00", now=_now())
     other_id = next(f["id"] for f in view["flexes"] if f["name"] == "Yoga Nidra")
-    place_flex(tmp_path, item_id=other_id, start="09:00", now=_now())
+    place_flex(tmp_path, output_dir=tmp_path / "Desktop", item_id=other_id, start="09:00", now=_now())
 
-    plan_path = submit_session(tmp_path, now=_now())
+    plan_path = submit_session(tmp_path, output_dir=tmp_path / "Desktop", now=_now())
     content = plan_path.read_text(encoding="utf-8")
 
     assert "daily" not in content.lower()
@@ -3295,7 +3293,7 @@ def test_apply_removes_daily_flex_duplicated_by_activity_reference(
         '[[flex]]\nactivity = "deep-work"\n', encoding="utf-8"
     )
 
-    view = apply_template(tmp_path, now=_now())
+    view = apply_template(tmp_path, output_dir=tmp_path / "Desktop", now=_now())
 
     deep_work_flexes = [f for f in view["flexes"] if f["name"] == "Deep Work"]
     assert len(deep_work_flexes) == 1
@@ -3315,7 +3313,7 @@ def test_apply_removes_daily_flex_duplicated_by_case_insensitive_name(
         encoding="utf-8",
     )
 
-    view = apply_template(tmp_path, now=_now())
+    view = apply_template(tmp_path, output_dir=tmp_path / "Desktop", now=_now())
 
     assert [f["name"] for f in view["flexes"]] == ["Yoga Nidra"]
     assert view["anchors"][0]["name"] == "deep work"
@@ -3331,12 +3329,12 @@ def test_apply_removes_a_placed_or_resized_daily_flex_when_duplicated(
     (templates / "tuesday.toml").write_text(
         '[[flex]]\nactivity = "deep-work"\n', encoding="utf-8"
     )
-    view = session_view(tmp_path, now=_now())
+    view = session_view(tmp_path, output_dir=tmp_path / "Desktop", now=_now())
     item_id = next(f["id"] for f in view["flexes"] if f["name"] == "Deep Work")
-    place_flex(tmp_path, item_id=item_id, start="07:00", now=_now())
-    change_flex_duration(tmp_path, item_id=item_id, duration_minutes=45, now=_now())
+    place_flex(tmp_path, output_dir=tmp_path / "Desktop", item_id=item_id, start="07:00", now=_now())
+    change_flex_duration(tmp_path, output_dir=tmp_path / "Desktop", item_id=item_id, duration_minutes=45, now=_now())
 
-    view = apply_template(tmp_path, now=_now())
+    view = apply_template(tmp_path, output_dir=tmp_path / "Desktop", now=_now())
 
     assert item_id not in [f["id"] for f in view["flexes"]]
 
@@ -3351,12 +3349,12 @@ def test_undo_after_apply_restores_removed_daily_flex_with_same_id_and_placement
     (templates / "tuesday.toml").write_text(
         '[[flex]]\nactivity = "deep-work"\n', encoding="utf-8"
     )
-    view = session_view(tmp_path, now=_now())
+    view = session_view(tmp_path, output_dir=tmp_path / "Desktop", now=_now())
     item_id = next(f["id"] for f in view["flexes"] if f["name"] == "Deep Work")
-    place_flex(tmp_path, item_id=item_id, start="07:00", now=_now())
+    place_flex(tmp_path, output_dir=tmp_path / "Desktop", item_id=item_id, start="07:00", now=_now())
 
-    apply_template(tmp_path, now=_now())
-    restored = undo_session(tmp_path, now=_now())
+    apply_template(tmp_path, output_dir=tmp_path / "Desktop", now=_now())
+    restored = undo_session(tmp_path, output_dir=tmp_path / "Desktop", now=_now())
 
     restored_flex = next(f for f in restored["flexes"] if f["id"] == item_id)
     assert restored_flex["start"] == "07:00"
@@ -3374,11 +3372,11 @@ def test_apply_does_not_remove_a_hand_added_flex_with_matching_name(
         '[[flex]]\nname = "Deep Work"\nduration = 90\n', encoding="utf-8"
     )
 
-    view = add_flex(tmp_path, name="Deep Work", duration_minutes=90, now=_now())
+    view = add_flex(tmp_path, output_dir=tmp_path / "Desktop", name="Deep Work", duration_minutes=90, now=_now())
     assert view["template_offer"] == "pending"
     assert view["show_template_offer"] is False
 
-    applied = apply_template(tmp_path, now=_now())
+    applied = apply_template(tmp_path, output_dir=tmp_path / "Desktop", now=_now())
     assert applied["template_offer"] == "pending"
     assert [f["name"] for f in applied["flexes"]].count("Deep Work") == 2
 
@@ -3391,6 +3389,7 @@ def test_promote_checklist_writes_a_new_library_checklist_from_an_anchor(
     _write_defaults(tmp_path)
     added = add_anchor(
         tmp_path,
+        output_dir=tmp_path / "Desktop",
         name="6am Taxi",
         start="06:00",
         duration_minutes=15,
@@ -3400,7 +3399,8 @@ def test_promote_checklist_writes_a_new_library_checklist_from_an_anchor(
     item_id = added["anchors"][0]["id"]
 
     view = promote_checklist(
-        tmp_path, item_id=item_id, item_kind="anchor", name="Travel Kit", now=_now()
+        tmp_path,
+        output_dir=tmp_path / "Desktop", item_id=item_id, item_kind="anchor", name="Travel Kit", now=_now()
     )
 
     library = load_checklist_library(tmp_path / "data")
@@ -3427,6 +3427,7 @@ def test_promote_checklist_from_a_flex_leaves_the_flex_literal(tmp_path: Path) -
     _write_defaults(tmp_path)
     added = add_flex(
         tmp_path,
+        output_dir=tmp_path / "Desktop",
         name="Sauna tonight",
         duration_minutes=30,
         checklist_items=["Towel"],
@@ -3435,7 +3436,8 @@ def test_promote_checklist_from_a_flex_leaves_the_flex_literal(tmp_path: Path) -
     item_id = added["flexes"][0]["id"]
 
     view = promote_checklist(
-        tmp_path, item_id=item_id, item_kind="flex", name="Sauna Kit v2", now=_now()
+        tmp_path,
+        output_dir=tmp_path / "Desktop", item_id=item_id, item_kind="flex", name="Sauna Kit v2", now=_now()
     )
 
     library = load_checklist_library(tmp_path / "data")
@@ -3448,6 +3450,7 @@ def test_promote_checklist_leaves_the_finished_plan_identical(tmp_path: Path) ->
     _write_defaults(tmp_path)
     add_anchor(
         tmp_path,
+        output_dir=tmp_path / "Desktop",
         name="6am Taxi",
         start="07:00",
         duration_minutes=15,
@@ -3455,7 +3458,7 @@ def test_promote_checklist_leaves_the_finished_plan_identical(tmp_path: Path) ->
         now=_now(),
     )
 
-    plan_before = submit_session(tmp_path, now=_now())
+    plan_before = submit_session(tmp_path, output_dir=tmp_path / "Desktop", now=_now())
     bytes_before = plan_before.read_bytes()
     plan_before.unlink()
 
@@ -3464,18 +3467,20 @@ def test_promote_checklist_leaves_the_finished_plan_identical(tmp_path: Path) ->
     (tmp_path / "data" / "session.json").unlink()
     add_anchor(
         tmp_path,
+        output_dir=tmp_path / "Desktop",
         name="6am Taxi",
         start="07:00",
         duration_minutes=15,
         checklist_items=["Passport", "Charger"],
         now=_now(),
     )
-    item_id = session_view(tmp_path, now=_now())["anchors"][0]["id"]
+    item_id = session_view(tmp_path, output_dir=tmp_path / "Desktop", now=_now())["anchors"][0]["id"]
     promote_checklist(
-        tmp_path, item_id=item_id, item_kind="anchor", name="Travel Kit", now=_now()
+        tmp_path,
+        output_dir=tmp_path / "Desktop", item_id=item_id, item_kind="anchor", name="Travel Kit", now=_now()
     )
 
-    plan_after = submit_session(tmp_path, now=_now())
+    plan_after = submit_session(tmp_path, output_dir=tmp_path / "Desktop", now=_now())
     bytes_after = plan_after.read_bytes()
 
     assert bytes_before == bytes_after
@@ -3493,6 +3498,7 @@ def test_promote_checklist_rejects_a_colliding_slug_and_leaves_the_file_untouche
 
     added = add_anchor(
         tmp_path,
+        output_dir=tmp_path / "Desktop",
         name="6am Taxi",
         start="06:00",
         duration_minutes=15,
@@ -3504,6 +3510,7 @@ def test_promote_checklist_rejects_a_colliding_slug_and_leaves_the_file_untouche
     with pytest.raises(ValueError):
         promote_checklist(
             tmp_path,
+            output_dir=tmp_path / "Desktop",
             item_id=item_id,
             item_kind="anchor",
             name="Travel Kit",
@@ -3518,6 +3525,7 @@ def test_promote_checklist_does_not_touch_undo_history(tmp_path: Path) -> None:
     _write_defaults(tmp_path)
     added = add_anchor(
         tmp_path,
+        output_dir=tmp_path / "Desktop",
         name="6am Taxi",
         start="06:00",
         duration_minutes=15,
@@ -3528,7 +3536,8 @@ def test_promote_checklist_does_not_touch_undo_history(tmp_path: Path) -> None:
     before_undo = added["can_undo"]
 
     view = promote_checklist(
-        tmp_path, item_id=item_id, item_kind="anchor", name="Travel Kit", now=_now()
+        tmp_path,
+        output_dir=tmp_path / "Desktop", item_id=item_id, item_kind="anchor", name="Travel Kit", now=_now()
     )
 
     assert view["can_undo"] == before_undo

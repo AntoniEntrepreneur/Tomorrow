@@ -51,8 +51,11 @@ from tomorrow.library import (
 )
 from tomorrow.icloud import try_import_icloud_items
 from tomorrow.plan import (
+    ForeignPlanFileError,
     default_plan_date,
+    describe_foreign_plan_file,
     discard_past_plans,
+    ensure_plan_file_not_foreign,
     format_plan_date,
     write_finalized_plan,
 )
@@ -194,14 +197,16 @@ def _seed_icloud_items(repo_root: Path, document: dict) -> bool:
     return added
 
 
-def refresh_icloud_items(repo_root: Path, *, now: datetime | None = None) -> dict:
+def refresh_icloud_items(
+    repo_root: Path, *, output_dir: Path, now: datetime | None = None
+) -> dict:
     """Re-run the iCloud import against the stored Session and persist new items.
 
     Called once per process at startup, so events and reminders added to iCloud
     since the Session was created show up on the next restart.
     """
 
-    document = load_session(repo_root, now=now)
+    document = load_session(repo_root, output_dir=output_dir, now=now)
     if _seed_icloud_items(repo_root, document):
         save_session(repo_root, document)
     return document
@@ -228,8 +233,10 @@ def save_session(repo_root: Path, document: dict) -> None:
     path.write_text(json.dumps(document, indent=2) + "\n", encoding="utf-8")
 
 
-def load_session(repo_root: Path, *, now: datetime | None = None) -> dict:
-    discard_past_plans(repo_root, now=now)
+def load_session(
+    repo_root: Path, *, output_dir: Path, now: datetime | None = None
+) -> dict:
+    discard_past_plans(output_dir=output_dir, now=now)
     blank = _blank_session(repo_root, now=now)
     path = _session_path(repo_root)
     if not path.is_file():
@@ -315,12 +322,13 @@ def _commit(
     document: dict,
     mutate: Callable[[dict], None],
     *,
+    output_dir: Path,
     now: datetime | None,
     opener: Callable[[Request], object],
 ) -> dict:
     _apply_mutation(document, mutate)
     save_session(repo_root, document)
-    return session_view(repo_root, now=now, opener=opener)
+    return session_view(repo_root, output_dir=output_dir, now=now, opener=opener)
 
 
 def _attached_checklist(
@@ -433,10 +441,11 @@ def add_anchor(
     duration_minutes: int,
     checklist: str | None | object = _UNSET,
     checklist_items: object = _UNSET,
+    output_dir: Path,
     now: datetime | None = None,
     opener: Callable[[Request], object] = _default_opener,
 ) -> dict:
-    document = load_session(repo_root, now=now)
+    document = load_session(repo_root, output_dir=output_dir, now=now)
     attached, items = _resolve_checklist(
         repo_root, name, checklist=checklist, checklist_items=checklist_items
     )
@@ -453,7 +462,7 @@ def add_anchor(
             }
         )
 
-    return _commit(repo_root, document, mutate, now=now, opener=opener)
+    return _commit(repo_root, document, mutate, output_dir=output_dir, now=now, opener=opener)
 
 
 def add_flex(
@@ -463,10 +472,11 @@ def add_flex(
     duration_minutes: int,
     checklist: str | None | object = _UNSET,
     checklist_items: object = _UNSET,
+    output_dir: Path,
     now: datetime | None = None,
     opener: Callable[[Request], object] = _default_opener,
 ) -> dict:
-    document = load_session(repo_root, now=now)
+    document = load_session(repo_root, output_dir=output_dir, now=now)
     attached, items = _resolve_checklist(
         repo_root, name, checklist=checklist, checklist_items=checklist_items
     )
@@ -483,13 +493,14 @@ def add_flex(
             }
         )
 
-    return _commit(repo_root, document, mutate, now=now, opener=opener)
+    return _commit(repo_root, document, mutate, output_dir=output_dir, now=now, opener=opener)
 
 
 def insert_activity_template(
     repo_root: Path,
     *,
     activity_id: str,
+    output_dir: Path,
     now: datetime | None = None,
     opener: Callable[[Request], object] = _default_opener,
 ) -> dict:
@@ -499,11 +510,11 @@ def insert_activity_template(
     not only when it is blank.
     """
 
-    document = load_session(repo_root, now=now)
+    document = load_session(repo_root, output_dir=output_dir, now=now)
     library = load_activity_template_library(repo_root / "data")
     activity = library.get(activity_id)
     if activity is None:
-        return session_view(repo_root, now=now, opener=opener)
+        return session_view(repo_root, output_dir=output_dir, now=now, opener=opener)
 
     def mutate(current: dict) -> None:
         if activity.start is not None:
@@ -527,7 +538,7 @@ def insert_activity_template(
                 }
             )
 
-    return _commit(repo_root, document, mutate, now=now, opener=opener)
+    return _commit(repo_root, document, mutate, output_dir=output_dir, now=now, opener=opener)
 
 
 def suggest_activity(
@@ -578,15 +589,16 @@ def add_draft(
     repo_root: Path,
     *,
     name: str,
+    output_dir: Path,
     now: datetime | None = None,
     opener: Callable[[Request], object] = _default_opener,
 ) -> dict:
-    document = load_session(repo_root, now=now)
+    document = load_session(repo_root, output_dir=output_dir, now=now)
 
     def mutate(current: dict) -> None:
         current["drafts"].append({"id": uuid.uuid4().hex, "name": name})
 
-    return _commit(repo_root, document, mutate, now=now, opener=opener)
+    return _commit(repo_root, document, mutate, output_dir=output_dir, now=now, opener=opener)
 
 
 def _new_todo(name: str, note: str = "") -> dict:
@@ -598,15 +610,16 @@ def add_todo(
     *,
     name: str,
     note: str = "",
+    output_dir: Path,
     now: datetime | None = None,
     opener: Callable[[Request], object] = _default_opener,
 ) -> dict:
-    document = load_session(repo_root, now=now)
+    document = load_session(repo_root, output_dir=output_dir, now=now)
 
     def mutate(current: dict) -> None:
         current["todos"].append(_new_todo(name, note))
 
-    return _commit(repo_root, document, mutate, now=now, opener=opener)
+    return _commit(repo_root, document, mutate, output_dir=output_dir, now=now, opener=opener)
 
 
 def edit_todo(
@@ -615,10 +628,11 @@ def edit_todo(
     item_id: str,
     name: str | None = None,
     note: str | None = None,
+    output_dir: Path,
     now: datetime | None = None,
     opener: Callable[[Request], object] = _default_opener,
 ) -> dict:
-    document = load_session(repo_root, now=now)
+    document = load_session(repo_root, output_dir=output_dir, now=now)
 
     def mutate(current: dict) -> None:
         todo = _item_by_id(current["todos"], item_id)
@@ -627,22 +641,23 @@ def edit_todo(
         if note is not None:
             todo["note"] = note
 
-    return _commit(repo_root, document, mutate, now=now, opener=opener)
+    return _commit(repo_root, document, mutate, output_dir=output_dir, now=now, opener=opener)
 
 
 def drop_todo(
     repo_root: Path,
     *,
     item_id: str,
+    output_dir: Path,
     now: datetime | None = None,
     opener: Callable[[Request], object] = _default_opener,
 ) -> dict:
-    document = load_session(repo_root, now=now)
+    document = load_session(repo_root, output_dir=output_dir, now=now)
 
     def mutate(current: dict) -> None:
         _drop_keyed(current, "todos", item_id)
 
-    return _commit(repo_root, document, mutate, now=now, opener=opener)
+    return _commit(repo_root, document, mutate, output_dir=output_dir, now=now, opener=opener)
 
 
 def convert_todo_to_flex(
@@ -650,10 +665,11 @@ def convert_todo_to_flex(
     *,
     item_id: str,
     duration_minutes: int,
+    output_dir: Path,
     now: datetime | None = None,
     opener: Callable[[Request], object] = _default_opener,
 ) -> dict:
-    document = load_session(repo_root, now=now)
+    document = load_session(repo_root, output_dir=output_dir, now=now)
 
     def mutate(current: dict) -> None:
         todo = _drop_keyed(current, "todos", item_id)
@@ -667,7 +683,7 @@ def convert_todo_to_flex(
             }
         )
 
-    return _commit(repo_root, document, mutate, now=now, opener=opener)
+    return _commit(repo_root, document, mutate, output_dir=output_dir, now=now, opener=opener)
 
 
 def convert_todo_to_anchor(
@@ -676,10 +692,11 @@ def convert_todo_to_anchor(
     item_id: str,
     start: str,
     duration_minutes: int,
+    output_dir: Path,
     now: datetime | None = None,
     opener: Callable[[Request], object] = _default_opener,
 ) -> dict:
-    document = load_session(repo_root, now=now)
+    document = load_session(repo_root, output_dir=output_dir, now=now)
 
     def mutate(current: dict) -> None:
         todo = _drop_keyed(current, "todos", item_id)
@@ -693,23 +710,24 @@ def convert_todo_to_anchor(
             }
         )
 
-    return _commit(repo_root, document, mutate, now=now, opener=opener)
+    return _commit(repo_root, document, mutate, output_dir=output_dir, now=now, opener=opener)
 
 
 def convert_flex_to_todo(
     repo_root: Path,
     *,
     item_id: str,
+    output_dir: Path,
     now: datetime | None = None,
     opener: Callable[[Request], object] = _default_opener,
 ) -> dict:
-    document = load_session(repo_root, now=now)
+    document = load_session(repo_root, output_dir=output_dir, now=now)
 
     def mutate(current: dict) -> None:
         flex = _drop_keyed(current, "flexes", item_id)
         current["todos"].append(_new_todo(flex["name"]))
 
-    return _commit(repo_root, document, mutate, now=now, opener=opener)
+    return _commit(repo_root, document, mutate, output_dir=output_dir, now=now, opener=opener)
 
 
 def _require_flex(current: dict, item_id: str) -> dict:
@@ -721,15 +739,16 @@ def place_flex(
     *,
     item_id: str,
     start: str,
+    output_dir: Path,
     now: datetime | None = None,
     opener: Callable[[Request], object] = _default_opener,
 ) -> dict:
-    document = load_session(repo_root, now=now)
+    document = load_session(repo_root, output_dir=output_dir, now=now)
 
     def mutate(current: dict) -> None:
         _require_flex(current, item_id)["start"] = start
 
-    return _commit(repo_root, document, mutate, now=now, opener=opener)
+    return _commit(repo_root, document, mutate, output_dir=output_dir, now=now, opener=opener)
 
 
 def change_flex_duration(
@@ -737,45 +756,48 @@ def change_flex_duration(
     *,
     item_id: str,
     duration_minutes: int,
+    output_dir: Path,
     now: datetime | None = None,
     opener: Callable[[Request], object] = _default_opener,
 ) -> dict:
-    document = load_session(repo_root, now=now)
+    document = load_session(repo_root, output_dir=output_dir, now=now)
 
     def mutate(current: dict) -> None:
         _require_flex(current, item_id)["duration_minutes"] = duration_minutes
 
-    return _commit(repo_root, document, mutate, now=now, opener=opener)
+    return _commit(repo_root, document, mutate, output_dir=output_dir, now=now, opener=opener)
 
 
 def drop_flex(
     repo_root: Path,
     *,
     item_id: str,
+    output_dir: Path,
     now: datetime | None = None,
     opener: Callable[[Request], object] = _default_opener,
 ) -> dict:
-    document = load_session(repo_root, now=now)
+    document = load_session(repo_root, output_dir=output_dir, now=now)
 
     def mutate(current: dict) -> None:
         _drop_keyed(current, "flexes", item_id)
 
-    return _commit(repo_root, document, mutate, now=now, opener=opener)
+    return _commit(repo_root, document, mutate, output_dir=output_dir, now=now, opener=opener)
 
 
 def drop_draft(
     repo_root: Path,
     *,
     item_id: str,
+    output_dir: Path,
     now: datetime | None = None,
     opener: Callable[[Request], object] = _default_opener,
 ) -> dict:
-    document = load_session(repo_root, now=now)
+    document = load_session(repo_root, output_dir=output_dir, now=now)
 
     def mutate(current: dict) -> None:
         _drop_keyed(current, "drafts", item_id)
 
-    return _commit(repo_root, document, mutate, now=now, opener=opener)
+    return _commit(repo_root, document, mutate, output_dir=output_dir, now=now, opener=opener)
 
 
 def edit_draft(
@@ -783,10 +805,11 @@ def edit_draft(
     *,
     item_id: str,
     name: str,
+    output_dir: Path,
     now: datetime | None = None,
     opener: Callable[[Request], object] = _default_opener,
 ) -> dict:
-    document = load_session(repo_root, now=now)
+    document = load_session(repo_root, output_dir=output_dir, now=now)
     _item_by_id(document["drafts"], item_id)
     trimmed = name.strip()
     if not trimmed:
@@ -796,7 +819,7 @@ def edit_draft(
         draft = _item_by_id(current["drafts"], item_id)
         draft["name"] = trimmed
 
-    return _commit(repo_root, document, mutate, now=now, opener=opener)
+    return _commit(repo_root, document, mutate, output_dir=output_dir, now=now, opener=opener)
 
 
 def promote_draft(
@@ -808,10 +831,11 @@ def promote_draft(
     start: str | None = None,
     name: str | None = None,
     checklist: str | None | object = _UNSET,
+    output_dir: Path,
     now: datetime | None = None,
     opener: Callable[[Request], object] = _default_opener,
 ) -> dict:
-    document = load_session(repo_root, now=now)
+    document = load_session(repo_root, output_dir=output_dir, now=now)
     draft = _item_by_id(document["drafts"], item_id)
     resolved_name = draft["name"] if name is None else name.strip()
     if not resolved_name:
@@ -844,7 +868,7 @@ def promote_draft(
             return
         raise ValueError(kind)
 
-    return _commit(repo_root, document, mutate, now=now, opener=opener)
+    return _commit(repo_root, document, mutate, output_dir=output_dir, now=now, opener=opener)
 
 
 _ITEM_KIND_KEYS = {"anchor": "anchors", "flex": "flexes"}
@@ -856,6 +880,7 @@ def promote_checklist(
     item_id: str,
     item_kind: str,
     name: str,
+    output_dir: Path,
     now: datetime | None = None,
     opener: Callable[[Request], object] = _default_opener,
 ) -> dict:
@@ -870,7 +895,7 @@ def promote_checklist(
     key = _ITEM_KIND_KEYS.get(item_kind)
     if key is None:
         raise ValueError(item_kind)
-    document = load_session(repo_root, now=now)
+    document = load_session(repo_root, output_dir=output_dir, now=now)
     item = _item_by_id(document[key], item_id)
     rows = list(item.get("checklist_items") or ())
 
@@ -884,7 +909,7 @@ def promote_checklist(
         raise ValueError(f'A Checklist named "{trimmed}" already exists.')
 
     save_checklist(repo_root, checklist_id=slug, name=trimmed, items=rows)
-    return session_view(repo_root, now=now, opener=opener)
+    return session_view(repo_root, output_dir=output_dir, now=now, opener=opener)
 
 
 def _is_duplicate_of_seed_entry(
@@ -942,10 +967,11 @@ def _seed_mutation(seed) -> Callable[[dict], None]:
 def apply_template(
     repo_root: Path,
     *,
+    output_dir: Path,
     now: datetime | None = None,
     opener: Callable[[Request], object] = _default_opener,
 ) -> dict:
-    document = load_session(repo_root, now=now)
+    document = load_session(repo_root, output_dir=output_dir, now=now)
     activity_library = load_activity_template_library(repo_root / "data")
     seed = load_day_template(
         _default_day_template_file(repo_root, document), activity_library
@@ -955,15 +981,16 @@ def apply_template(
         or document["template_offer"] != "pending"
         or _session_has_items(document)
     ):
-        return session_view(repo_root, now=now, opener=opener)
+        return session_view(repo_root, output_dir=output_dir, now=now, opener=opener)
 
-    return _commit(repo_root, document, _seed_mutation(seed), now=now, opener=opener)
+    return _commit(repo_root, document, _seed_mutation(seed), output_dir=output_dir, now=now, opener=opener)
 
 
 def apply_named_day_template(
     repo_root: Path,
     *,
     template_id: str,
+    output_dir: Path,
     now: datetime | None = None,
     opener: Callable[[Request], object] = _default_opener,
 ) -> dict:
@@ -974,34 +1001,35 @@ def apply_named_day_template(
     automatically or picked by name.
     """
 
-    document = load_session(repo_root, now=now)
+    document = load_session(repo_root, output_dir=output_dir, now=now)
     if _session_has_items(document):
-        return session_view(repo_root, now=now, opener=opener)
+        return session_view(repo_root, output_dir=output_dir, now=now, opener=opener)
 
     activity_library = load_activity_template_library(repo_root / "data")
     seed = load_day_template(
         named_day_template_path(repo_root / "data", template_id), activity_library
     )
     if seed is None:
-        return session_view(repo_root, now=now, opener=opener)
+        return session_view(repo_root, output_dir=output_dir, now=now, opener=opener)
 
-    return _commit(repo_root, document, _seed_mutation(seed), now=now, opener=opener)
+    return _commit(repo_root, document, _seed_mutation(seed), output_dir=output_dir, now=now, opener=opener)
 
 
 def decline_template(
     repo_root: Path,
     *,
+    output_dir: Path,
     now: datetime | None = None,
     opener: Callable[[Request], object] = _default_opener,
 ) -> dict:
-    document = load_session(repo_root, now=now)
+    document = load_session(repo_root, output_dir=output_dir, now=now)
     if document["template_offer"] != "pending":
-        return session_view(repo_root, now=now, opener=opener)
+        return session_view(repo_root, output_dir=output_dir, now=now, opener=opener)
 
     def mutate(current: dict) -> None:
         current["template_offer"] = "declined"
 
-    return _commit(repo_root, document, mutate, now=now, opener=opener)
+    return _commit(repo_root, document, mutate, output_dir=output_dir, now=now, opener=opener)
 
 
 def _apply_item_checklist(
@@ -1032,10 +1060,11 @@ def edit_flex(
     duration_minutes: int | None = None,
     checklist: str | None | object = _UNSET,
     checklist_items: object = _UNSET,
+    output_dir: Path,
     now: datetime | None = None,
     opener: Callable[[Request], object] = _default_opener,
 ) -> dict:
-    document = load_session(repo_root, now=now)
+    document = load_session(repo_root, output_dir=output_dir, now=now)
 
     def mutate(current: dict) -> None:
         flex = _require_flex(current, item_id)
@@ -1051,7 +1080,7 @@ def edit_flex(
             checklist_items=checklist_items,
         )
 
-    return _commit(repo_root, document, mutate, now=now, opener=opener)
+    return _commit(repo_root, document, mutate, output_dir=output_dir, now=now, opener=opener)
 
 
 def edit_anchor(
@@ -1064,10 +1093,11 @@ def edit_anchor(
     checklist: str | None | object = _UNSET,
     checklist_items: object = _UNSET,
     remove: bool = False,
+    output_dir: Path,
     now: datetime | None = None,
     opener: Callable[[Request], object] = _default_opener,
 ) -> dict:
-    document = load_session(repo_root, now=now)
+    document = load_session(repo_root, output_dir=output_dir, now=now)
 
     def mutate(current: dict) -> None:
         if remove:
@@ -1096,7 +1126,7 @@ def edit_anchor(
                 return
         raise KeyError(item_id)
 
-    return _commit(repo_root, document, mutate, now=now, opener=opener)
+    return _commit(repo_root, document, mutate, output_dir=output_dir, now=now, opener=opener)
 
 
 def edit_bounds(
@@ -1104,10 +1134,11 @@ def edit_bounds(
     *,
     wake: str | None = None,
     sleep: str | None = None,
+    output_dir: Path,
     now: datetime | None = None,
     opener: Callable[[Request], object] = _default_opener,
 ) -> dict:
-    document = load_session(repo_root, now=now)
+    document = load_session(repo_root, output_dir=output_dir, now=now)
 
     def mutate(current: dict) -> None:
         if wake is not None:
@@ -1115,7 +1146,7 @@ def edit_bounds(
         if sleep is not None:
             current["bounds"]["sleep"] = sleep
 
-    return _commit(repo_root, document, mutate, now=now, opener=opener)
+    return _commit(repo_root, document, mutate, output_dir=output_dir, now=now, opener=opener)
 
 
 def _unpack(
@@ -1186,14 +1217,16 @@ def _with_checklist_kind(item: dict) -> dict:
 def session_view(
     repo_root: Path,
     *,
+    output_dir: Path,
     now: datetime | None = None,
     opener: Callable[[Request], object] = _default_opener,
 ) -> dict:
-    document = load_session(repo_root, now=now)
+    document = load_session(repo_root, output_dir=output_dir, now=now)
     bounds, drafts, anchors, flexes, todos = _unpack(document)
     result = finalize_plan(
         bounds=bounds, drafts=drafts, anchors=anchors, flexes=flexes, todos=todos
     )
+    desktop_conflict = describe_foreign_plan_file(output_dir=output_dir)
     undo = document.get("undo", {"past": [], "future": []})
     plan_date = date.fromisoformat(document["plan_date"])
     data_dir = repo_root / "data"
@@ -1228,7 +1261,8 @@ def session_view(
         "flexes": [_with_checklist_kind(item) for item in document["flexes"]],
         "todos": document.get("todos", []),
         "gaps": gaps,
-        "blockers": [describe_blocker(blocker) for blocker in result.blockers],
+        "blockers": [describe_blocker(blocker) for blocker in result.blockers]
+        + ([desktop_conflict] if desktop_conflict else []),
         "can_undo": bool(undo.get("past")),
         "can_redo": bool(undo.get("future")),
         "weather_name": load_weather_name(data_dir),
@@ -1247,50 +1281,53 @@ def session_view(
 def undo_session(
     repo_root: Path,
     *,
+    output_dir: Path,
     now: datetime | None = None,
     opener: Callable[[Request], object] = _default_opener,
 ) -> dict:
-    document = load_session(repo_root, now=now)
+    document = load_session(repo_root, output_dir=output_dir, now=now)
     undo = document.get("undo", {"past": [], "future": []})
     past = list(undo.get("past", []))
     if not past:
-        return session_view(repo_root, now=now, opener=opener)
+        return session_view(repo_root, output_dir=output_dir, now=now, opener=opener)
     future = list(undo.get("future", []))
     snapshot = past.pop()
     future.append(_snapshot_without_undo(document))
     restored = copy.deepcopy(snapshot)
     restored["undo"] = {"past": past, "future": future}
     save_session(repo_root, restored)
-    return session_view(repo_root, now=now, opener=opener)
+    return session_view(repo_root, output_dir=output_dir, now=now, opener=opener)
 
 
 def redo_session(
     repo_root: Path,
     *,
+    output_dir: Path,
     now: datetime | None = None,
     opener: Callable[[Request], object] = _default_opener,
 ) -> dict:
-    document = load_session(repo_root, now=now)
+    document = load_session(repo_root, output_dir=output_dir, now=now)
     undo = document.get("undo", {"past": [], "future": []})
     future = list(undo.get("future", []))
     if not future:
-        return session_view(repo_root, now=now, opener=opener)
+        return session_view(repo_root, output_dir=output_dir, now=now, opener=opener)
     past = list(undo.get("past", []))
     snapshot = future.pop()
     past.append(_snapshot_without_undo(document))
     restored = copy.deepcopy(snapshot)
     restored["undo"] = {"past": past[-20:], "future": future}
     save_session(repo_root, restored)
-    return session_view(repo_root, now=now, opener=opener)
+    return session_view(repo_root, output_dir=output_dir, now=now, opener=opener)
 
 
 def reset_session(
     repo_root: Path,
     *,
+    output_dir: Path,
     now: datetime | None = None,
     opener: Callable[[Request], object] = _default_opener,
 ) -> dict:
-    document = load_session(repo_root, now=now)
+    document = load_session(repo_root, output_dir=output_dir, now=now)
     blank = _blank_session(repo_root, now=now)
 
     def mutate(current: dict) -> None:
@@ -1305,16 +1342,18 @@ def reset_session(
         _seed_icloud_items(repo_root, current)
         _seed_daily_activities(repo_root, current)
 
-    return _commit(repo_root, document, mutate, now=now, opener=opener)
+    return _commit(repo_root, document, mutate, output_dir=output_dir, now=now, opener=opener)
 
 
 def submit_session(
     repo_root: Path,
     *,
+    output_dir: Path,
     now: datetime | None = None,
     opener: Callable[[Request], object] = _default_opener,
 ) -> Path:
-    document = load_session(repo_root, now=now)
+    ensure_plan_file_not_foreign(output_dir=output_dir)
+    document = load_session(repo_root, output_dir=output_dir, now=now)
     result = _finalize_document(document)
     if not result.ok:
         raise PlanBlockedError(result.blockers)
@@ -1323,6 +1362,7 @@ def submit_session(
     weather = try_fetch_weather(repo_root / "data", plan_date, opener=opener)
     return write_finalized_plan(
         repo_root=repo_root,
+        output_dir=output_dir,
         plan_date=plan_date,
         plan=result.plan,
         weather=weather,
@@ -1450,6 +1490,7 @@ class SessionHTTPServer(ThreadingHTTPServer):
     allow_reuse_address = True
     daemon_threads = True
     repo_root: Path
+    output_dir: Path
     now: datetime | None
     opener: Callable[[Request], object]
     submitted_path: Path | None
@@ -1463,6 +1504,7 @@ class SessionHandler(BaseHTTPRequestHandler):
 
     def _view_args(self) -> dict:
         return {
+            "output_dir": self.server.output_dir,
             "now": self.server.now,
             "opener": self.server.opener,
         }
@@ -1773,7 +1815,7 @@ class SessionHandler(BaseHTTPRequestHandler):
             return
         try:
             plan_path = submit_session(self.server.repo_root, **self._view_args())
-        except PlanBlockedError:
+        except (PlanBlockedError, ForeignPlanFileError):
             self._send_json(409, session_view(self.server.repo_root, **self._view_args()))
             return
         self.server.submitted_path = plan_path
@@ -1822,11 +1864,13 @@ class SessionHandler(BaseHTTPRequestHandler):
 def bind_session_server(
     repo_root: Path,
     *,
+    output_dir: Path,
     now: datetime | None = None,
     opener: Callable[[Request], object] = _default_opener,
 ) -> SessionHTTPServer:
     server = SessionHTTPServer((SESSION_HOST, SESSION_PORT), SessionHandler)
     server.repo_root = repo_root
+    server.output_dir = output_dir
     server.now = now
     server.opener = opener
     server.submitted_path = None
@@ -1836,17 +1880,18 @@ def bind_session_server(
 def run_session(
     repo_root: Path,
     *,
+    output_dir: Path,
     now: datetime | None = None,
     opener: Callable[[Request], object] = _default_opener,
 ) -> None:
     try:
-        server = bind_session_server(repo_root, now=now, opener=opener)
+        server = bind_session_server(repo_root, output_dir=output_dir, now=now, opener=opener)
     except OSError as exc:
         if exc.errno != errno.EADDRINUSE:
             raise
         print(f"Port {SESSION_PORT} is already in use.")
         return
-    document = refresh_icloud_items(repo_root, now=now)
+    document = refresh_icloud_items(repo_root, output_dir=output_dir, now=now)
     plan_date = date.fromisoformat(document["plan_date"])
     print(f"Plan date: {format_plan_date(plan_date)}")
     print(SESSION_URL)
@@ -1866,6 +1911,7 @@ def run_session(
 def run_library(
     repo_root: Path,
     *,
+    output_dir: Path,
     now: datetime | None = None,
     opener: Callable[[Request], object] = _default_opener,
 ) -> None:
@@ -1878,7 +1924,7 @@ def run_library(
     """
 
     try:
-        server = bind_session_server(repo_root, now=now, opener=opener)
+        server = bind_session_server(repo_root, output_dir=output_dir, now=now, opener=opener)
     except OSError as exc:
         if exc.errno != errno.EADDRINUSE:
             raise

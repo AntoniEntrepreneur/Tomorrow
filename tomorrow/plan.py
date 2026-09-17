@@ -19,6 +19,21 @@ from tomorrow.domain import (
 
 _TEMPLATES_DIR = Path(__file__).parent / "templates"
 
+PLAN_FILENAME = "🌅 Tomorrow Plan.html"
+
+_MARKER_PATTERN = re.compile(r'<meta name="tomorrow-plan" content="(\d{4}-\d{2}-\d{2})">')
+
+
+class ForeignPlanFileError(Exception):
+    """Raised when the Desktop Plan file exists but Tomorrow didn't write it."""
+
+    def __init__(self, path: Path) -> None:
+        super().__init__(
+            f"'{path.name}' is already on your Desktop and Tomorrow didn't write "
+            "it. Move or rename it, then try again."
+        )
+        self.path = path
+
 
 def default_plan_date(now: datetime | None = None, *, wake: str) -> date:
     current = now if now is not None else datetime.now()
@@ -32,41 +47,59 @@ def format_plan_date(plan_date: date) -> str:
     return f"{plan_date.strftime('%A')}, {plan_date.day} {plan_date.strftime('%B %Y')}"
 
 
-def plan_filename(plan_date: date) -> str:
-    return f"{plan_date.isoformat()}.html"
+def _plan_file_marker(path: Path) -> date | None:
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError:
+        return None
+    match = _MARKER_PATTERN.search(text)
+    if match is None:
+        return None
+    try:
+        return date.fromisoformat(match.group(1))
+    except ValueError:
+        return None
 
 
-def discard_past_plans(repo_root: Path, *, now: datetime | None = None) -> None:
-    today = (now if now is not None else datetime.now()).date()
-    plans_dir = repo_root / "plans"
-    if not plans_dir.is_dir():
-        return
-    for path in plans_dir.glob("*.html"):
-        try:
-            plan_date = date.fromisoformat(path.stem)
-        except ValueError:
-            continue
-        if plan_date < today:
-            path.unlink()
+def _is_foreign(path: Path) -> bool:
+    return path.is_file() and _plan_file_marker(path) is None
 
 
-def find_plan_to_open(repo_root: Path, *, now: datetime | None = None) -> Path | None:
-    """Return tomorrow's Plan if it exists, otherwise today's, otherwise None.
+def ensure_plan_file_not_foreign(*, output_dir: Path) -> None:
+    path = output_dir / PLAN_FILENAME
+    if _is_foreign(path):
+        raise ForeignPlanFileError(path)
 
-    "Tomorrow" and "today" are calendar dates relative to `now`, unlike the
-    Plan date rule used to start a Session (see `default_plan_date`) — at
-    10:00 the Session's Plan date is tomorrow, but today's Plan is the one
-    still useful to open.
-    """
 
-    discard_past_plans(repo_root, now=now)
-    today = (now if now is not None else datetime.now()).date()
-    plans_dir = repo_root / "plans"
-    for candidate in (today + timedelta(days=1), today):
-        path = plans_dir / plan_filename(candidate)
-        if path.is_file():
-            return path
+def describe_foreign_plan_file(*, output_dir: Path) -> str | None:
+    """Return the refusal message if the Desktop Plan file is foreign, else None."""
+
+    path = output_dir / PLAN_FILENAME
+    if _is_foreign(path):
+        return str(ForeignPlanFileError(path))
     return None
+
+
+def discard_past_plans(*, output_dir: Path, now: datetime | None = None) -> None:
+    today = (now if now is not None else datetime.now()).date()
+    path = output_dir / PLAN_FILENAME
+    marker = _plan_file_marker(path)
+    if marker is not None and marker < today:
+        path.unlink()
+
+
+def find_plan_to_open(*, output_dir: Path, now: datetime | None = None) -> Path | None:
+    """Return the Desktop Plan if its Plan date is today or tomorrow, else None."""
+
+    discard_past_plans(output_dir=output_dir, now=now)
+    path = output_dir / PLAN_FILENAME
+    marker = _plan_file_marker(path)
+    if marker is None:
+        return None
+    today = (now if now is not None else datetime.now()).date()
+    if marker < today:
+        return None
+    return path
 
 
 def _format_clock(value: time) -> str:
@@ -243,6 +276,7 @@ def render_plan(
 def write_plan(
     *,
     repo_root: Path,
+    output_dir: Path,
     plan_date: date,
     bounds: DayBounds,
     anchors: Sequence[Anchor] = (),
@@ -251,9 +285,9 @@ def write_plan(
     checklists: Mapping[str, Checklist] | None = None,
     weather: str | None = None,
 ) -> Path:
-    plans_dir = repo_root / "plans"
-    plans_dir.mkdir(parents=True, exist_ok=True)
-    path = plans_dir / plan_filename(plan_date)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    path = output_dir / PLAN_FILENAME
+    ensure_plan_file_not_foreign(output_dir=output_dir)
     library = dict(checklists or load_checklist_library(repo_root / "data"))
     path.write_text(
         render_plan(
@@ -273,12 +307,14 @@ def write_plan(
 def write_finalized_plan(
     *,
     repo_root: Path,
+    output_dir: Path,
     plan_date: date,
     plan: FinalizedPlan,
     weather: str | None = None,
 ) -> Path:
     return write_plan(
         repo_root=repo_root,
+        output_dir=output_dir,
         plan_date=plan_date,
         bounds=plan.bounds,
         anchors=plan.anchors,

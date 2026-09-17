@@ -149,6 +149,7 @@
     .draft-note { font-size: 0.68rem; opacity: 0.75; white-space: pre-line; margin-top: 0.1rem; }
 
     .blockers { color: var(--danger); font-size: 0.8rem; margin-bottom: 0.85rem; }
+    .blockers[hidden] { display: none; }
 
     .rail-cap {
       font-family: "IBM Plex Mono", monospace;
@@ -352,7 +353,7 @@
 
     <div class="drafts empty" id="drafts"></div>
 
-    <div class="blockers" id="blockers"></div>
+    <div class="blockers" id="blockers" role="alert" hidden></div>
 
     <button type="button" class="rail-cap" id="wake-cap">↑ wake</button>
     <div class="rail-wrap" id="rail"></div>
@@ -612,12 +613,44 @@
       return sheetKind === "edit";
     }
 
+    const BLOCKER_FLASH_MS = 5000;
+    let blockerFlashTimer = null;
+
+    function blockersEl() {
+      return document.getElementById("blockers");
+    }
+
+    function hideBlockers() {
+      if (blockerFlashTimer) {
+        clearTimeout(blockerFlashTimer);
+        blockerFlashTimer = null;
+      }
+      const el = blockersEl();
+      el.textContent = "";
+      el.hidden = true;
+    }
+
+    function flashBlockers(blockers) {
+      if (!blockers.length) return;
+      hideBlockers();
+      const el = blockersEl();
+      el.textContent = blockers.join(" ");
+      el.hidden = false;
+      blockerFlashTimer = setTimeout(hideBlockers, BLOCKER_FLASH_MS);
+    }
+
+    // A showing caption describes the Submit attempt that raised it. Once the
+    // Session moves on, it is stale — drop it rather than let it run its 5s out.
+    function dropStaleBlockers(blockers) {
+      const el = blockersEl();
+      if (!el.hidden && el.textContent !== blockers.join(" ")) hideBlockers();
+    }
+
     function setChromeEnabled() {
       if (!current) return;
       const blocked = sessionUndoBlocked();
       document.getElementById("undo").disabled = blocked || !current.can_undo;
       document.getElementById("redo").disabled = blocked || !current.can_redo;
-      document.getElementById("submit").disabled = (current.blockers || []).length > 0;
     }
 
     function renderRail(session) {
@@ -744,7 +777,7 @@
       }
       if (session.weather_one_liner) weatherBits.push(esc(session.weather_one_liner));
       document.getElementById("weather").innerHTML = weatherBits.join(" · ");
-      document.getElementById("blockers").textContent = (session.blockers || []).join(" ");
+      dropStaleBlockers(session.blockers || []);
       document.getElementById("wake-cap").textContent = "↑ " + session.bounds.wake + " wake";
       document.getElementById("sleep-cap").textContent =
         clockLabel(session.bounds.sleep, session.bounds.wake) + " sleep ↓";
@@ -1138,17 +1171,6 @@
     }
 
     async function flexToTodo(itemId) {
-      const item = findFlex(itemId);
-      const rowCount = item && Array.isArray(item.checklist_items)
-        ? item.checklist_items.length
-        : 0;
-      if (rowCount > 0) {
-        const rowWord = rowCount === 1 ? "row" : "rows";
-        const confirmed = window.confirm(
-          `Discard ${rowCount} checklist ${rowWord} and convert to a To-do?`
-        );
-        if (!confirmed) return;
-      }
       await mutate("/api/convert", { kind: "flex-to-todo", id: itemId });
     }
 
@@ -1557,9 +1579,16 @@
     });
 
     document.getElementById("submit").addEventListener("click", async () => {
+      const blockers = (current && current.blockers) || [];
+      if (blockers.length > 0) {
+        flashBlockers(blockers);
+        return;
+      }
       const response = await fetch("/api/submit", { method: "POST" });
       if (response.status === 409) {
-        render(await response.json());
+        const session = await response.json();
+        render(session);
+        flashBlockers(session.blockers || []);
       }
     });
 
