@@ -1039,27 +1039,36 @@ def edit_bounds(
                 }
             )
 
+        def shift_and_maybe_demote(index: int, delta_minutes: int) -> bool:
+            """Shift the anchor at index by delta_minutes; if it now collides
+            with another anchor, demote it to a flex. Returns True if the
+            anchor was removed (demoted), so callers can adjust any other
+            cached index that pointed past it.
+            """
+            if delta_minutes == 0:
+                return False
+            shift(index, delta_minutes)
+            if collides_with_another(index):
+                demote_to_flex(index)
+                return True
+            return False
+
         if wake is not None and earliest is not None:
             new_wake = parse_clock(wake)
             delta_minutes = (
                 minutes_since_midnight(new_wake) - minutes_since_midnight(old_wake)
             )
-            if delta_minutes != 0:
-                shift(earliest, delta_minutes)
-                if collides_with_another(earliest):
-                    demote_to_flex(earliest)
-                    if latest is not None and latest > earliest:
-                        latest -= 1
+            if shift_and_maybe_demote(earliest, delta_minutes):
+                # demoting earlier index shifts all later indices down by one
+                if latest is not None and latest > earliest:
+                    latest -= 1
 
         if sleep is not None and latest is not None and latest != earliest:
             new_sleep = parse_clock(sleep)
             delta_minutes = (
                 minutes_since_midnight(new_sleep) - minutes_since_midnight(old_sleep)
             )
-            if delta_minutes != 0:
-                shift(latest, delta_minutes)
-                if collides_with_another(latest):
-                    demote_to_flex(latest)
+            shift_and_maybe_demote(latest, delta_minutes)
 
     return _commit(repo_root, document, mutate, output_dir=output_dir, now=now, opener=opener)
 

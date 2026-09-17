@@ -3288,6 +3288,44 @@ def test_wake_and_sleep_anchors_each_independently_demote_on_collision(
     assert flex_names == {"Stretch", "Wind-down"}
 
 
+def test_wake_and_sleep_both_demote_on_collision_in_same_edit_bounds_call(
+    tmp_path: Path,
+) -> None:
+    _write_defaults(tmp_path)
+    now = datetime(2026, 8, 10, 22, 0)
+    edit_bounds(tmp_path, output_dir=tmp_path / "Desktop", wake="06:00", sleep="22:00", now=now)
+    add_anchor(
+        tmp_path, output_dir=tmp_path / "Desktop", name="Stretch", start="06:00", duration_minutes=15, now=now
+    )
+    add_anchor(
+        tmp_path, output_dir=tmp_path / "Desktop", name="Meeting", start="09:10", duration_minutes=30, now=now
+    )
+    add_anchor(
+        tmp_path, output_dir=tmp_path / "Desktop", name="Wind-down", start="21:45", duration_minutes=15, now=now
+    )
+    add_anchor(
+        tmp_path, output_dir=tmp_path / "Desktop", name="Call", start="21:00", duration_minutes=20, now=now
+    )
+
+    view = edit_bounds(tmp_path, output_dir=tmp_path / "Desktop", wake="09:00", sleep="21:15", now=now)
+
+    anchor_names = {a["name"] for a in view["anchors"]}
+    assert anchor_names == {"Meeting", "Call"}
+
+    flex_names = {f["name"] for f in view["flexes"]}
+    assert flex_names == {"Stretch", "Wind-down"}
+    stretch = next(f for f in view["flexes"] if f["name"] == "Stretch")
+    wind_down = next(f for f in view["flexes"] if f["name"] == "Wind-down")
+    assert stretch["start"] is None
+    assert wind_down["start"] is None
+    assert stretch["id"] != wind_down["id"]
+
+    meeting = next(a for a in view["anchors"] if a["name"] == "Meeting")
+    call = next(a for a in view["anchors"] if a["name"] == "Call")
+    assert meeting["start"] == "09:10"
+    assert call["start"] == "21:00"
+
+
 def test_wake_shift_landing_exactly_adjacent_is_not_a_collision(tmp_path: Path) -> None:
     _write_defaults(tmp_path)
     now = datetime(2026, 8, 10, 22, 0)
