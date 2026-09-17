@@ -94,3 +94,67 @@ def test_whitespace_cleanup_collapses_double_spaces() -> None:
     result = parse_name_time("Tutoring  16:30  today")
     assert result.stripped_name == "Tutoring today"
     assert result.start == "16:30"
+
+
+DURATION_WITH_START = [
+    # (name, expected stripped name, expected start, expected duration_minutes)
+    ("Tutoring 16:30 (90 min)", "Tutoring", "16:30", 90),
+    ("Tutoring 16:30 (90min)", "Tutoring", "16:30", 90),
+    ("Tutoring 16:30 (1h30)", "Tutoring", "16:30", 90),
+    ("Tutoring 16:30 (1.5h)", "Tutoring", "16:30", 90),
+]
+
+DURATION_ONLY = [
+    # (name, expected stripped name, expected duration_minutes)
+    ("Gym 45m", "Gym", 45),
+    ("Gym 45min", "Gym", 45),
+    ("Gym 90m", "Gym", 90),
+    ("Gym (90m)", "Gym", 90),
+    ("Gym 1h", "Gym", 60),
+    ("Gym 1h30", "Gym", 90),
+    ("Gym 1.5h", "Gym", 90),
+    ("Gym (1.5h)", "Gym", 90),
+]
+
+DURATION_REJECTED = [
+    "Gym 90",
+    "Gym 8",
+]
+
+
+@pytest.mark.parametrize(
+    "name,expected_stripped,expected_start,expected_duration", DURATION_WITH_START
+)
+def test_duration_alongside_start(
+    name: str, expected_stripped: str, expected_start: str, expected_duration: int
+) -> None:
+    result = parse_name_time(name)
+    assert result.start == expected_start
+    assert result.duration_minutes == expected_duration
+    assert result.stripped_name == expected_stripped
+    assert result.matched is True
+
+
+@pytest.mark.parametrize("name,expected_stripped,expected_duration", DURATION_ONLY)
+def test_duration_without_start(
+    name: str, expected_stripped: str, expected_duration: int
+) -> None:
+    result = parse_name_time(name)
+    assert result.start is None
+    assert result.duration_minutes == expected_duration
+    assert result.stripped_name == expected_stripped
+    assert result.matched is True
+
+
+@pytest.mark.parametrize("name", DURATION_REJECTED)
+def test_bare_number_is_not_a_duration(name: str) -> None:
+    result = parse_name_time(name)
+    assert result.duration_minutes is None
+    assert result.start is None
+    assert result.stripped_name == name
+    assert result.matched is False
+
+
+def test_result_duration_field_defaults_to_none() -> None:
+    result = parse_name_time("Just a name")
+    assert result.duration_minutes is None
