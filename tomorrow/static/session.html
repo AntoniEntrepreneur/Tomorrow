@@ -913,6 +913,7 @@
     function sheetPromote(item) {
       const strippedName = item.stripped_name || item.name;
       const suggestedStart = item.suggested_start || "09:00";
+      const suggestedEnd = item.suggested_end || null;
       openSheet(
         "<h2>Promote Draft · " + esc(item.name) + "</h2>" +
         '<p class="hint">A new opaque id is minted. The Draft’s id does not leak.</p>' +
@@ -933,6 +934,10 @@
       );
       const form = document.getElementById("promote-draft");
       initDurationToggle(form);
+      if (suggestedEnd) {
+        setDurationMode(form, "end");
+        form.end.value = suggestedEnd;
+      }
       const kind = form.querySelector('[name="kind"]');
       kind.addEventListener("change", () => syncPromoteFields(form));
       syncPromoteFields(form);

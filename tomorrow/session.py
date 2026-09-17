@@ -1291,8 +1291,9 @@ def _draft_view(item: dict) -> dict:
 
     The Draft's own `name` is left untouched (the tray always shows the
     full original name). The parse result is shipped alongside it under
-    `stripped_name` (used for Anchor/Flex) and `suggested_start` (absent
-    when no time was found), so the Promote sheet can pre-fill without any
+    `stripped_name` (used for Anchor/Flex), `suggested_start` (absent
+    when no time was found), and `suggested_end` (absent unless a valid
+    range was found), so the Promote sheet can pre-fill without any
     parsing in the browser.
     """
 
@@ -1300,6 +1301,7 @@ def _draft_view(item: dict) -> dict:
     parsed = parse_name_time(item["name"])
     view["stripped_name"] = parsed.stripped_name
     view["suggested_start"] = parsed.start
+    view["suggested_end"] = parsed.end
     return view
 
 

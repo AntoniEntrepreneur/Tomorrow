@@ -242,6 +242,24 @@ def test_imported_draft_with_a_name_time_ships_stripped_name_and_suggested_start
     assert draft["suggested_start"] == "16:30"
 
 
+def test_draft_with_a_name_range_ships_suggested_end(
+    tmp_path: Path,
+) -> None:
+    _write_defaults(tmp_path)
+
+    view = add_draft(
+        tmp_path,
+        output_dir=tmp_path / "Desktop",
+        name="Tutoring 16:30-18:00",
+        now=datetime(2026, 8, 10, 22, 0),
+    )
+    draft = view["drafts"][0]
+    assert draft["name"] == "Tutoring 16:30-18:00"
+    assert draft["stripped_name"] == "Tutoring"
+    assert draft["suggested_start"] == "16:30"
+    assert draft["suggested_end"] == "18:00"
+
+
 def test_hand_added_draft_with_a_name_time_gets_the_same_treatment_as_imported(
     tmp_path: Path,
 ) -> None:
@@ -1501,7 +1519,12 @@ def test_adding_a_draft_mints_an_id_and_flushes_the_session_file(
     assert list(draft) == ["id", "name"]
     assert isinstance(draft["id"], str) and draft["id"]
     assert view["drafts"] == [
-        {**document["drafts"][0], "stripped_name": "Call dentist", "suggested_start": None}
+        {
+            **document["drafts"][0],
+            "stripped_name": "Call dentist",
+            "suggested_start": None,
+            "suggested_end": None,
+        }
     ]
     assert "undo" not in view
     assert view["can_undo"] is True
@@ -2867,7 +2890,13 @@ def test_drafts_cannot_carry_a_checklist(tmp_path: Path) -> None:
     document = load_session(tmp_path, output_dir=tmp_path / "Desktop", now=datetime(2026, 8, 10, 22, 0))
 
     assert view["drafts"] == [
-        {"id": "d1", "name": "Gym", "stripped_name": "Gym", "suggested_start": None}
+        {
+            "id": "d1",
+            "name": "Gym",
+            "stripped_name": "Gym",
+            "suggested_start": None,
+            "suggested_end": None,
+        }
     ]
     assert "checklist" not in view["drafts"][0]
     assert "checklist" not in document["drafts"][0]

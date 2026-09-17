@@ -21,6 +21,36 @@ ACCEPTED = [
     ("Call 9am", "Call", "09:00"),
 ]
 
+RANGES = [
+    # (name, expected stripped name, expected start, expected end)
+    ("Tutoring 16:30-18:00", "Tutoring", "16:30", "18:00"),
+    ("Tutoring 16:30–18:00", "Tutoring", "16:30", "18:00"),
+    ("Tutoring 16:30 to 18:00", "Tutoring", "16:30", "18:00"),
+    ("Squash 4-6pm", "Squash", "16:00", "18:00"),
+    ("Squash 4pm-6pm", "Squash", "16:00", "18:00"),
+    ("Party 22:30-01:00", "Party", "22:30", None),
+    ("Meet 16:30-15:00", "Meet", "16:30", None),
+]
+
+
+@pytest.mark.parametrize("name,expected_stripped,expected_start,expected_end", RANGES)
+def test_range_forms(
+    name: str, expected_stripped: str, expected_start: str, expected_end: str | None
+) -> None:
+    result = parse_name_time(name)
+    assert result.start == expected_start
+    assert result.end == expected_end
+    assert result.stripped_name == expected_stripped
+    assert result.matched is True
+
+
+def test_no_range_still_parses_as_single_start() -> None:
+    result = parse_name_time("Tutoring 16:30")
+    assert result.start == "16:30"
+    assert result.end is None
+    assert result.stripped_name == "Tutoring"
+
+
 REJECTED = [
     "Invoice 1630",
     "Sleep 8",
