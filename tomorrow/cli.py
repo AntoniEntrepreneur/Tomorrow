@@ -23,7 +23,7 @@ from tomorrow.session import (
 
 
 def discover_repo_root(*starts: Path) -> Path:
-    """Locate the clone that holds data/ and plans/, independent of cwd."""
+    """Locate the clone that holds data/, independent of cwd."""
     if not starts:
         starts = (Path(__file__).resolve().parent, Path.cwd())
     seen: set[Path] = set()
@@ -39,6 +39,11 @@ def discover_repo_root(*starts: Path) -> Path:
         "Could not find Tomorrow's data/defaults.toml. "
         "This tool expects the git clone that holds data/ next to the package."
     )
+
+
+def discover_desktop_dir() -> Path:
+    """The single place the Desktop path is resolved."""
+    return Path.home() / "Desktop"
 
 
 def _print_calendars() -> None:
@@ -97,8 +102,8 @@ def _set_defaults(
     return 0
 
 
-def _open_plan(repo_root: Path, *, now: datetime | None) -> None:
-    plan_path = find_plan_to_open(repo_root, now=now)
+def _open_plan(*, output_dir: Path, now: datetime | None) -> None:
+    plan_path = find_plan_to_open(output_dir=output_dir, now=now)
     if plan_path is None:
         print("No Plan for today or tomorrow — run `tomorrow` to build one.")
         return
@@ -167,7 +172,7 @@ def main(
     repo_root = discover_repo_root()
 
     if args.command == "library":
-        run_library(repo_root, now=now, opener=opener)
+        run_library(repo_root, output_dir=discover_desktop_dir(), now=now, opener=opener)
         return
 
     if args.command == "defaults":
@@ -182,10 +187,10 @@ def main(
         return
 
     if args.command == "plan":
-        _open_plan(repo_root, now=now)
+        _open_plan(output_dir=discover_desktop_dir(), now=now)
         return
 
-    run_session(repo_root, now=now, opener=opener)
+    run_session(repo_root, output_dir=discover_desktop_dir(), now=now, opener=opener)
 
 
 if __name__ == "__main__":
