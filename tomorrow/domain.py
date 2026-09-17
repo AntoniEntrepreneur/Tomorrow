@@ -40,6 +40,7 @@ class Anchor:
     start: time
     duration: timedelta
     checklist: str | None = None
+    checklist_items: tuple[str, ...] = ()
     source: str | None = None
     activity_template_id: str | None = None
 
@@ -57,6 +58,7 @@ class Flex:
     duration: timedelta
     start: time | None = None
     checklist: str | None = None
+    checklist_items: tuple[str, ...] = ()
     source: str | None = None
     activity_template_id: str | None = None
 
@@ -73,6 +75,7 @@ class Flex:
             duration=duration,
             start=self.start,
             checklist=self.checklist,
+            checklist_items=self.checklist_items,
             source=self.source,
             activity_template_id=self.activity_template_id,
         )
@@ -83,6 +86,7 @@ class Flex:
             duration=self.duration,
             start=start,
             checklist=self.checklist,
+            checklist_items=self.checklist_items,
             source=self.source,
             activity_template_id=self.activity_template_id,
         )

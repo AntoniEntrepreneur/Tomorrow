@@ -27,6 +27,15 @@ def test_save_checklist_round_trips_through_the_filesystem(tmp_path: Path) -> No
     assert library["gym-bag"].items == ("Towel", "Lock")
 
 
+def test_save_checklist_overwrites_an_existing_checklist_in_place(tmp_path: Path) -> None:
+    save_checklist(tmp_path, checklist_id="gym-bag", name="Gym bag", items=["Towel"])
+
+    save_checklist(tmp_path, checklist_id="gym-bag", name="Gym bag", items=["Towel", "Lock"])
+
+    library = load_checklist_library(tmp_path / "data")
+    assert library["gym-bag"].items == ("Towel", "Lock")
+
+
 def test_delete_checklist_removes_the_file(tmp_path: Path) -> None:
     save_checklist(tmp_path, checklist_id="gym-bag", name="Gym bag", items=["Towel"])
 

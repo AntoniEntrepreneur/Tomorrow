@@ -176,6 +176,56 @@ def test_render_plan_shows_prep_accordion_for_attached_checklists() -> None:
     assert 'dateKey: "2026-08-11"' in html
 
 
+def test_render_plan_shows_a_one_time_checklist_labelled_by_item_alone() -> None:
+    taxi = Anchor(
+        name="6am Taxi",
+        start=time(6, 0),
+        duration=timedelta(minutes=15),
+        checklist_items=("Passport", "Charger", "Boarding pass"),
+    )
+
+    html = render_plan(
+        plan_date=date(2026, 8, 11),
+        bounds=DayBounds(wake="06:00", sleep="23:00"),
+        anchors=[taxi],
+        checklists={},
+    )
+
+    assert 'id="prep-active"' in html
+    assert 'itemId: "6am-taxi-0"' in html
+    assert 'checklistId: null' in html
+    assert 'checklistName: null' in html
+    assert '"Passport"' in html
+    assert '"Charger"' in html
+    assert '"Boarding pass"' in html
+    assert "localStorage" in html
+    # bundleLabel falls back to the item name alone when checklistName is unset.
+    assert "bundle.checklistName" in html
+    assert "if (!bundle.checklistName) return bundle.itemName;" in html
+
+
+def test_render_plan_flex_with_literal_rows_needs_no_checklist_mapping_entry() -> None:
+    gym = Flex(
+        name="Gym",
+        duration=timedelta(minutes=60),
+        start=time(7, 0),
+        checklist_items=("Towel", "Water bottle"),
+    )
+
+    # No entry for this item in the checklists mapping at all: unlike a stale
+    # library-id lookup, a literal-rows bundle must still render.
+    html = render_plan(
+        plan_date=date(2026, 8, 11),
+        bounds=DayBounds(wake="06:30", sleep="23:00"),
+        flexes=[gym],
+        checklists={},
+    )
+
+    assert 'itemId: "gym-0"' in html
+    assert '"Towel"' in html
+    assert '"Water bottle"' in html
+
+
 def test_render_plan_orders_prep_bundles_by_parent_start_time() -> None:
     gym = Anchor(
         name="Gym",

@@ -435,20 +435,35 @@
       return entry ? entry.name : "";
     }
 
-    function checklistField(selectedId) {
+    function checklistRows(checklistId) {
+      if (!checklistId || !current) return [];
+      const entry = (current.checklists || []).find(item => item.id === checklistId);
+      return entry ? (entry.items || []) : [];
+    }
+
+    function checklistField(selectedId, selectedItems) {
       const selected = selectedId || "";
+      // A reference item carries no `checklist_items` of its own; its rows
+      // editor is prefilled from the referenced Checklist's current rows so
+      // the first edit has something concrete to detach away from.
+      const rows = (selectedItems && selectedItems.length
+        ? selectedItems
+        : checklistRows(selected)
+      ).join("\n");
       const options = (current && current.checklists || []).map(entry =>
         '<option value="' + esc(entry.id) + '"' +
         (entry.id === selected ? " selected" : "") + ">" +
         esc(entry.name) + "</option>"
       ).join("");
-      return '<label>Checklist <select name="checklist"' +
-        (selected ? ' data-touched="1"' : "") + ">" +
-        '<option value="">None</option>' + options + "</select></label>";
+      return '<label>Checklist <select name="checklist" data-checklist-select="1"' +
+        (selected || rows ? ' data-touched="1"' : "") + ">" +
+        '<option value="">None</option>' + options + "</select></label>" +
+        '<label>One-time rows (one per line)<textarea name="checklist_items"' +
+        (rows ? ' data-touched="1"' : "") + '>' + esc(rows) + "</textarea></label>";
     }
 
     const TIMING_FIELDS = ["start", "duration_minutes", "end"];
-    const SUGGESTIBLE_FIELDS = ["checklist"].concat(TIMING_FIELDS);
+    const SUGGESTIBLE_FIELDS = ["checklist", "checklist_items"].concat(TIMING_FIELDS);
 
     function markTouched(form, fieldNames) {
       fieldNames.forEach(fieldName => {
@@ -532,6 +547,14 @@
     function checklistPayload(form) {
       const value = form.checklist ? form.checklist.value : "";
       return value || null;
+    }
+
+    function checklistItemsPayload(form) {
+      const raw = form.checklist_items ? form.checklist_items.value : "";
+      return raw
+        .split("\n")
+        .map(line => line.trim())
+        .filter(line => line.length > 0);
     }
 
     function heightPx(durationMin, total, floor) {
@@ -1030,6 +1053,12 @@
       );
     }
 
+    function saveToLibraryButton(item, kind) {
+      if (item.checklist_kind !== "literal") return "";
+      return '<button type="button" class="ghost" data-promote-checklist="' +
+        esc(item.id) + '" data-promote-checklist-kind="' + esc(kind) + '">Save to Library</button>';
+    }
+
     function sheetEditFlex(item) {
       const placedHint = item.start
         ? esc(item.start) + " · " + esc(fmtDur(item.duration_minutes))
@@ -1041,11 +1070,12 @@
         '<label>Name <input name="name" required value="' + esc(item.name) + '"></label>' +
         '<label>Duration (min) <input name="duration_minutes" type="number" min="1" required value="' +
         esc(item.duration_minutes) + '"></label>' +
-        checklistField(item.checklist) +
+        checklistField(item.checklist, item.checklist_items) +
         '<div class="actions"><button class="primary" type="submit">Update</button>' +
         '<button type="button" class="ghost" data-place="' + esc(item.id) + '">Place</button>' +
         '<button type="button" class="ghost" data-change-duration="' + esc(item.id) + '">Change Duration</button>' +
         '<button type="button" class="ghost" data-flex-to-todo="' + esc(item.id) + '">Make To-do</button>' +
+        saveToLibraryButton(item, "flex") +
         '<button type="button" class="ghost" data-close>Cancel</button>' +
         '<button type="button" class="danger" data-drop="' + esc(item.id) + '">Drop</button></div></form>'
       );
@@ -1069,8 +1099,9 @@
       openSheet(
         "<h2>Edit Anchor</h2><form id=\"edit-anchor\" data-id=\"" + esc(item.id) + "\">" +
         formFields(item.name, item.start, item.duration_minutes) +
-        checklistField(item.checklist) +
+        checklistField(item.checklist, item.checklist_items) +
         '<div class="actions"><button class="primary" type="submit">Update</button>' +
+        saveToLibraryButton(item, "anchor") +
         '<button type="button" class="ghost" data-close>Cancel</button>' +
         '<button type="button" class="danger" data-remove="' + esc(item.id) + '">Remove</button></div></form>'
       );
@@ -1141,6 +1172,16 @@
 
     async function flexToTodo(itemId) {
       await mutate("/api/convert", { kind: "flex-to-todo", id: itemId });
+    }
+
+    async function promoteChecklist(itemId, itemKind) {
+      const name = window.prompt("Save this checklist to the Library as:");
+      if (name === null) return;
+      if (!name.trim()) {
+        showSheetError("Checklist name cannot be blank.");
+        return;
+      }
+      await mutate("/api/promote-checklist", { id: itemId, kind: itemKind, name: name });
     }
 
     document.getElementById("stamp-anchor").addEventListener("click", sheetAddAnchor);
@@ -1331,14 +1372,31 @@
         event.preventDefault();
         const item = findFlex(changeDurationId);
         if (item) sheetChangeDuration(item);
+        return;
+      }
+      const promoteChecklistId = event.target.dataset.promoteChecklist;
+      if (promoteChecklistId) {
+        event.preventDefault();
+        await promoteChecklist(promoteChecklistId, event.target.dataset.promoteChecklistKind);
       }
     });
 
     document.getElementById("sheet").addEventListener("input", event => {
       const form = event.target.form;
       if (!form) return;
+      if (event.target.dataset.checklistSelect === "1") {
+        // Attaching a Library Checklist from the select prefills the rows
+        // editor with its rows, overwriting whatever was typed there.
+        markTouched(form, ["checklist"]);
+        if (form.checklist_items) {
+          form.checklist_items.value = checklistRows(event.target.value).join("\n");
+          delete form.checklist_items.dataset.touched;
+        }
+        return;
+      }
       if (SUGGESTIBLE_FIELDS.includes(event.target.name)) {
         markTouched(form, [event.target.name]);
+        if (event.target.name === "checklist_items") markTouched(form, ["checklist"]);
         return;
       }
       if (event.target.name === "name") suggestFromName(form);
@@ -1355,7 +1413,8 @@
           name: form.name.value,
           start: clockValue(form.start),
           duration_minutes: duration,
-          checklist: checklistPayload(form)
+          checklist: checklistPayload(form),
+          checklist_items: checklistItemsPayload(form)
         });
         return;
       }
@@ -1364,7 +1423,8 @@
           kind: "flex",
           name: form.name.value,
           duration_minutes: Number(form.duration_minutes.value),
-          checklist: checklistPayload(form)
+          checklist: checklistPayload(form),
+          checklist_items: checklistItemsPayload(form)
         });
         return;
       }
@@ -1451,7 +1511,8 @@
           name: form.name.value,
           start: clockValue(form.start),
           duration_minutes: duration,
-          checklist: checklistPayload(form)
+          checklist: checklistPayload(form),
+          checklist_items: checklistItemsPayload(form)
         });
         return;
       }
@@ -1461,7 +1522,8 @@
           id: form.dataset.id,
           name: form.name.value,
           duration_minutes: Number(form.duration_minutes.value),
-          checklist: checklistPayload(form)
+          checklist: checklistPayload(form),
+          checklist_items: checklistItemsPayload(form)
         });
         return;
       }

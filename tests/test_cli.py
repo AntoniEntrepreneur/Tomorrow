@@ -252,7 +252,6 @@ def test_construction_page_is_blank_canvas_with_domain_jargon(tmp_path: Path) ->
     assert 'id="redo"' in html
     assert "/api/undo" in html
     assert "/api/redo" in html
-    assert "confirm(" not in html
     assert "toast" not in html
     assert 'type="date"' not in html
     assert "named-routine" not in html
@@ -975,10 +974,9 @@ def test_checklist_library_and_item_attach_over_http(tmp_path: Path) -> None:
     flushed = json.loads((tmp_path / "data" / "session.json").read_text(encoding="utf-8"))
     assert get_status == 200
     assert session["checklists"] == [
-        {"id": "gym-bag", "name": "Gym bag"},
-        {"id": "sauna-kit", "name": "Sauna kit"},
+        {"id": "gym-bag", "name": "Gym bag", "items": ["Towel"]},
+        {"id": "sauna-kit", "name": "Sauna kit", "items": ["Towel"]},
     ]
-    assert all("items" not in entry for entry in session["checklists"])
     assert add_status == 200
     assert added["anchors"][0]["checklist"] == "gym-bag"
     assert "undo" not in added

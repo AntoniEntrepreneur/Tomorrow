@@ -366,16 +366,16 @@
 
     const STORAGE_PREFIX = "tomorrow-plan-" + PLAN.dateKey + "-";
 
-    function storageKey(itemId, checklistId, rowIndex) {
-      return STORAGE_PREFIX + itemId + "-" + checklistId + "-" + rowIndex;
+    function storageKey(itemId, rowIndex) {
+      return STORAGE_PREFIX + itemId + "-" + rowIndex;
     }
 
-    function isChecked(itemId, checklistId, rowIndex) {
-      return localStorage.getItem(storageKey(itemId, checklistId, rowIndex)) === "1";
+    function isChecked(itemId, rowIndex) {
+      return localStorage.getItem(storageKey(itemId, rowIndex)) === "1";
     }
 
-    function setChecked(itemId, checklistId, rowIndex, checked) {
-      const key = storageKey(itemId, checklistId, rowIndex);
+    function setChecked(itemId, rowIndex, checked) {
+      const key = storageKey(itemId, rowIndex);
       if (checked) localStorage.setItem(key, "1");
       else localStorage.removeItem(key);
     }
@@ -383,19 +383,20 @@
     function bundleProgress(bundle) {
       let done = 0;
       bundle.rows.forEach((_, index) => {
-        if (isChecked(bundle.itemId, bundle.checklistId, index)) done++;
+        if (isChecked(bundle.itemId, index)) done++;
       });
       return { done, total: bundle.rows.length, complete: done === bundle.rows.length };
     }
 
     function bundleLabel(bundle) {
+      if (!bundle.checklistName) return bundle.itemName;
       return `${bundle.itemName}<span class="bundle-sub">· ${bundle.checklistName}</span>`;
     }
 
     function checklistRowsHtml(bundle, prefix) {
       const rows = bundle.rows.map((label, index) => {
         const inputId = prefix + bundle.itemId + "-" + index;
-        const checked = isChecked(bundle.itemId, bundle.checklistId, index) ? " checked" : "";
+        const checked = isChecked(bundle.itemId, index) ? " checked" : "";
         return `<li><input type="checkbox" id="${inputId}" data-item="${bundle.itemId}" data-cl="${bundle.checklistId}" data-idx="${index}"${checked}><label for="${inputId}">${label}</label></li>`;
       }).join("");
       return `<ul class="checklist" data-bundle="${bundle.itemId}">${rows}</ul>`;
@@ -451,7 +452,7 @@
 
       document.querySelectorAll('.checklist input[type="checkbox"]').forEach(cb => {
         cb.addEventListener("change", () => {
-          setChecked(cb.dataset.item, cb.dataset.cl, Number(cb.dataset.idx), cb.checked);
+          setChecked(cb.dataset.item, Number(cb.dataset.idx), cb.checked);
           renderPrep();
         });
       });
