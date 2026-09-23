@@ -402,25 +402,97 @@
       return `<ul class="checklist" data-bundle="${bundle.itemId}">${rows}</ul>`;
     }
 
-    function splitActiveDone(bundles) {
-      const active = [];
-      const done = [];
-      bundles.forEach(bundle => {
-        if (bundleProgress(bundle).complete) done.push(bundle);
-        else active.push(bundle);
-      });
-      return { active, done };
+    const doneSet = new Set();
+    PLAN.bundles.forEach(bundle => {
+      if (bundleProgress(bundle).complete) doneSet.add(bundle.itemId);
+    });
+    let doneSectionOpen = false;
+    const pendingTimers = new Map();
+
+    function findBundleEl(itemId) {
+      return document.querySelector(`.prep-bundle[data-bundle="${itemId}"]`);
     }
 
-    function renderPrep() {
+    function getBundle(itemId) {
+      return PLAN.bundles.find(b => b.itemId === itemId);
+    }
+
+    function updateCountBadge(bundle) {
+      const el = findBundleEl(bundle.itemId);
+      if (!el) return;
+      const badge = el.querySelector(".bundle-count");
+      if (!badge) return;
+      const progress = bundleProgress(bundle);
+      badge.textContent = `${progress.done}/${progress.total}`;
+    }
+
+    function clearPendingMove(itemId) {
+      if (pendingTimers.has(itemId)) {
+        clearTimeout(pendingTimers.get(itemId));
+        pendingTimers.delete(itemId);
+      }
+    }
+
+    function schedulePendingMove(itemId) {
+      if (pendingTimers.has(itemId)) return;
+      const timer = setTimeout(() => {
+        pendingTimers.delete(itemId);
+        const bundle = getBundle(itemId);
+        if (bundle && bundleProgress(bundle).complete) {
+          doneSet.add(itemId);
+          renderPrep();
+        }
+      }, 600);
+      pendingTimers.set(itemId, timer);
+    }
+
+    function handleCheckboxChange(cb) {
+      const itemId = cb.dataset.item;
+      const rowIndex = Number(cb.dataset.idx);
+      setChecked(itemId, rowIndex, cb.checked);
+
+      const bundle = getBundle(itemId);
+      if (!bundle) return;
+      const progress = bundleProgress(bundle);
+
+      if (doneSet.has(itemId)) {
+        if (!progress.complete) {
+          doneSet.delete(itemId);
+          clearPendingMove(itemId);
+          renderPrep({ openId: itemId });
+        }
+        return;
+      }
+
+      updateCountBadge(bundle);
+      if (progress.complete) {
+        schedulePendingMove(itemId);
+      } else {
+        clearPendingMove(itemId);
+      }
+    }
+
+    function currentOpenActiveId() {
+      const el = document.querySelector("#prep-active .prep-bundle[open]");
+      return el ? el.dataset.bundle : null;
+    }
+
+    function renderPrep(options) {
+      const openId = options && "openId" in options ? options.openId : currentOpenActiveId();
       const activeRoot = document.getElementById("prep-active");
       const doneRoot = document.getElementById("prep-done");
-      const { active, done } = splitActiveDone(PLAN.bundles);
+
+      const existingDoneDetails = doneRoot.querySelector(".prep-done");
+      if (existingDoneDetails) doneSectionOpen = existingDoneDetails.open;
+
+      const active = PLAN.bundles.filter(bundle => !doneSet.has(bundle.itemId));
+      const done = PLAN.bundles.filter(bundle => doneSet.has(bundle.itemId));
 
       activeRoot.innerHTML = active.map(bundle => {
         const progress = bundleProgress(bundle);
+        const openAttr = bundle.itemId === openId ? " open" : "";
         return `
-          <details class="prep-bundle" data-bundle="${bundle.itemId}">
+          <details class="prep-bundle" data-bundle="${bundle.itemId}"${openAttr}>
             <summary>
               <span>${bundleLabel(bundle)}</span>
               <span class="bundle-count">${progress.done}/${progress.total}</span>
@@ -430,31 +502,28 @@
       }).join("");
 
       doneRoot.innerHTML = done.length ? `
-        <details class="prep-done">
+        <details class="prep-done"${doneSectionOpen ? " open" : ""}>
           <summary>Done · ${done.length}</summary>
           <div class="done-list">
             ${done.map(bundle => `
-              <details class="prep-bundle" open>
+              <details class="prep-bundle" data-bundle="${bundle.itemId}" open>
                 <summary><span>${bundleLabel(bundle)}</span><span class="bundle-count">✓</span></summary>
                 ${checklistRowsHtml(bundle, "acc-done-")}
               </details>`).join("")}
           </div>
         </details>` : "";
 
-      document.querySelectorAll(".v-tl-accordion .prep-bundle").forEach(el => {
+      document.querySelectorAll("#prep-active .prep-bundle").forEach(el => {
         el.addEventListener("toggle", () => {
           if (!el.open) return;
-          document.querySelectorAll(".v-tl-accordion .prep-bundle").forEach(other => {
+          document.querySelectorAll("#prep-active .prep-bundle").forEach(other => {
             if (other !== el) other.open = false;
           });
         });
       });
 
       document.querySelectorAll('.checklist input[type="checkbox"]').forEach(cb => {
-        cb.addEventListener("change", () => {
-          setChecked(cb.dataset.item, Number(cb.dataset.idx), cb.checked);
-          renderPrep();
-        });
+        cb.addEventListener("change", () => handleCheckboxChange(cb));
       });
     }
 
