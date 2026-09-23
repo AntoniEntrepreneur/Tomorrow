@@ -907,12 +907,7 @@ def promote_checklist(
     if not trimmed:
         raise ValueError("Checklist name cannot be blank.")
 
-    data_dir = repo_root / "data"
-    slug = _slugify(trimmed)
-    if slug in load_checklist_library(data_dir):
-        raise ValueError(f'A Checklist named "{trimmed}" already exists.')
-
-    save_checklist(repo_root, checklist_id=slug, name=trimmed, items=rows)
+    save_checklist(repo_root, name=trimmed, items=rows)
     return session_view(repo_root, output_dir=output_dir, now=now, opener=opener)
 
 
@@ -1565,7 +1560,7 @@ def _optional_checklist_items(payload: dict) -> object:
 
 def _list_checklists(data_dir: Path) -> list[dict]:
     return [
-        {"id": checklist_id, "name": checklist.name}
+        {"id": checklist_id, "name": checklist.name, "items": list(checklist.items)}
         for checklist_id, checklist in load_checklist_library(data_dir).items()
     ]
 
@@ -1577,6 +1572,12 @@ def _list_activity_templates(data_dir: Path) -> list[dict]:
             "name": activity.name,
             "is_anchor_shaped": activity.start is not None,
             "daily": activity.daily,
+            "start": activity.start.strftime("%H:%M") if activity.start is not None else None,
+            "end": activity.end,
+            "duration_minutes": (
+                None if activity.end is not None else int(activity.duration.total_seconds() // 60)
+            ),
+            "checklist": activity.checklist,
         }
         for activity_id, activity in load_activity_template_library(data_dir).items()
     ]
@@ -1617,19 +1618,21 @@ class _LibraryEntityOps:
 def _save_checklist_entity(repo_root: Path, payload: dict) -> None:
     save_checklist(
         repo_root,
-        checklist_id=payload["id"],
+        id=payload.get("id") or None,
         name=payload["name"],
         items=list(payload.get("items", [])),
     )
 
 
 def _save_activity_template_entity(repo_root: Path, payload: dict) -> None:
+    duration_value = payload.get("duration_minutes")
     save_activity_template(
         repo_root,
-        activity_id=payload["id"],
+        id=payload.get("id") or None,
         name=payload["name"],
-        duration_minutes=int(payload["duration_minutes"]),
+        duration_minutes=int(duration_value) if duration_value not in (None, "") else None,
         start=payload.get("start") or None,
+        end=payload.get("end") or None,
         checklist=payload.get("checklist") or None,
         daily=bool(payload.get("daily", False)),
     )
@@ -1638,7 +1641,7 @@ def _save_activity_template_entity(repo_root: Path, payload: dict) -> None:
 def _save_day_template_entity(repo_root: Path, payload: dict) -> None:
     save_day_template(
         repo_root,
-        template_id=payload["id"],
+        id=payload.get("id") or None,
         name=payload["name"],
         anchors=payload.get("anchors"),
         flexes=payload.get("flexes"),

@@ -8,7 +8,7 @@ from pathlib import Path
 import tomllib
 
 from tomorrow.activity_templates import ActivityTemplate
-from tomorrow.domain import Anchor, Flex, parse_clock
+from tomorrow.domain import Anchor, Flex, minutes_from_bound, parse_clock
 
 
 @dataclass(frozen=True)
@@ -91,17 +91,52 @@ def load_day_template(
 
     library = activity_library or {}
     data = tomllib.loads(path.read_text(encoding="utf-8"))
-    anchors = tuple(
-        anchor
-        for anchor in (_parse_anchor(entry, library) for entry in data.get("anchor", ()))
-        if anchor is not None
-    )
-    flexes = tuple(
-        flex
-        for flex in (_parse_flex(entry, library) for entry in data.get("flex", ()))
-        if flex is not None
-    )
-    return TemplateSeed(anchors=anchors, flexes=flexes)
+    anchor_entries = list(data.get("anchor", ()))
+    flex_entries = list(data.get("flex", ()))
+
+    anchors: list[Anchor] = []
+    flexes: list[Flex] = []
+
+    # An `activity = <id>` entry always follows the Activity Template's
+    # *current* shape, regardless of which section it is stored under, so
+    # switching an Activity Template between Anchor and Flex never drops it.
+    for entry in anchor_entries + flex_entries:
+        activity_name = entry.get("activity")
+        if activity_name is None:
+            continue
+        activity = library.get(str(activity_name))
+        if activity is None:
+            continue
+        if activity.start is not None:
+            anchors.append(
+                Anchor(
+                    name=activity.name,
+                    start=activity.start,
+                    duration=activity.duration,
+                    checklist=activity.checklist,
+                    activity_template_id=str(activity_name),
+                )
+            )
+        else:
+            flexes.append(
+                Flex(
+                    name=activity.name,
+                    duration=activity.duration,
+                    checklist=activity.checklist,
+                    activity_template_id=str(activity_name),
+                )
+            )
+
+    for entry in anchor_entries:
+        if "activity" in entry:
+            continue
+        anchors.append(_parse_literal_anchor(entry))
+    for entry in flex_entries:
+        if "activity" in entry:
+            continue
+        flexes.append(_parse_literal_flex(entry))
+
+    return TemplateSeed(anchors=tuple(anchors), flexes=tuple(flexes))
 
 
 def _parse_duration_minutes(entry: dict[str, object]) -> int:
@@ -118,23 +153,13 @@ def _parse_checklist(entry: dict[str, object]) -> str | None:
     return str(checklist)
 
 
-def _parse_anchor(
-    entry: dict[str, object], activity_library: dict[str, ActivityTemplate]
-) -> Anchor | None:
-    activity_name = entry.get("activity")
-    if activity_name is not None:
-        activity = activity_library.get(str(activity_name))
-        if activity is None or activity.start is None:
-            return None
-        return Anchor(
-            name=activity.name,
-            start=activity.start,
-            duration=activity.duration,
-            checklist=activity.checklist,
-            activity_template_id=str(activity_name),
-        )
+def _parse_literal_anchor(entry: dict[str, object]) -> Anchor:
     start = parse_clock(str(entry["start"]))
-    duration = timedelta(minutes=_parse_duration_minutes(entry))
+    end_value = entry.get("end")
+    if end_value is not None:
+        duration = timedelta(minutes=minutes_from_bound(start, parse_clock(str(end_value))))
+    else:
+        duration = timedelta(minutes=_parse_duration_minutes(entry))
     return Anchor(
         name=str(entry["name"]),
         start=start,
@@ -143,20 +168,7 @@ def _parse_anchor(
     )
 
 
-def _parse_flex(
-    entry: dict[str, object], activity_library: dict[str, ActivityTemplate]
-) -> Flex | None:
-    activity_name = entry.get("activity")
-    if activity_name is not None:
-        activity = activity_library.get(str(activity_name))
-        if activity is None or activity.start is not None:
-            return None
-        return Flex(
-            name=activity.name,
-            duration=activity.duration,
-            checklist=activity.checklist,
-            activity_template_id=str(activity_name),
-        )
+def _parse_literal_flex(entry: dict[str, object]) -> Flex:
     return Flex(
         name=str(entry["name"]),
         duration=timedelta(minutes=_parse_duration_minutes(entry)),

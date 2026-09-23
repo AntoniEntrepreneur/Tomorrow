@@ -23,13 +23,15 @@
     button { background: #1a2030; color: #e6e1d4; border: 1px solid #2a3142; border-radius: 0.35rem; padding: 0.3rem 0.6rem; cursor: pointer; }
     button.danger { color: #e07a6a; }
     form { display: grid; gap: 0.4rem; margin-top: 0.6rem; }
-    input, select { background: #1a2030; color: #e6e1d4; border: 1px solid #2a3142; border-radius: 0.35rem; padding: 0.4rem; }
+    input, select, textarea { background: #1a2030; color: #e6e1d4; border: 1px solid #2a3142; border-radius: 0.35rem; padding: 0.4rem; font-family: inherit; }
+    textarea { min-height: 4.5rem; resize: vertical; }
     .hint { font-size: 0.75rem; color: #8b93a7; }
     .row-list { display: grid; gap: 0.5rem; }
     .entry-row { border: 1px solid #2a3142; border-radius: 0.4rem; padding: 0.5rem; display: grid; gap: 0.35rem; }
     .entry-row-header { display: flex; justify-content: space-between; align-items: center; gap: 0.4rem; }
     .entry-row-fields { display: grid; gap: 0.35rem; }
     .entry-row-fields[hidden], .entry-row-fields .field[hidden] { display: none; }
+    .bound-toggle { display: flex; gap: 0.6rem; align-items: center; font-size: 0.85rem; }
   </style>
 </head>
 <body>
@@ -41,10 +43,11 @@
       <h2>Checklists</h2>
       <div id="checklist-list"></div>
       <form id="checklist-form">
-        <input name="id" placeholder="id (e.g. gym-bag)" required>
         <input name="name" placeholder="Name" required>
-        <input name="items" placeholder="Items, comma separated">
+        <span class="hint">Items, one per line</span>
+        <textarea name="items" placeholder="Towel&#10;Lock"></textarea>
         <button type="submit">Save Checklist</button>
+        <button type="button" id="checklist-cancel-edit" hidden>Cancel edit</button>
       </form>
     </section>
 
@@ -52,13 +55,18 @@
       <h2>Activity Templates</h2>
       <div id="activity-list"></div>
       <form id="activity-form">
-        <input name="id" placeholder="id (e.g. deep-work)" required>
         <input name="name" placeholder="Name" required>
-        <input name="duration_minutes" type="number" placeholder="Duration (minutes)" required>
+        <input name="duration_minutes" id="activity-duration" type="number" placeholder="Duration (minutes)">
         <input name="start" id="activity-start" placeholder="Start HH:MM (leave blank for Flex)">
-        <input name="checklist" placeholder="Checklist id (optional)">
+        <div id="activity-bound-toggle" class="bound-toggle" hidden>
+          <label><input type="radio" name="activity-bound-kind" value="duration" checked> Duration</label>
+          <label><input type="radio" name="activity-bound-kind" value="end"> End</label>
+          <input name="end" id="activity-end" placeholder="End HH:MM" hidden>
+        </div>
+        <select name="checklist" id="activity-checklist"></select>
         <label><input type="checkbox" name="daily" id="activity-daily"> Daily</label>
         <button type="submit">Save Activity Template</button>
+        <button type="button" id="activity-cancel-edit" hidden>Cancel edit</button>
       </form>
     </section>
 
@@ -66,9 +74,8 @@
       <h2>Day Templates</h2>
       <div id="day-template-list"></div>
       <form id="day-template-form">
-        <input name="id" placeholder="id (e.g. travel-day)" required>
         <input name="name" placeholder="Name" required>
-        <input name="weekday" placeholder="Default weekday (optional, e.g. tuesday)">
+        <select name="weekday" id="day-template-weekday"></select>
         <span class="hint">Entries</span>
         <div id="day-template-entries" class="row-list"></div>
         <button type="button" id="day-template-add-entry">+ Add entry</button>
@@ -84,8 +91,13 @@
       return response.json();
     }
 
+    const WEEKDAYS = [
+      "monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday",
+    ];
+
     let currentActivityOptions = [];
     let currentChecklistOptions = [];
+    let currentDayTemplateOptions = [];
 
     function renderList(el, entries, kind, onEdit) {
       el.innerHTML = "";
@@ -93,7 +105,7 @@
         const row = document.createElement("div");
         row.className = "entry";
         const label = document.createElement("span");
-        label.textContent = entry.name + " (" + entry.id + ")";
+        label.textContent = entry.name;
         const actions = document.createElement("div");
         actions.className = "actions";
         if (onEdit) {
@@ -124,44 +136,145 @@
       const data = await api("/api/library");
       currentActivityOptions = data.activity_templates;
       currentChecklistOptions = data.checklists;
-      renderList(document.getElementById("checklist-list"), data.checklists, "checklist");
-      renderList(document.getElementById("activity-list"), data.activity_templates, "activity-template");
+      currentDayTemplateOptions = data.day_templates;
+      renderList(document.getElementById("checklist-list"), data.checklists, "checklist", editChecklist);
+      renderList(document.getElementById("activity-list"), data.activity_templates, "activity-template", editActivityTemplate);
       renderList(
         document.getElementById("day-template-list"),
         data.day_templates,
         "day-template",
         editDayTemplate
       );
+      renderWeekdayOptions();
+      if (editingActivityId === null) {
+        renderChecklistOptions("");
+      }
     }
 
-    document.getElementById("checklist-form").addEventListener("submit", async (event) => {
+    // --- Checklists -----------------------------------------------------
+
+    const checklistForm = document.getElementById("checklist-form");
+    const checklistCancelEdit = document.getElementById("checklist-cancel-edit");
+    let editingChecklistId = null;
+
+    function resetChecklistForm() {
+      checklistForm.reset();
+      editingChecklistId = null;
+      checklistCancelEdit.hidden = true;
+    }
+
+    function editChecklist(entry) {
+      editingChecklistId = entry.id;
+      checklistForm.elements.name.value = entry.name;
+      checklistForm.elements.items.value = (entry.items || []).join("\n");
+      checklistCancelEdit.hidden = false;
+      checklistForm.scrollIntoView({ behavior: "smooth", block: "center" });
+    }
+
+    checklistCancelEdit.addEventListener("click", resetChecklistForm);
+
+    checklistForm.addEventListener("submit", async (event) => {
       event.preventDefault();
       const form = new FormData(event.target);
       const items = String(form.get("items") || "")
-        .split(",")
+        .split("\n")
         .map((item) => item.trim())
         .filter(Boolean);
-      await api("/api/library/checklist", {
+      const result = await api("/api/library/checklist", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "save", id: form.get("id"), name: form.get("name"), items }),
+        body: JSON.stringify({
+          action: "save",
+          id: editingChecklistId,
+          name: form.get("name"),
+          items,
+        }),
       });
-      event.target.reset();
+      if (result && result.error) {
+        alert(result.error);
+        return;
+      }
+      resetChecklistForm();
       load();
     });
 
+    // --- Activity Templates -----------------------------------------------
+
+    const activityForm = document.getElementById("activity-form");
+    const activityCancelEdit = document.getElementById("activity-cancel-edit");
     const activityStartInput = document.getElementById("activity-start");
+    const activityEndInput = document.getElementById("activity-end");
+    const activityDurationInput = document.getElementById("activity-duration");
     const activityDailyInput = document.getElementById("activity-daily");
-    activityStartInput.addEventListener("input", () => {
-      if (activityStartInput.value.trim()) {
+    const activityBoundToggle = document.getElementById("activity-bound-toggle");
+    const activityChecklistSelect = document.getElementById("activity-checklist");
+    let editingActivityId = null;
+
+    function renderChecklistOptions(selected) {
+      let html = '<option value="">-- none --</option>';
+      for (const option of currentChecklistOptions) {
+        const isSelected = option.id === selected ? " selected" : "";
+        html += `<option value="${option.id}"${isSelected}>${option.name}</option>`;
+      }
+      activityChecklistSelect.innerHTML = html;
+    }
+
+    function applyActivityBoundKind() {
+      const kind = activityForm.elements["activity-bound-kind"].value;
+      activityEndInput.hidden = kind !== "end";
+      activityDurationInput.hidden = kind !== "duration";
+    }
+
+    for (const radio of activityForm.elements["activity-bound-kind"]) {
+      radio.addEventListener("change", applyActivityBoundKind);
+    }
+
+    function applyActivityShape() {
+      const hasStart = activityStartInput.value.trim().length > 0;
+      activityBoundToggle.hidden = !hasStart;
+      if (hasStart) {
         activityDailyInput.checked = false;
         activityDailyInput.disabled = true;
+        applyActivityBoundKind();
       } else {
         activityDailyInput.disabled = false;
+        activityEndInput.hidden = true;
+        activityDurationInput.hidden = false;
       }
-    });
+    }
+    activityStartInput.addEventListener("input", applyActivityShape);
 
-    document.getElementById("activity-form").addEventListener("submit", async (event) => {
+    function resetActivityForm() {
+      activityForm.reset();
+      editingActivityId = null;
+      activityCancelEdit.hidden = true;
+      activityDailyInput.disabled = false;
+      applyActivityShape();
+    }
+
+    function editActivityTemplate(entry) {
+      editingActivityId = entry.id;
+      activityForm.elements.name.value = entry.name;
+      activityForm.elements.start.value = entry.start || "";
+      activityForm.elements.daily.checked = !!entry.daily;
+      renderChecklistOptions(entry.checklist || "");
+      if (entry.is_anchor_shaped && entry.end != null) {
+        activityForm.elements["activity-bound-kind"].value = "end";
+        activityEndInput.value = entry.end;
+        activityDurationInput.value = "";
+      } else {
+        activityForm.elements["activity-bound-kind"].value = "duration";
+        activityDurationInput.value = entry.duration_minutes != null ? entry.duration_minutes : "";
+        activityEndInput.value = "";
+      }
+      applyActivityShape();
+      activityCancelEdit.hidden = false;
+      activityForm.scrollIntoView({ behavior: "smooth", block: "center" });
+    }
+
+    activityCancelEdit.addEventListener("click", resetActivityForm);
+
+    activityForm.addEventListener("submit", async (event) => {
       event.preventDefault();
       const form = new FormData(event.target);
       const start = form.get("start") || null;
@@ -170,15 +283,21 @@
         alert("A Daily Activity cannot have a fixed start.");
         return;
       }
+      const boundKind = start ? form.get("activity-bound-kind") : "duration";
+      const durationMinutes = boundKind === "duration" && form.get("duration_minutes")
+        ? Number(form.get("duration_minutes"))
+        : null;
+      const end = boundKind === "end" ? (form.get("end") || null) : null;
       const result = await api("/api/library/activity-template", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           action: "save",
-          id: form.get("id"),
+          id: editingActivityId,
           name: form.get("name"),
-          duration_minutes: Number(form.get("duration_minutes")),
+          duration_minutes: durationMinutes,
           start,
+          end,
           checklist: form.get("checklist") || null,
           daily,
         }),
@@ -187,16 +306,34 @@
         alert(result.error);
         return;
       }
-      event.target.reset();
-      activityDailyInput.disabled = false;
+      resetActivityForm();
       load();
     });
+
+    // --- Day Templates ------------------------------------------------------
+
+    function weekdayOwnerLabel(weekday, excludingId) {
+      const owner = currentDayTemplateOptions.find(
+        (template) => template.weekday === weekday && template.id !== excludingId
+      );
+      return owner ? `${weekday} (currently ${owner.name})` : weekday;
+    }
+
+    function renderWeekdayOptions(selected, excludingId) {
+      const select = document.getElementById("day-template-weekday");
+      let html = '<option value="">-- none --</option>';
+      for (const weekday of WEEKDAYS) {
+        const isSelected = weekday === selected ? " selected" : "";
+        html += `<option value="${weekday}"${isSelected}>${weekdayOwnerLabel(weekday, excludingId)}</option>`;
+      }
+      select.innerHTML = html;
+    }
 
     function optionsHtml(options, selected) {
       let html = '<option value="">-- none --</option>';
       for (const option of options) {
         const isSelected = option.id === selected ? " selected" : "";
-        html += `<option value="${option.id}"${isSelected}>${option.name} (${option.id})</option>`;
+        html += `<option value="${option.id}"${isSelected}>${option.name}</option>`;
       }
       return html;
     }
@@ -206,6 +343,9 @@
       const isActivityRef = entry.activity != null;
       const isFlex = !isActivityRef && entry.start == null;
       const type = isActivityRef ? "activity" : isFlex ? "flex" : "anchor";
+      const hasEnd = !isActivityRef && !isFlex && entry.end != null;
+
+      const boundGroupName = "entry-bound-kind-" + Math.random().toString(36).slice(2);
 
       const row = document.createElement("div");
       row.className = "entry-row";
@@ -221,7 +361,12 @@
         <div class="entry-row-fields inline-fields">
           <input class="entry-name" placeholder="Name" value="${entry.name || ""}">
           <input class="entry-start" placeholder="Start HH:MM (Anchor only)" value="${entry.start || ""}">
+          <div class="bound-toggle entry-bound-toggle">
+            <label><input type="radio" name="${boundGroupName}" class="entry-bound-duration-radio" checked> Duration</label>
+            <label><input type="radio" name="${boundGroupName}" class="entry-bound-end-radio"> End</label>
+          </div>
           <input class="entry-duration" type="number" placeholder="Duration (minutes)" value="${entry.duration != null ? entry.duration : ""}">
+          <input class="entry-end" placeholder="End HH:MM" value="${entry.end || ""}" hidden>
           <select class="entry-checklist"></select>
         </div>
         <div class="entry-row-fields activity-fields" hidden>
@@ -238,14 +383,41 @@
         entry.activity || ""
       );
 
+      const durationRadio = row.querySelector(".entry-bound-duration-radio");
+      const endRadio = row.querySelector(".entry-bound-end-radio");
+      const durationInput = row.querySelector(".entry-duration");
+      const endInput = row.querySelector(".entry-end");
+      if (hasEnd) {
+        endRadio.checked = true;
+      } else {
+        durationRadio.checked = true;
+      }
+
       const startField = row.querySelector(".entry-start");
+      const boundToggle = row.querySelector(".entry-bound-toggle");
       const inlineFields = row.querySelector(".inline-fields");
       const activityFields = row.querySelector(".activity-fields");
+
+      function applyBoundKind() {
+        const useEnd = endRadio.checked;
+        endInput.hidden = !useEnd;
+        durationInput.hidden = useEnd;
+      }
+      durationRadio.addEventListener("change", applyBoundKind);
+      endRadio.addEventListener("change", applyBoundKind);
+
       function applyType() {
         const value = row.querySelector(".entry-type").value;
         activityFields.hidden = value !== "activity";
         inlineFields.hidden = value === "activity";
         startField.hidden = value === "flex";
+        boundToggle.hidden = value !== "anchor";
+        if (value === "flex") {
+          durationInput.hidden = false;
+          endInput.hidden = true;
+        } else {
+          applyBoundKind();
+        }
       }
       row.querySelector(".entry-type").addEventListener("change", applyType);
       applyType();
@@ -272,14 +444,23 @@
         }
         const name = row.querySelector(".entry-name").value.trim();
         if (!name) continue;
-        const duration = Number(row.querySelector(".entry-duration").value);
-        if (!Number.isFinite(duration) || duration <= 0) continue;
         const checklist = row.querySelector(".entry-checklist").value || null;
         if (type === "anchor") {
           const start = row.querySelector(".entry-start").value.trim();
           if (!start) continue;
-          anchors.push({ name, start, duration, checklist });
+          const useEnd = row.querySelector(".entry-bound-end-radio").checked;
+          if (useEnd) {
+            const end = row.querySelector(".entry-end").value.trim();
+            if (!end) continue;
+            anchors.push({ name, start, end, checklist });
+          } else {
+            const duration = Number(row.querySelector(".entry-duration").value);
+            if (!Number.isFinite(duration) || duration <= 0) continue;
+            anchors.push({ name, start, duration, checklist });
+          }
         } else {
+          const duration = Number(row.querySelector(".entry-duration").value);
+          if (!Number.isFinite(duration) || duration <= 0) continue;
           flexes.push({ name, duration, checklist });
         }
       }
@@ -289,6 +470,7 @@
     const dayTemplateForm = document.getElementById("day-template-form");
     const dayTemplateEntries = document.getElementById("day-template-entries");
     const dayTemplateCancelEdit = document.getElementById("day-template-cancel-edit");
+    let editingDayTemplateId = null;
 
     document.getElementById("day-template-add-entry").addEventListener("click", () => {
       dayTemplateEntries.appendChild(buildEntryRow());
@@ -297,15 +479,15 @@
     function resetDayTemplateForm() {
       dayTemplateForm.reset();
       dayTemplateEntries.innerHTML = "";
-      dayTemplateForm.elements.id.disabled = false;
+      editingDayTemplateId = null;
       dayTemplateCancelEdit.hidden = true;
+      renderWeekdayOptions();
     }
 
     function editDayTemplate(entry) {
-      dayTemplateForm.elements.id.value = entry.id;
-      dayTemplateForm.elements.id.disabled = true;
+      editingDayTemplateId = entry.id;
       dayTemplateForm.elements.name.value = entry.name;
-      dayTemplateForm.elements.weekday.value = entry.weekday || "";
+      renderWeekdayOptions(entry.weekday || "", entry.id);
       dayTemplateEntries.innerHTML = "";
       for (const anchor of entry.anchors || []) {
         dayTemplateEntries.appendChild(buildEntryRow(anchor));
@@ -323,22 +505,27 @@
       event.preventDefault();
       const form = new FormData(event.target);
       const { anchors, flexes } = entryRowsToPayload(dayTemplateEntries);
-      await api("/api/library/day-template", {
+      const result = await api("/api/library/day-template", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           action: "save",
-          id: form.get("id") || dayTemplateForm.elements.id.value,
+          id: editingDayTemplateId,
           name: form.get("name"),
           weekday: form.get("weekday") || null,
           anchors,
           flexes,
         }),
       });
+      if (result && result.error) {
+        alert(result.error);
+        return;
+      }
       resetDayTemplateForm();
       load();
     });
 
+    applyActivityShape();
     load();
   </script>
 </body>
