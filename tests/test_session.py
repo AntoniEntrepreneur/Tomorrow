@@ -3009,7 +3009,6 @@ def test_daily_activity_checklist_detaches_leaving_its_template_unchanged(
     _write_checklist_library(tmp_path)
     save_activity_template(
         tmp_path,
-        activity_id="gym-routine",
         name="Gym routine",
         duration_minutes=60,
         checklist="gym-bag",
@@ -3831,10 +3830,10 @@ def test_renamed_imported_draft_keeps_its_new_name_across_a_reimport(
 
 def _write_daily_activities(tmp_path: Path) -> None:
     save_activity_template(
-        tmp_path, activity_id="deep-work", name="Deep Work", duration_minutes=90, daily=True
+        tmp_path, name="Deep Work", duration_minutes=90, daily=True
     )
     save_activity_template(
-        tmp_path, activity_id="yoga-nidra", name="Yoga Nidra", duration_minutes=20, daily=True
+        tmp_path, name="Yoga Nidra", duration_minutes=20, daily=True
     )
 
 
@@ -3844,7 +3843,7 @@ def test_new_session_holds_one_unplaced_daily_flex_per_daily_activity(
     _write_defaults(tmp_path)
     _write_daily_activities(tmp_path)
     save_activity_template(
-        tmp_path, activity_id="therapy", name="Therapy", duration_minutes=50, start="16:00"
+        tmp_path, name="Therapy", duration_minutes=50, start="16:00"
     )
 
     view = session_view(tmp_path, output_dir=tmp_path / "Desktop", now=_now())
@@ -3898,7 +3897,7 @@ def test_editing_activity_template_after_session_exists_does_not_change_session(
     session_view(tmp_path, output_dir=tmp_path / "Desktop", now=_now())
 
     save_activity_template(
-        tmp_path, activity_id="deep-work", name="Deep Work", duration_minutes=120, daily=True
+        tmp_path, id="deep-work", name="Deep Work", duration_minutes=120, daily=True
     )
 
     view = session_view(tmp_path, output_dir=tmp_path / "Desktop", now=_now())
@@ -3915,7 +3914,7 @@ def test_non_daily_activity_templates_are_not_added_to_new_session(
 ) -> None:
     _write_defaults(tmp_path)
     save_activity_template(
-        tmp_path, activity_id="deep-work", name="Deep Work", duration_minutes=90
+        tmp_path, name="Deep Work", duration_minutes=90
     )
 
     view = session_view(tmp_path, output_dir=tmp_path / "Desktop", now=_now())
@@ -4176,7 +4175,7 @@ def test_promote_checklist_rejects_a_colliding_slug_and_leaves_the_file_untouche
     from tomorrow.library import save_checklist
 
     _write_defaults(tmp_path)
-    save_checklist(tmp_path, checklist_id="travel-kit", name="Travel Kit", items=["Old row"])
+    save_checklist(tmp_path, name="Travel Kit", items=["Old row"])
     checklist_path = tmp_path / "data" / "checklists" / "travel-kit.toml"
     bytes_before = checklist_path.read_bytes()
 

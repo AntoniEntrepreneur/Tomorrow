@@ -209,6 +209,19 @@ def is_next_day(value: time, *, wake: time) -> bool:
     return minutes_since_midnight(value) < minutes_since_midnight(wake)
 
 
+def minutes_from_bound(start: time, end: time) -> int:
+    """Minutes from `start` to `end`, wrapping past midnight (end at or before
+    start means "tomorrow"), the same rule used for day bounds.
+
+    Raises ValueError when `end` equals `start`, a zero-length Anchor.
+    """
+
+    duration = (minutes_since_midnight(end) - minutes_since_midnight(start)) % 1440
+    if duration == 0:
+        raise ValueError("End time must differ from start time.")
+    return duration
+
+
 def minutes_between(start: time, end: time) -> int:
     """Whole minutes from start to end. Raises if end is not after start."""
 

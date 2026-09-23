@@ -1374,3 +1374,27 @@ def test_session_page_asks_for_activity_suggestions_from_name_fields(
     html = body.decode("utf-8")
     assert status == 200
     assert "/api/suggest-activity" in html
+
+
+def test_library_checklist_name_collision_over_http_reaches_the_page_as_error(
+    tmp_path: Path,
+) -> None:
+    _write_defaults(tmp_path)
+    server, thread = _start_server(tmp_path)
+    try:
+        _http(
+            "POST",
+            "/api/library/checklist",
+            payload={"action": "save", "id": None, "name": "Gym bag", "items": ["Towel"]},
+        )
+        status, body = _http(
+            "POST",
+            "/api/library/checklist",
+            payload={"action": "save", "id": None, "name": "gym bag", "items": ["Lock"]},
+        )
+    finally:
+        _stop_server(server, thread)
+
+    payload = json.loads(body)
+    assert status == 400
+    assert "error" in payload

@@ -7,7 +7,7 @@ from datetime import time, timedelta
 from pathlib import Path
 import tomllib
 
-from tomorrow.domain import parse_clock
+from tomorrow.domain import minutes_from_bound, parse_clock
 from tomorrow.library_base import load_toml_library, suggest_by_name
 
 
@@ -20,6 +20,9 @@ class ActivityTemplate:
     start: time | None = None
     checklist: str | None = None
     daily: bool = False
+    # Raw "HH:MM" end time as typed, when saved with an end rather than a
+    # duration; `duration` above is always the resolved value either way.
+    end: str | None = None
 
 
 def activity_templates_dir(data_dir: Path) -> Path:
@@ -35,14 +38,21 @@ def load_activity_template_library(data_dir: Path) -> dict[str, ActivityTemplate
 def _parse_activity_template(path: Path) -> ActivityTemplate:
     data = tomllib.loads(path.read_text(encoding="utf-8"))
     start_value = data.get("start")
-    duration = timedelta(minutes=int(data["duration"]))
+    start = parse_clock(str(start_value)) if start_value is not None else None
+    end_value = data.get("end")
+    if end_value is not None:
+        assert start is not None
+        duration = timedelta(minutes=minutes_from_bound(start, parse_clock(str(end_value))))
+    else:
+        duration = timedelta(minutes=int(data["duration"]))
     checklist = data.get("checklist")
     return ActivityTemplate(
         name=str(data["name"]),
         duration=duration,
-        start=parse_clock(str(start_value)) if start_value is not None else None,
+        start=start,
         checklist=str(checklist) if checklist is not None else None,
         daily=bool(data.get("daily", False)),
+        end=str(end_value) if end_value is not None else None,
     )
 
 
