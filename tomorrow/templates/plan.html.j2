@@ -413,6 +413,10 @@
       return document.querySelector(`.prep-bundle[data-bundle="${itemId}"]`);
     }
 
+    function getBundle(itemId) {
+      return PLAN.bundles.find(b => b.itemId === itemId);
+    }
+
     function updateCountBadge(bundle) {
       const el = findBundleEl(bundle.itemId);
       if (!el) return;
@@ -433,7 +437,7 @@
       if (pendingTimers.has(itemId)) return;
       const timer = setTimeout(() => {
         pendingTimers.delete(itemId);
-        const bundle = PLAN.bundles.find(b => b.itemId === itemId);
+        const bundle = getBundle(itemId);
         if (bundle && bundleProgress(bundle).complete) {
           doneSet.add(itemId);
           renderPrep();
@@ -447,7 +451,7 @@
       const rowIndex = Number(cb.dataset.idx);
       setChecked(itemId, rowIndex, cb.checked);
 
-      const bundle = PLAN.bundles.find(b => b.itemId === itemId);
+      const bundle = getBundle(itemId);
       if (!bundle) return;
       const progress = bundleProgress(bundle);
 
@@ -468,8 +472,13 @@
       }
     }
 
+    function currentOpenActiveId() {
+      const el = document.querySelector("#prep-active .prep-bundle[open]");
+      return el ? el.dataset.bundle : null;
+    }
+
     function renderPrep(options) {
-      const openId = options && options.openId;
+      const openId = options && "openId" in options ? options.openId : currentOpenActiveId();
       const activeRoot = document.getElementById("prep-active");
       const doneRoot = document.getElementById("prep-done");
 
