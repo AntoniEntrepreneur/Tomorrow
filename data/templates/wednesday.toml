@@ -1,0 +1,12 @@
+name = "Wednesday"
+weekday = "wednesday"
+
+[[anchor]]
+name = "Matylda Korepetycje"
+start = "16:30"
+duration = 60
+
+[[anchor]]
+name = "Szymon Korepetycje"
+start = "17:40"
+duration = 60

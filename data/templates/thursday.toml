@@ -1,0 +1,17 @@
+name = "Thursday"
+weekday = "thursday"
+
+[[anchor]]
+name = "Drive to Politechnika"
+start = "13:10"
+duration = 20
+
+[[anchor]]
+name = "Mapowanie Procesów Biznesowych"
+start = "13:45"
+duration = 100
+
+[[anchor]]
+name = "Zarządzanie Agile"
+start = "16:20"
+duration = 100

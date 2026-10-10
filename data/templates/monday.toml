@@ -1,0 +1,7 @@
+name = "Monday"
+weekday = "monday"
+
+[[anchor]]
+name = "Tutoring"
+start = "18:50"
+duration = 130
