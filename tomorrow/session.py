@@ -1141,95 +1141,69 @@ def edit_bounds(
     document = load_session(repo_root, output_dir=output_dir, now=now)
 
     def mutate(current: dict) -> None:
-        old_wake = parse_clock(current["bounds"]["wake"])
-        old_sleep = parse_clock(current["bounds"]["sleep"])
+        final_wake = parse_clock(wake or current["bounds"]["wake"])
+        final_sleep = parse_clock(sleep or current["bounds"]["sleep"])
+        day_length = minutes_since_wake(final_sleep, wake=final_wake)
 
-        anchors = current["anchors"]
+        # Work on a copy until every scheduled item has a valid repair.  This
+        # keeps an edit atomic when an item is longer than the final day.
+        repaired_anchors = copy.deepcopy(current["anchors"])
+        repaired_flexes = copy.deepcopy(current["flexes"])
+        scheduled = [
+            ("Anchor", item) for item in repaired_anchors
+        ] + [
+            ("Flex", item) for item in repaired_flexes if item.get("start")
+        ]
 
-        def start_minutes(index: int) -> int:
-            return minutes_since_midnight(parse_clock(anchors[index]["start"]))
+        if day_length == 0:
+            # Keep the existing live zero-length-day blocker behavior.
+            current["bounds"]["wake"] = wake or current["bounds"]["wake"]
+            current["bounds"]["sleep"] = sleep or current["bounds"]["sleep"]
+            return
 
-        def end_minutes(index: int) -> int:
-            return start_minutes(index) + anchors[index]["duration_minutes"]
+        def clock_at(offset: int) -> str:
+            value = datetime.combine(date(2000, 1, 1), final_wake) + timedelta(
+                minutes=offset
+            )
+            return value.strftime("%H:%M")
 
-        earliest = (
-            min(range(len(anchors)), key=start_minutes) if anchors else None
+        wraps_midnight = minutes_since_midnight(final_sleep) <= minutes_since_midnight(
+            final_wake
         )
-        latest = (
-            min(range(len(anchors)), key=lambda index: -end_minutes(index))
-            if anchors
-            else None
-        )
+        for kind, item in scheduled:
+            start = parse_clock(item["start"])
+            duration = int(item["duration_minutes"])
+            offset = minutes_since_wake(start, wake=final_wake)
+            before_wake = not wraps_midnight and minutes_since_midnight(start) < minutes_since_midnight(final_wake)
+            if before_wake:
+                # For a non-wrapping day, modulo arithmetic would describe a
+                # pre-wake start as tomorrow.  Measure its end from the
+                # actual wake instead so short early activities can move to
+                # wake, while an activity spanning both bounds is rejected.
+                prewake = minutes_since_midnight(final_wake) - minutes_since_midnight(start)
+                past_sleep = duration - prewake > day_length
+            else:
+                past_sleep = offset + duration > day_length
 
-        if wake is not None:
-            current["bounds"]["wake"] = wake
-        if sleep is not None:
-            current["bounds"]["sleep"] = sleep
+            if before_wake and past_sleep:
+                raise ValueError(
+                    f"{kind} '{item['name']}' crosses both final day bounds and "
+                    "cannot be repaired without changing its duration."
+                )
+            if before_wake:
+                item["start"] = final_wake.strftime("%H:%M")
+            elif past_sleep:
+                if duration > day_length:
+                    raise ValueError(
+                        f"{kind} '{item['name']}' crosses both final day bounds and "
+                        "cannot be repaired without changing its duration."
+                    )
+                item["start"] = clock_at(day_length - duration)
 
-        def shift(index: int, delta_minutes: int) -> None:
-            anchor = anchors[index]
-            shifted_start = datetime.combine(
-                date(2000, 1, 1), parse_clock(anchor["start"])
-            ) + timedelta(minutes=delta_minutes)
-            anchor["start"] = shifted_start.strftime("%H:%M")
-
-        def collides_with_another(index: int) -> bool:
-            anchor = anchors[index]
-            anchor_start = start_minutes(index)
-            anchor_end = end_minutes(index)
-            for other_index, other in enumerate(anchors):
-                if other_index == index:
-                    continue
-                other_start = start_minutes(other_index)
-                other_end = end_minutes(other_index)
-                if anchor_start < other_end and other_start < anchor_end:
-                    return True
-            return False
-
-        def demote_to_flex(index: int) -> None:
-            anchor = anchors.pop(index)
-            current["flexes"].append(
-                {
-                    "id": uuid.uuid4().hex,
-                    "name": anchor["name"],
-                    "duration_minutes": anchor["duration_minutes"],
-                    "start": None,
-                    "checklist": anchor.get("checklist"),
-                    "source": anchor.get("source"),
-                    "activity_template_id": anchor.get("activity_template_id"),
-                }
-            )
-
-        def shift_and_maybe_demote(index: int, delta_minutes: int) -> bool:
-            """Shift the anchor at index by delta_minutes; if it now collides
-            with another anchor, demote it to a flex. Returns True if the
-            anchor was removed (demoted), so callers can adjust any other
-            cached index that pointed past it.
-            """
-            if delta_minutes == 0:
-                return False
-            shift(index, delta_minutes)
-            if collides_with_another(index):
-                demote_to_flex(index)
-                return True
-            return False
-
-        if wake is not None and earliest is not None:
-            new_wake = parse_clock(wake)
-            delta_minutes = (
-                minutes_since_midnight(new_wake) - minutes_since_midnight(old_wake)
-            )
-            if shift_and_maybe_demote(earliest, delta_minutes):
-                # demoting earlier index shifts all later indices down by one
-                if latest is not None and latest > earliest:
-                    latest -= 1
-
-        if sleep is not None and latest is not None and latest != earliest:
-            new_sleep = parse_clock(sleep)
-            delta_minutes = (
-                minutes_since_midnight(new_sleep) - minutes_since_midnight(old_sleep)
-            )
-            shift_and_maybe_demote(latest, delta_minutes)
+        current["bounds"]["wake"] = wake or current["bounds"]["wake"]
+        current["bounds"]["sleep"] = sleep or current["bounds"]["sleep"]
+        current["anchors"] = repaired_anchors
+        current["flexes"] = repaired_flexes
 
     return _commit(repo_root, document, mutate, output_dir=output_dir, now=now, opener=opener)
 
@@ -1786,12 +1760,16 @@ class SessionHandler(BaseHTTPRequestHandler):
                 self._send_json(200, view)
                 return
             if kind == "bounds":
-                view = edit_bounds(
-                    self.server.repo_root,
-                    wake=payload.get("wake"),
-                    sleep=payload.get("sleep"),
-                    **self._view_args(),
-                )
+                try:
+                    view = edit_bounds(
+                        self.server.repo_root,
+                        wake=payload.get("wake"),
+                        sleep=payload.get("sleep"),
+                        **self._view_args(),
+                    )
+                except ValueError as exc:
+                    self._send_json(400, {"error": str(exc)})
+                    return
                 self._send_json(200, view)
                 return
             if kind == "flex":
