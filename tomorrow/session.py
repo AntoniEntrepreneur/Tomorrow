@@ -1150,9 +1150,11 @@ def edit_bounds(
         repaired_anchors = copy.deepcopy(current["anchors"])
         repaired_flexes = copy.deepcopy(current["flexes"])
         scheduled = [
-            ("Anchor", item) for item in repaired_anchors
+            {"kind": "Anchor", "item": item} for item in repaired_anchors
         ] + [
-            ("Flex", item) for item in repaired_flexes if item.get("start")
+            {"kind": "Flex", "item": item}
+            for item in repaired_flexes
+            if item.get("start")
         ]
 
         if day_length == 0:
@@ -1170,35 +1172,106 @@ def edit_bounds(
         wraps_midnight = minutes_since_midnight(final_sleep) <= minutes_since_midnight(
             final_wake
         )
-        for kind, item in scheduled:
+        for entry in scheduled:
+            item = entry["item"]
             start = parse_clock(item["start"])
-            duration = int(item["duration_minutes"])
-            offset = minutes_since_wake(start, wake=final_wake)
-            before_wake = not wraps_midnight and minutes_since_midnight(start) < minutes_since_midnight(final_wake)
-            if before_wake:
-                # For a non-wrapping day, modulo arithmetic would describe a
-                # pre-wake start as tomorrow.  Measure its end from the
-                # actual wake instead so short early activities can move to
-                # wake, while an activity spanning both bounds is rejected.
-                prewake = minutes_since_midnight(final_wake) - minutes_since_midnight(start)
-                past_sleep = duration - prewake > day_length
-            else:
-                past_sleep = offset + duration > day_length
+            entry["offset"] = (
+                minutes_since_midnight(start) - minutes_since_midnight(final_wake)
+                if not wraps_midnight
+                and minutes_since_midnight(start) < minutes_since_midnight(final_wake)
+                else minutes_since_wake(start, wake=final_wake)
+            )
+            entry["duration"] = int(item["duration_minutes"])
 
-            if before_wake and past_sleep:
-                raise ValueError(
-                    f"{kind} '{item['name']}' crosses both final day bounds and "
-                    "cannot be repaired without changing its duration."
-                )
-            if before_wake:
-                item["start"] = final_wake.strftime("%H:%M")
-            elif past_sleep:
-                if duration > day_length:
-                    raise ValueError(
-                        f"{kind} '{item['name']}' crosses both final day bounds and "
-                        "cannot be repaired without changing its duration."
+        def overlaps(
+            first: dict, first_shift: int, second: dict, second_shift: int
+        ) -> bool:
+            first_start = first["offset"] + first_shift
+            second_start = second["offset"] + second_shift
+            return (
+                first_start < second_start + second["duration"]
+                and second_start < first_start + first["duration"]
+            )
+
+        def repair_groups(
+            seed_indices: list[int], *, side: str
+        ) -> list[tuple[set[int], int]]:
+            groups: list[tuple[set[int], int]] = []
+            remaining = set(seed_indices)
+            while remaining:
+                group = {remaining.pop()}
+                while True:
+                    shift = (
+                        -min(scheduled[index]["offset"] for index in group)
+                        if side == "wake"
+                        else day_length
+                        - max(
+                            scheduled[index]["offset"] + scheduled[index]["duration"]
+                            for index in group
+                        )
                     )
-                item["start"] = clock_at(day_length - duration)
+                    connected = {
+                        index
+                        for index in range(len(scheduled))
+                        if index not in group
+                        and any(
+                            overlaps(scheduled[group_index], shift, scheduled[index], 0)
+                            for group_index in group
+                        )
+                    }
+                    if not connected:
+                        break
+                    group.update(connected)
+                    remaining.difference_update(connected)
+                groups.append((group, shift))
+            return groups
+
+        wake_seeds = [
+            index
+            for index, entry in enumerate(scheduled)
+            if not wraps_midnight and entry["offset"] < 0
+        ]
+        sleep_seeds = [
+            index
+            for index, entry in enumerate(scheduled)
+            if entry["offset"] + entry["duration"] > day_length
+        ]
+        if set(wake_seeds) & set(sleep_seeds):
+            entry = scheduled[next(iter(set(wake_seeds) & set(sleep_seeds)))]
+            raise ValueError(
+                f"{entry['kind']} '{entry['item']['name']}' crosses both final day bounds "
+                "and cannot be repaired without changing its duration."
+            )
+
+        groups = repair_groups(wake_seeds, side="wake") + repair_groups(
+            sleep_seeds, side="sleep"
+        )
+        for left, (left_group, left_shift) in enumerate(groups):
+            for right_group, right_shift in groups[left + 1 :]:
+                if any(
+                    overlaps(
+                        scheduled[first], left_shift, scheduled[second], right_shift
+                    )
+                    for first in left_group
+                    for second in right_group
+                ):
+                    raise ValueError(
+                        "Wake-side and sleep-side repairs meet or overlap and "
+                        "cannot both fit within the final day."
+                    )
+
+        shifts = {index: 0 for index in range(len(scheduled))}
+        for group, shift in groups:
+            for index in group:
+                shifts[index] = shift
+        for index, entry in enumerate(scheduled):
+            final_offset = entry["offset"] + shifts[index]
+            if final_offset < 0 or final_offset + entry["duration"] > day_length:
+                raise ValueError(
+                    f"{entry['kind']} '{entry['item']['name']}' cannot fit within "
+                    "the final day bounds without changing its duration."
+                )
+            entry["item"]["start"] = clock_at(final_offset)
 
         current["bounds"]["wake"] = wake or current["bounds"]["wake"]
         current["bounds"]["sleep"] = sleep or current["bounds"]["sleep"]

@@ -4505,3 +4505,109 @@ def test_demoted_flex_can_be_placed_into_the_remaining_gap(tmp_path: Path) -> No
     stretch = next(f for f in placed["flexes"] if f["id"] == stretch_id)
     assert stretch["start"] == "09:40"
     assert not any("Stretch" in blocker for blocker in placed["blockers"])
+
+
+def test_wake_repair_moves_collision_connected_anchor_and_flex_as_one_group(
+    tmp_path: Path,
+) -> None:
+    _write_defaults(tmp_path)
+    now = datetime(2026, 8, 10, 22, 0)
+    edit_bounds(tmp_path, output_dir=tmp_path / "Desktop", wake="06:00", sleep="22:00", now=now)
+    early = add_anchor(
+        tmp_path,
+        output_dir=tmp_path / "Desktop",
+        name="Early",
+        start="06:00",
+        duration_minutes=30,
+        checklist_items=["Keys"],
+        now=now,
+    )
+    later = add_anchor(
+        tmp_path,
+        output_dir=tmp_path / "Desktop",
+        name="Later",
+        start="15:00",
+        duration_minutes=30,
+        now=now,
+    )
+    flex = add_flex(
+        tmp_path,
+        output_dir=tmp_path / "Desktop",
+        name="Prep",
+        duration_minutes=20,
+        checklist_items=["Bag"],
+        now=now,
+    )
+    prep_id = next(item for item in flex["flexes"] if item["name"] == "Prep")["id"]
+    place_flex(
+        tmp_path,
+        output_dir=tmp_path / "Desktop",
+        item_id=prep_id,
+        start="09:20",
+        now=now,
+    )
+
+    view = edit_bounds(tmp_path, output_dir=tmp_path / "Desktop", wake="09:00", now=now)
+
+    repaired_early = next(item for item in view["anchors"] if item["name"] == "Early")
+    repaired_prep = next(item for item in view["flexes"] if item["name"] == "Prep")
+    assert repaired_early["start"] == "09:00"
+    assert repaired_prep["start"] == "12:20"
+    assert repaired_early["checklist_items"] == ["Keys"]
+    assert repaired_prep["checklist_items"] == ["Bag"]
+    assert next(item for item in view["anchors"] if item["name"] == "Later")["start"] == "15:00"
+    assert view["blockers"] == []
+
+    fresh = session_view(tmp_path, output_dir=tmp_path / "Desktop", now=now)
+    assert next(item for item in fresh["flexes"] if item["name"] == "Prep")["start"] == "12:20"
+
+
+def test_sleep_repair_leaves_free_space_and_moves_connected_flex_group(
+    tmp_path: Path,
+) -> None:
+    _write_defaults(tmp_path)
+    now = datetime(2026, 8, 10, 22, 0)
+    edit_bounds(tmp_path, output_dir=tmp_path / "Desktop", wake="06:00", sleep="22:00", now=now)
+    add_anchor(
+        tmp_path,
+        output_dir=tmp_path / "Desktop",
+        name="Wind-down",
+        start="21:45",
+        duration_minutes=15,
+        now=now,
+    )
+    connected = add_flex(
+        tmp_path,
+        output_dir=tmp_path / "Desktop",
+        name="Close-up",
+        duration_minutes=20,
+        now=now,
+    )
+    isolated = add_flex(
+        tmp_path,
+        output_dir=tmp_path / "Desktop",
+        name="Reading",
+        duration_minutes=20,
+        now=now,
+    )
+    place_flex(
+        tmp_path,
+        output_dir=tmp_path / "Desktop",
+        item_id=next(item for item in connected["flexes"] if item["name"] == "Close-up")["id"],
+        start="20:50",
+        now=now,
+    )
+    place_flex(
+        tmp_path,
+        output_dir=tmp_path / "Desktop",
+        item_id=next(item for item in isolated["flexes"] if item["name"] == "Reading")["id"],
+        start="18:00",
+        now=now,
+    )
+
+    view = edit_bounds(tmp_path, output_dir=tmp_path / "Desktop", sleep="21:00", now=now)
+
+    assert next(item for item in view["anchors"] if item["name"] == "Wind-down")["start"] == "20:45"
+    assert next(item for item in view["flexes"] if item["name"] == "Close-up")["start"] == "19:50"
+    assert next(item for item in view["flexes"] if item["name"] == "Reading")["start"] == "18:00"
+    assert view["blockers"] == []
