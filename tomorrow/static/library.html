@@ -303,9 +303,12 @@
     });
 
     // Day Templates use the shared timeline planner; this page only navigates.
+    function editDayTemplate(entry) {
+      window.location.href = "/?template=" + encodeURIComponent(entry.id);
+    }
 
     document.getElementById("day-template-new").addEventListener("click", () => {
-      window.location.href = "/?template=new";
+      window.location.href = "/?template=" + encodeURIComponent("new");
     });
 
     applyActivityShape();

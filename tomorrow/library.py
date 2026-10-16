@@ -12,7 +12,7 @@ from __future__ import annotations
 from pathlib import Path
 import tomllib
 
-from tomorrow.activity_templates import activity_templates_dir
+from tomorrow.activity_templates import activity_templates_dir, load_activity_template_library
 from tomorrow.checklists import checklists_dir
 from tomorrow.day_templates import day_templates_dir
 from tomorrow.domain import minutes_from_bound, parse_clock
@@ -191,7 +191,10 @@ def _unassign_other_weekday_owners(directory: Path, weekday: str, keep: str) -> 
             path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
-def _validate_anchor_entry(entry: dict[str, object]) -> None:
+def _validate_anchor_entry(
+    entry: dict[str, object],
+    activity_library: dict[str, object] | None = None,
+) -> None:
     if "activity" in entry:
         shape = entry.get("shape")
         if shape is not None and shape not in {"anchor", "flex"}:
@@ -199,7 +202,12 @@ def _validate_anchor_entry(entry: dict[str, object]) -> None:
         if shape == "flex":
             _validate_flex_entry({**entry, "name": entry.get("name", "reference"), "duration": entry.get("duration", 1)})
             return
-        if entry.get("start") is None and entry.get("shape") == "anchor":
+        activity = (activity_library or {}).get(str(entry["activity"]))
+        if (
+            entry.get("start") is None
+            and entry.get("shape") == "anchor"
+            and getattr(activity, "start", None) is None
+        ):
             raise ValueError("An Anchor-shaped Activity Template requires a start time.")
         return
     name = entry.get("name")
@@ -229,13 +237,19 @@ def _validate_anchor_entry(entry: dict[str, object]) -> None:
             raise ValueError(f"Invalid Anchor end time: {end!r}.") from exc
 
 
-def _validate_flex_entry(entry: dict[str, object]) -> None:
+def _validate_flex_entry(
+    entry: dict[str, object],
+    activity_library: dict[str, object] | None = None,
+) -> None:
     if "activity" in entry:
         shape = entry.get("shape")
         if shape is not None and shape not in {"anchor", "flex"}:
             raise ValueError("Activity Template shape must be Anchor or Flex.")
         if shape == "anchor":
-            _validate_anchor_entry({**entry, "name": entry.get("name", "reference")})
+            _validate_anchor_entry(
+                {**entry, "name": entry.get("name", "reference")},
+                activity_library,
+            )
         return
     name = entry.get("name")
     if not isinstance(name, str) or not name.strip():
@@ -285,14 +299,13 @@ def save_day_template(
 
     anchor_entries = list(anchors or [])
     flex_entries = list(flexes or [])
+    activity_library = load_activity_template_library(repo_root / "data")
     for anchor in anchor_entries:
-        _validate_anchor_entry(anchor)
+        _validate_anchor_entry(anchor, activity_library)
     for flex in flex_entries:
-        _validate_flex_entry(flex)
+        _validate_flex_entry(flex, activity_library)
     anchor_entries = _ordered_anchor_entries(anchor_entries)
 
-    if weekday is not None:
-        _unassign_other_weekday_owners(directory, weekday, slug)
     if (wake is None) != (sleep is None):
         raise ValueError("Give both wake and sleep bounds, or neither.")
     if wake is not None and sleep is not None:
@@ -316,6 +329,8 @@ def save_day_template(
         lines.append("")
 
     _write_toml_lines(directory, slug, lines)
+    if weekday is not None:
+        _unassign_other_weekday_owners(directory, weekday, slug)
     return slug
 
 

@@ -1134,6 +1134,9 @@ def save_template_mode(
             )):
                 for key in ("start", "end", "duration", "duration_minutes"):
                     cleaned.pop(key, None)
+            if "end" in cleaned:
+                cleaned.pop("duration", None)
+                cleaned.pop("duration_minutes", None)
             return cleaned | (
                 {"duration": entry["duration_minutes"]}
                 if "duration_minutes" in entry

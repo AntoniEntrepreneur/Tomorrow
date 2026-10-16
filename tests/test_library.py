@@ -363,6 +363,68 @@ def test_save_day_template_with_activity_reference(tmp_path: Path) -> None:
     assert seed.anchors[0].name == "Therapy"
 
 
+def test_save_day_template_allows_anchor_reference_to_inherit_start(
+    tmp_path: Path,
+) -> None:
+    save_activity_template(tmp_path, name="Therapy", duration_minutes=50, start="16:00")
+
+    save_day_template(tmp_path, name="Tuesday", anchors=[{"activity": "therapy", "shape": "anchor"}])
+
+    text = (tmp_path / "data" / "templates" / "tuesday.toml").read_text()
+    assert 'activity = "therapy"' in text
+
+
+def test_invalid_day_template_save_does_not_unassign_existing_weekday_owner(
+    tmp_path: Path,
+) -> None:
+    save_day_template(tmp_path, name="Existing", weekday="tuesday")
+
+    with pytest.raises(ValueError):
+        save_day_template(
+            tmp_path,
+            name="Broken",
+            weekday="tuesday",
+            anchors=[{"name": "Missing timing", "start": "08:00"}],
+        )
+
+    assert 'weekday = "tuesday"' in (
+        tmp_path / "data" / "templates" / "existing.toml"
+    ).read_text()
+
+
+def test_activity_reference_with_inherited_duration_and_explicit_end_round_trips(
+    tmp_path: Path,
+) -> None:
+    (tmp_path / "data").mkdir()
+    (tmp_path / "data" / "defaults.toml").write_text(
+        'wake = "07:00"\nsleep = "23:00"\n', encoding="utf-8"
+    )
+    save_activity_template(tmp_path, name="Therapy", duration_minutes=50, start="16:00")
+    save_day_template(
+        tmp_path,
+        name="Tuesday",
+        anchors=[{"activity": "therapy", "shape": "anchor", "end": "17:15"}],
+    )
+
+    from tomorrow.session import save_template_mode, template_mode_view
+
+    view = template_mode_view(tmp_path, template_id="tuesday")
+    save_template_mode(
+        tmp_path,
+        template_id="tuesday",
+        name=view["name"],
+        weekday=view["weekday"],
+        wake=view["bounds"]["wake"],
+        sleep=view["bounds"]["sleep"],
+        anchors=view["anchors"],
+        flexes=view["flexes"],
+    )
+
+    text = (tmp_path / "data" / "templates" / "tuesday.toml").read_text()
+    assert 'end = "17:15"' in text
+    assert "duration =" not in text
+
+
 def test_save_day_template_preserves_activity_overrides(tmp_path: Path) -> None:
     save_day_template(
         tmp_path,
