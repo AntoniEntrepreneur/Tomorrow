@@ -1,0 +1,13 @@
+name = "Friday"
+weekday = "friday"
+
+[[anchor]]
+name = "Modelowanie i prognozowanie ekonometryczne"
+start = "11:00"
+end = "12:40"
+checklist = "university"
+
+[[anchor]]
+name = "Drive to Politechnika"
+start = "10:30"
+end = "10:50"

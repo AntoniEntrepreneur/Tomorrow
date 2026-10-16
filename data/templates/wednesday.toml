@@ -10,3 +10,8 @@ duration = 60
 name = "Szymon Korepetycje"
 start = "17:40"
 duration = 60
+
+[[anchor]]
+name = "Singing lesson"
+start = "12:10"
+end = "13:40"

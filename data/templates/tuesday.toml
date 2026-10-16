@@ -1,0 +1,18 @@
+name = "Tuesday"
+weekday = "tuesday"
+
+[[anchor]]
+name = "GIS"
+start = "8:20"
+end = "10:00"
+checklist = "university"
+
+[[anchor]]
+name = "Eksploracja danych"
+start = "13:45"
+end = "15:25"
+
+[[anchor]]
+name = "Drive to Politechnika"
+start = "7:50"
+end = "8:10"

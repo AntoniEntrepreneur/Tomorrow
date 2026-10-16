@@ -5,3 +5,19 @@ weekday = "monday"
 name = "Tutoring"
 start = "18:50"
 duration = 130
+
+[[anchor]]
+name = "Analiza danych w medycynie"
+start = "12:50"
+end = "14:30"
+checklist = "university"
+
+[[anchor]]
+name = "Volleyball"
+start = "21:00"
+duration = 90
+
+[[anchor]]
+name = "Drive to Politechnika"
+start = "12:20"
+end = "12:40"
