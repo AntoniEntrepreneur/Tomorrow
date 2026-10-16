@@ -391,6 +391,7 @@
 
   <script>
     let current = null;
+    let templateDraft = null;
     let sheetOpen = false;
     let sheetKind = null;
     let armedFlexId = null;
@@ -1148,6 +1149,44 @@
       suggestFromName(document.getElementById("edit-anchor"));
     }
 
+    function templateEntryForm(kind, index) {
+      const entry = templateDraft[kind === "anchor" ? "anchors" : "flexes"][index] || {};
+      const duration = entry.duration || entry.duration_minutes || "";
+      const timing = kind === "anchor"
+        ? formFields(entry.name || "", entry.start || "", duration)
+        : '<label>Name <input name="name" required value="' + esc(entry.name || "") + '"></label>' +
+          '<label>Duration (min) <input name="duration_minutes" type="number" min="1" required value="' + esc(duration) + '"></label>';
+      openSheet(
+        "<h2>" + (index === -1 ? "Add " : "Edit ") + (kind === "anchor" ? "Anchor" : "Flex") + "</h2>" +
+        '<form id="template-entry" data-kind="' + kind + '" data-index="' + index + '">' +
+        timing +
+        '<div class="actions"><button class="primary" type="submit">Update</button>' +
+        '<button type="button" class="ghost" data-close>Cancel</button></div></form>',
+        "edit"
+      );
+      if (kind === "anchor") initDurationToggle(document.getElementById("template-entry"));
+    }
+
+    function renderTemplateEntries() {
+      const rail = document.getElementById("rail");
+      const anchors = templateDraft.anchors || [];
+      const flexes = templateDraft.flexes || [];
+      rail.innerHTML =
+        '<div class="template-actions"><button type="button" data-template-add="anchor">Add Anchor</button>' +
+        '<button type="button" data-template-add="flex">Add Flex</button></div>' +
+        anchors.map((entry, index) =>
+          '<button type="button" class="block anchor" data-template-entry="anchor" data-template-index="' + index + '">' +
+          '<span class="block-title">' + esc(entry.name || ("Activity: " + entry.activity)) + '</span><div class="block-range">' +
+          esc([entry.start, entry.end || (entry.duration && (entry.duration + " min"))].filter(Boolean).join(" · ")) +
+          "</div></button>"
+        ).join("") +
+        flexes.map((entry, index) =>
+          '<button type="button" class="block flex" data-template-entry="flex" data-template-index="' + index + '">' +
+          esc(entry.name || ("Activity: " + entry.activity)) + (entry.duration ? " · " + esc(entry.duration) + " min" : "") +
+          "</button>"
+        ).join("");
+    }
+
     function sheetEditBound(which) {
       const value = current.bounds[which];
       const label = which === "wake" ? "Wake" : "Sleep";
@@ -1203,23 +1242,11 @@
         document.getElementById("template-editor").elements.weekday.value = template.weekday || "";
         document.getElementById("template-editor").elements.wake.value = template.bounds.wake;
         document.getElementById("template-editor").elements.sleep.value = template.bounds.sleep;
-        const templateRail = document.getElementById("rail");
-        for (const anchor of template.anchors || []) {
-          const block = document.createElement("div");
-          block.className = "block anchor";
-          block.innerHTML = '<span class="block-title"></span><div class="block-range"></div>';
-          block.querySelector(".block-title").textContent = anchor.name || ("Activity: " + anchor.activity);
-          block.querySelector(".block-range").textContent =
-            [anchor.start, anchor.end || (anchor.duration && (anchor.duration + " min"))].filter(Boolean).join(" · ");
-          templateRail.appendChild(block);
-        }
-        for (const flex of template.flexes || []) {
-          const block = document.createElement("div");
-          block.className = "block flex";
-          block.textContent = (flex.name || ("Activity: " + flex.activity)) +
-            (flex.duration ? " · " + flex.duration + " min" : "");
-          templateRail.appendChild(block);
-        }
+        templateDraft = {
+          anchors: (template.anchors || []).map(entry => ({...entry})),
+          flexes: (template.flexes || []).map(entry => ({...entry}))
+        };
+        renderTemplateEntries();
         document.querySelector(".stamps").hidden = true;
         document.getElementById("template-offer").hidden = true;
         document.getElementById("submit").hidden = true;
@@ -1236,8 +1263,8 @@
               weekday: form.get("weekday") || null,
               wake: form.get("wake"),
               sleep: form.get("sleep"),
-              anchors: template.anchors,
-              flexes: template.flexes
+              anchors: templateDraft.anchors,
+              flexes: templateDraft.flexes
             })
           }).then((r) => r.json());
           if (result.error) {
@@ -1478,6 +1505,19 @@
       }
     });
 
+    document.getElementById("rail").addEventListener("click", event => {
+      const target = event.target.closest("[data-template-add], [data-template-entry]");
+      if (!target) return;
+      const addKind = target.dataset.templateAdd;
+      if (addKind && templateDraft) {
+        templateEntryForm(addKind, -1);
+        return;
+      }
+      const kind = target.dataset.templateEntry;
+      const index = target.dataset.templateIndex;
+      if (kind && index !== undefined && templateDraft) templateEntryForm(kind, Number(index));
+    });
+
     document.getElementById("sheet").addEventListener("input", event => {
       const form = event.target.form;
       if (!form) return;
@@ -1513,6 +1553,19 @@
           checklist: checklistPayload(form),
           checklist_items: checklistItemsPayload(form)
         });
+        return;
+      }
+      if (form.id === "template-entry") {
+        const entries = form.dataset.kind === "anchor" ? templateDraft.anchors : templateDraft.flexes;
+        const entry = form.dataset.kind === "anchor"
+          ? {name: form.name.value, start: clockValue(form.start), duration: resolveDurationMinutes(form)}
+          : {name: form.name.value, duration: Number(form.duration_minutes.value)};
+        if (!entry.duration) return;
+        const index = Number(form.dataset.index);
+        if (index === -1) entries.push(entry);
+        else entries[index] = entry;
+        closeSheet();
+        renderTemplateEntries();
         return;
       }
       if (form.id === "add-flex") {

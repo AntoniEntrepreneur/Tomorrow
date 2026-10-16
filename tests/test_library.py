@@ -299,6 +299,58 @@ def test_save_day_template_creates_with_a_name_only_and_derives_the_id(tmp_path:
     assert seed.flexes[0].checklist == "sauna-kit"
 
 
+def test_save_day_template_serializes_anchors_in_chronological_order_and_keeps_flex_order(
+    tmp_path: Path,
+) -> None:
+    save_day_template(
+        tmp_path,
+        name="Tuesday",
+        anchors=[
+            {"name": "Late", "start": "18:00", "duration": 30},
+            {"name": "Early", "start": "07:00", "duration": 15},
+            {"name": "Overlap", "start": "07:10", "duration": 20},
+        ],
+        flexes=[
+            {"name": "First", "duration": 10},
+            {"name": "Second", "duration": 20},
+        ],
+    )
+
+    text = (tmp_path / "data" / "templates" / "tuesday.toml").read_text()
+    assert [text.index('name = "Early"'), text.index('name = "Overlap"'), text.index('name = "Late"')] == sorted(
+        [text.index('name = "Early"'), text.index('name = "Overlap"'), text.index('name = "Late"')]
+    )
+    seed = load_day_template(tmp_path / "data" / "templates" / "tuesday.toml", {})
+    assert seed is not None
+    assert [anchor.name for anchor in seed.anchors] == ["Early", "Overlap", "Late"]
+    assert [flex.name for flex in seed.flexes] == ["First", "Second"]
+
+
+@pytest.mark.parametrize(
+    ("anchors", "flexes", "message"),
+    [
+        ([{"name": "", "start": "08:00", "duration": 30}], None, "name"),
+        ([{"name": "Missing duration", "start": "08:00"}], None, "duration"),
+        (None, [{"name": "Missing duration"}], "duration"),
+        ([{"name": "Bad time", "start": "not-a-time", "duration": 30}], None, "time"),
+        ([{"name": "Bad duration", "start": "08:00", "duration": 0}], None, "duration"),
+    ],
+)
+def test_save_day_template_rejects_structurally_invalid_literal_entries(
+    tmp_path: Path,
+    anchors: list[dict[str, object]] | None,
+    flexes: list[dict[str, object]] | None,
+    message: str,
+) -> None:
+    with pytest.raises(ValueError, match=message):
+        save_day_template(
+            tmp_path,
+            name="Invalid",
+            anchors=anchors,
+            flexes=flexes,
+        )
+
+
 def test_save_day_template_with_activity_reference(tmp_path: Path) -> None:
     save_activity_template(tmp_path, name="Therapy", duration_minutes=50, start="16:00")
     save_day_template(tmp_path, name="Tuesday", anchors=[{"activity": "therapy"}])

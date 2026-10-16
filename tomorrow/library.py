@@ -194,15 +194,56 @@ def _unassign_other_weekday_owners(directory: Path, weekday: str, keep: str) -> 
 def _validate_anchor_entry(entry: dict[str, object]) -> None:
     if "activity" in entry:
         return
+    name = entry.get("name")
+    if not isinstance(name, str) or not name.strip():
+        raise ValueError("A Day Template entry requires a non-blank name.")
     start = entry.get("start")
     if start is None:
         raise ValueError("A Day Template Anchor entry requires a start time.")
+    try:
+        start_time = parse_clock(str(start))
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"Invalid Anchor start time: {start!r}.") from exc
     duration = entry.get("duration")
     end = entry.get("end")
     if (duration is None) == (end is None):
         raise ValueError("Give either a duration or an end time, not both or neither.")
+    if duration is not None:
+        try:
+            if int(duration) <= 0:
+                raise ValueError
+        except (TypeError, ValueError) as exc:
+            raise ValueError("A Day Template Anchor duration must be a positive number.") from exc
     if end is not None:
-        minutes_from_bound(parse_clock(str(start)), parse_clock(str(end)))
+        try:
+            minutes_from_bound(start_time, parse_clock(str(end)))
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"Invalid Anchor end time: {end!r}.") from exc
+
+
+def _validate_flex_entry(entry: dict[str, object]) -> None:
+    if "activity" in entry:
+        return
+    name = entry.get("name")
+    if not isinstance(name, str) or not name.strip():
+        raise ValueError("A Day Template entry requires a non-blank name.")
+    if entry.get("start") is not None or entry.get("end") is not None:
+        raise ValueError("A Day Template Flex entry cannot have a start or end time.")
+    duration = entry.get("duration")
+    try:
+        if duration is None or int(duration) <= 0:
+            raise ValueError
+    except (TypeError, ValueError) as exc:
+        raise ValueError("A Day Template Flex duration must be a positive number.") from exc
+
+
+def _ordered_anchor_entries(anchors: list[dict[str, object]]) -> list[dict[str, object]]:
+    """Put timed literal anchors in display order without moving references."""
+
+    literal = [entry for entry in anchors if "activity" not in entry]
+    references = [entry for entry in anchors if "activity" in entry]
+    literal.sort(key=lambda entry: parse_clock(str(entry["start"])))
+    return literal + references
 
 
 def save_day_template(
@@ -223,12 +264,19 @@ def save_day_template(
     {"activity": "<activity_id>"}.
     """
 
+    if not name.strip():
+        raise ValueError("Day Template name cannot be blank.")
     directory = day_templates_dir(repo_root / "data")
     directory.mkdir(parents=True, exist_ok=True)
     slug = _resolve_slug(directory, "Day Template", id=id, name=name)
 
-    for anchor in anchors or []:
+    anchor_entries = list(anchors or [])
+    flex_entries = list(flexes or [])
+    for anchor in anchor_entries:
         _validate_anchor_entry(anchor)
+    for flex in flex_entries:
+        _validate_flex_entry(flex)
+    anchor_entries = _ordered_anchor_entries(anchor_entries)
 
     if weekday is not None:
         _unassign_other_weekday_owners(directory, weekday, slug)
@@ -245,11 +293,11 @@ def save_day_template(
         lines.append(f"sleep = {_toml_string(sleep)}")
     lines.append("")
 
-    for anchor in anchors or []:
+    for anchor in anchor_entries:
         lines.append("[[anchor]]")
         lines.extend(_entry_lines(anchor))
         lines.append("")
-    for flex in flexes or []:
+    for flex in flex_entries:
         lines.append("[[flex]]")
         lines.extend(_entry_lines(flex))
         lines.append("")

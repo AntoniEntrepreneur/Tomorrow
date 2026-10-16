@@ -151,6 +151,35 @@ def test_template_mode_save_leaves_open_plan_file_and_session_unchanged(
     assert plan_path.read_bytes() == before_plan
 
 
+def test_template_mode_saves_shared_planner_entries_with_safe_timing_fields(
+    tmp_path: Path,
+) -> None:
+    _write_defaults(tmp_path)
+
+    save_template_mode(
+        tmp_path,
+        template_id=None,
+        name="Planner template",
+        weekday=None,
+        wake="06:00",
+        sleep="23:00",
+        anchors=[
+            {"name": "Later", "start": "18:00", "duration_minutes": 30},
+            {"name": "Earlier", "start": "08:00", "duration_minutes": 60},
+            {"name": "Overlap", "start": "08:30", "duration_minutes": 15},
+        ],
+        flexes=[{"name": "First", "duration_minutes": 20, "start": None}],
+    )
+
+    entries = template_mode_view(tmp_path, template_id="planner-template")
+    assert [entry["name"] for entry in entries["anchors"]] == [
+        "Earlier",
+        "Overlap",
+        "Later",
+    ]
+    assert entries["flexes"] == [{"name": "First", "duration": 20}]
+
+
 def _write_defaults(tmp_path: Path) -> None:
     data_dir = tmp_path / "data"
     data_dir.mkdir()
