@@ -12,7 +12,7 @@ from __future__ import annotations
 from pathlib import Path
 import tomllib
 
-from tomorrow.activity_templates import activity_templates_dir
+from tomorrow.activity_templates import activity_templates_dir, load_activity_template_library
 from tomorrow.checklists import checklists_dir
 from tomorrow.day_templates import day_templates_dir
 from tomorrow.domain import minutes_from_bound, parse_clock
@@ -191,18 +191,86 @@ def _unassign_other_weekday_owners(directory: Path, weekday: str, keep: str) -> 
             path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
-def _validate_anchor_entry(entry: dict[str, object]) -> None:
+def _validate_anchor_entry(
+    entry: dict[str, object],
+    activity_library: dict[str, object] | None = None,
+) -> None:
     if "activity" in entry:
+        shape = entry.get("shape")
+        if shape is not None and shape not in {"anchor", "flex"}:
+            raise ValueError("Activity Template shape must be Anchor or Flex.")
+        if shape == "flex":
+            _validate_flex_entry({**entry, "name": entry.get("name", "reference"), "duration": entry.get("duration", 1)})
+            return
+        activity = (activity_library or {}).get(str(entry["activity"]))
+        if (
+            entry.get("start") is None
+            and entry.get("shape") == "anchor"
+            and getattr(activity, "start", None) is None
+        ):
+            raise ValueError("An Anchor-shaped Activity Template requires a start time.")
         return
+    name = entry.get("name")
+    if not isinstance(name, str) or not name.strip():
+        raise ValueError("A Day Template entry requires a non-blank name.")
     start = entry.get("start")
     if start is None:
         raise ValueError("A Day Template Anchor entry requires a start time.")
+    try:
+        start_time = parse_clock(str(start))
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"Invalid Anchor start time: {start!r}.") from exc
     duration = entry.get("duration")
     end = entry.get("end")
     if (duration is None) == (end is None):
         raise ValueError("Give either a duration or an end time, not both or neither.")
+    if duration is not None:
+        try:
+            if int(duration) <= 0:
+                raise ValueError
+        except (TypeError, ValueError) as exc:
+            raise ValueError("A Day Template Anchor duration must be a positive number.") from exc
     if end is not None:
-        minutes_from_bound(parse_clock(str(start)), parse_clock(str(end)))
+        try:
+            minutes_from_bound(start_time, parse_clock(str(end)))
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"Invalid Anchor end time: {end!r}.") from exc
+
+
+def _validate_flex_entry(
+    entry: dict[str, object],
+    activity_library: dict[str, object] | None = None,
+) -> None:
+    if "activity" in entry:
+        shape = entry.get("shape")
+        if shape is not None and shape not in {"anchor", "flex"}:
+            raise ValueError("Activity Template shape must be Anchor or Flex.")
+        if shape == "anchor":
+            _validate_anchor_entry(
+                {**entry, "name": entry.get("name", "reference")},
+                activity_library,
+            )
+        return
+    name = entry.get("name")
+    if not isinstance(name, str) or not name.strip():
+        raise ValueError("A Day Template entry requires a non-blank name.")
+    if entry.get("start") is not None or entry.get("end") is not None:
+        raise ValueError("A Day Template Flex entry cannot have a start or end time.")
+    duration = entry.get("duration")
+    try:
+        if duration is None or int(duration) <= 0:
+            raise ValueError
+    except (TypeError, ValueError) as exc:
+        raise ValueError("A Day Template Flex duration must be a positive number.") from exc
+
+
+def _ordered_anchor_entries(anchors: list[dict[str, object]]) -> list[dict[str, object]]:
+    """Put timed literal anchors in display order without moving references."""
+
+    literal = [entry for entry in anchors if "activity" not in entry]
+    references = [entry for entry in anchors if "activity" in entry]
+    literal.sort(key=lambda entry: parse_clock(str(entry["start"])))
+    return literal + references
 
 
 def save_day_template(
@@ -213,6 +281,8 @@ def save_day_template(
     anchors: list[dict[str, object]] | None = None,
     flexes: list[dict[str, object]] | None = None,
     weekday: str | None = None,
+    wake: str | None = None,
+    sleep: str | None = None,
 ) -> str:
     """Create (id=None) or update (existing id) a Day Template TOML file.
 
@@ -221,31 +291,46 @@ def save_day_template(
     {"activity": "<activity_id>"}.
     """
 
+    if not name.strip():
+        raise ValueError("Day Template name cannot be blank.")
     directory = day_templates_dir(repo_root / "data")
     directory.mkdir(parents=True, exist_ok=True)
     slug = _resolve_slug(directory, "Day Template", id=id, name=name)
 
-    for anchor in anchors or []:
-        _validate_anchor_entry(anchor)
+    anchor_entries = list(anchors or [])
+    flex_entries = list(flexes or [])
+    activity_library = load_activity_template_library(repo_root / "data")
+    for anchor in anchor_entries:
+        _validate_anchor_entry(anchor, activity_library)
+    for flex in flex_entries:
+        _validate_flex_entry(flex, activity_library)
+    anchor_entries = _ordered_anchor_entries(anchor_entries)
 
-    if weekday is not None:
-        _unassign_other_weekday_owners(directory, weekday, slug)
+    if (wake is None) != (sleep is None):
+        raise ValueError("Give both wake and sleep bounds, or neither.")
+    if wake is not None and sleep is not None:
+        minutes_from_bound(parse_clock(wake), parse_clock(sleep))
 
     lines = [f"name = {_toml_string(name)}"]
     if weekday is not None:
         lines.append(f"weekday = {_toml_string(weekday)}")
+    if wake is not None:
+        lines.append(f"wake = {_toml_string(wake)}")
+        lines.append(f"sleep = {_toml_string(sleep)}")
     lines.append("")
 
-    for anchor in anchors or []:
+    for anchor in anchor_entries:
         lines.append("[[anchor]]")
         lines.extend(_entry_lines(anchor))
         lines.append("")
-    for flex in flexes or []:
+    for flex in flex_entries:
         lines.append("[[flex]]")
         lines.extend(_entry_lines(flex))
         lines.append("")
 
     _write_toml_lines(directory, slug, lines)
+    if weekday is not None:
+        _unassign_other_weekday_owners(directory, weekday, slug)
     return slug
 
 
@@ -253,6 +338,11 @@ def _entry_lines(entry: dict[str, object]) -> list[str]:
     lines: list[str] = []
     if "activity" in entry:
         lines.append(f"activity = {_toml_string(str(entry['activity']))}")
+        for key in ("shape", "name", "start", "end", "checklist"):
+            if entry.get(key) is not None:
+                lines.append(f"{key} = {_toml_string(str(entry[key]))}")
+        if entry.get("duration") is not None:
+            lines.append(f"duration = {int(entry['duration'])}")  # type: ignore[arg-type]
         return lines
     lines.append(f"name = {_toml_string(str(entry['name']))}")
     if entry.get("start") is not None:

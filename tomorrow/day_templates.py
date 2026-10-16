@@ -73,10 +73,12 @@ def load_day_template_entries(path: Path) -> dict[str, object]:
     """
 
     if not path.exists():
-        return {"weekday": None, "anchors": [], "flexes": []}
+        return {"weekday": None, "wake": None, "sleep": None, "anchors": [], "flexes": []}
     data = tomllib.loads(path.read_text(encoding="utf-8"))
     return {
         "weekday": data.get("weekday"),
+        "wake": data.get("wake"),
+        "sleep": data.get("sleep"),
         "anchors": list(data.get("anchor", ())),
         "flexes": list(data.get("flex", ())),
     }
@@ -97,9 +99,8 @@ def load_day_template(
     anchors: list[Anchor] = []
     flexes: list[Flex] = []
 
-    # An `activity = <id>` entry always follows the Activity Template's
-    # *current* shape, regardless of which section it is stored under, so
-    # switching an Activity Template between Anchor and Flex never drops it.
+    # An activity reference follows its explicit shape override, or the
+    # Activity Template's current shape.  The section is only a legacy hint.
     for entry in anchor_entries + flex_entries:
         activity_name = entry.get("activity")
         if activity_name is None:
@@ -107,22 +108,45 @@ def load_day_template(
         activity = library.get(str(activity_name))
         if activity is None:
             continue
-        if activity.start is not None:
+        shape = str(entry.get("shape") or ("anchor" if activity.start is not None else "flex"))
+        name = str(entry.get("name") or activity.name)
+        checklist = (
+            str(entry["checklist"]) if "checklist" in entry else activity.checklist
+        )
+        duration = (
+            timedelta(minutes=int(entry["duration"]))
+            if entry.get("duration") is not None
+            else activity.duration
+        )
+        start_value = entry.get("start") if "start" in entry else activity.start
+        end_value = entry.get("end") if "end" in entry else None
+        start_time = (
+            start_value
+            if hasattr(start_value, "hour") and hasattr(start_value, "minute")
+            else parse_clock(str(start_value))
+            if start_value is not None
+            else None
+        )
+        if end_value is not None and start_time is not None:
+            duration = timedelta(
+                minutes=minutes_from_bound(start_time, parse_clock(str(end_value)))
+            )
+        if shape == "anchor" and start_time is not None:
             anchors.append(
                 Anchor(
-                    name=activity.name,
-                    start=activity.start,
-                    duration=activity.duration,
-                    checklist=activity.checklist,
+                    name=name,
+                    start=start_time,
+                    duration=duration,
+                    checklist=checklist,
                     activity_template_id=str(activity_name),
                 )
             )
-        else:
+        elif shape == "flex":
             flexes.append(
                 Flex(
-                    name=activity.name,
-                    duration=activity.duration,
-                    checklist=activity.checklist,
+                    name=name,
+                    duration=duration,
+                    checklist=checklist,
                     activity_template_id=str(activity_name),
                 )
             )

@@ -8,6 +8,7 @@ from tomorrow.checklists import load_checklist_library
 from tomorrow.day_templates import (
     default_day_template_path,
     load_day_template,
+    load_day_template_entries,
     named_day_template_path,
 )
 from tomorrow.library import (
@@ -298,6 +299,58 @@ def test_save_day_template_creates_with_a_name_only_and_derives_the_id(tmp_path:
     assert seed.flexes[0].checklist == "sauna-kit"
 
 
+def test_save_day_template_serializes_anchors_in_chronological_order_and_keeps_flex_order(
+    tmp_path: Path,
+) -> None:
+    save_day_template(
+        tmp_path,
+        name="Tuesday",
+        anchors=[
+            {"name": "Late", "start": "18:00", "duration": 30},
+            {"name": "Early", "start": "07:00", "duration": 15},
+            {"name": "Overlap", "start": "07:10", "duration": 20},
+        ],
+        flexes=[
+            {"name": "First", "duration": 10},
+            {"name": "Second", "duration": 20},
+        ],
+    )
+
+    text = (tmp_path / "data" / "templates" / "tuesday.toml").read_text()
+    assert [text.index('name = "Early"'), text.index('name = "Overlap"'), text.index('name = "Late"')] == sorted(
+        [text.index('name = "Early"'), text.index('name = "Overlap"'), text.index('name = "Late"')]
+    )
+    seed = load_day_template(tmp_path / "data" / "templates" / "tuesday.toml", {})
+    assert seed is not None
+    assert [anchor.name for anchor in seed.anchors] == ["Early", "Overlap", "Late"]
+    assert [flex.name for flex in seed.flexes] == ["First", "Second"]
+
+
+@pytest.mark.parametrize(
+    ("anchors", "flexes", "message"),
+    [
+        ([{"name": "", "start": "08:00", "duration": 30}], None, "name"),
+        ([{"name": "Missing duration", "start": "08:00"}], None, "duration"),
+        (None, [{"name": "Missing duration"}], "duration"),
+        ([{"name": "Bad time", "start": "not-a-time", "duration": 30}], None, "time"),
+        ([{"name": "Bad duration", "start": "08:00", "duration": 0}], None, "duration"),
+    ],
+)
+def test_save_day_template_rejects_structurally_invalid_literal_entries(
+    tmp_path: Path,
+    anchors: list[dict[str, object]] | None,
+    flexes: list[dict[str, object]] | None,
+    message: str,
+) -> None:
+    with pytest.raises(ValueError, match=message):
+        save_day_template(
+            tmp_path,
+            name="Invalid",
+            anchors=anchors,
+            flexes=flexes,
+        )
+
+
 def test_save_day_template_with_activity_reference(tmp_path: Path) -> None:
     save_activity_template(tmp_path, name="Therapy", duration_minutes=50, start="16:00")
     save_day_template(tmp_path, name="Tuesday", anchors=[{"activity": "therapy"}])
@@ -308,6 +361,91 @@ def test_save_day_template_with_activity_reference(tmp_path: Path) -> None:
 
     assert seed is not None
     assert seed.anchors[0].name == "Therapy"
+
+
+def test_save_day_template_allows_anchor_reference_to_inherit_start(
+    tmp_path: Path,
+) -> None:
+    save_activity_template(tmp_path, name="Therapy", duration_minutes=50, start="16:00")
+
+    save_day_template(tmp_path, name="Tuesday", anchors=[{"activity": "therapy", "shape": "anchor"}])
+
+    text = (tmp_path / "data" / "templates" / "tuesday.toml").read_text()
+    assert 'activity = "therapy"' in text
+
+
+def test_invalid_day_template_save_does_not_unassign_existing_weekday_owner(
+    tmp_path: Path,
+) -> None:
+    save_day_template(tmp_path, name="Existing", weekday="tuesday")
+
+    with pytest.raises(ValueError):
+        save_day_template(
+            tmp_path,
+            name="Broken",
+            weekday="tuesday",
+            anchors=[{"name": "Missing timing", "start": "08:00"}],
+        )
+
+    assert 'weekday = "tuesday"' in (
+        tmp_path / "data" / "templates" / "existing.toml"
+    ).read_text()
+
+
+def test_activity_reference_with_inherited_duration_and_explicit_end_round_trips(
+    tmp_path: Path,
+) -> None:
+    (tmp_path / "data").mkdir()
+    (tmp_path / "data" / "defaults.toml").write_text(
+        'wake = "07:00"\nsleep = "23:00"\n', encoding="utf-8"
+    )
+    save_activity_template(tmp_path, name="Therapy", duration_minutes=50, start="16:00")
+    save_day_template(
+        tmp_path,
+        name="Tuesday",
+        anchors=[{"activity": "therapy", "shape": "anchor", "end": "17:15"}],
+    )
+
+    from tomorrow.session import save_template_mode, template_mode_view
+
+    view = template_mode_view(tmp_path, template_id="tuesday")
+    save_template_mode(
+        tmp_path,
+        template_id="tuesday",
+        name=view["name"],
+        weekday=view["weekday"],
+        wake=view["bounds"]["wake"],
+        sleep=view["bounds"]["sleep"],
+        anchors=view["anchors"],
+        flexes=view["flexes"],
+    )
+
+    text = (tmp_path / "data" / "templates" / "tuesday.toml").read_text()
+    assert 'end = "17:15"' in text
+    assert "duration =" not in text
+
+
+def test_save_day_template_preserves_activity_overrides(tmp_path: Path) -> None:
+    save_day_template(
+        tmp_path,
+        name="Tuesday",
+        flexes=[
+            {
+                "activity": "deep-work",
+                "shape": "anchor",
+                "name": "Short focus",
+                "start": "09:00",
+                "duration": 45,
+                "checklist": "focus-kit",
+            }
+        ],
+    )
+
+    text = (tmp_path / "data" / "templates" / "tuesday.toml").read_text()
+    assert 'activity = "deep-work"' in text
+    assert 'shape = "anchor"' in text
+    assert 'name = "Short focus"' in text
+    assert 'start = "09:00"' in text
 
 
 def test_activity_reference_stored_under_the_wrong_section_still_resolves_by_current_shape(
@@ -408,6 +546,26 @@ def test_save_day_template_end_bound_anchor_round_trips(tmp_path: Path) -> None:
 
     assert seed is not None
     assert seed.anchors[0].duration.total_seconds() / 60 == 120
+
+
+def test_day_template_persists_optional_bounds_and_legacy_defaults(tmp_path: Path) -> None:
+    save_day_template(
+        tmp_path,
+        name="Focused Tuesday",
+        weekday="tuesday",
+        wake="07:30",
+        sleep="23:15",
+    )
+
+    path = named_day_template_path(tmp_path / "data", "focused-tuesday")
+    entries = load_day_template_entries(path)
+    assert entries["wake"] == "07:30"
+    assert entries["sleep"] == "23:15"
+
+    legacy = tmp_path / "data" / "templates" / "legacy.toml"
+    legacy.write_text('name = "Legacy"\n', encoding="utf-8")
+    assert load_day_template_entries(legacy)["wake"] is None
+    assert load_day_template_entries(legacy)["sleep"] is None
 
 
 def test_save_day_template_rejects_both_duration_and_end_on_an_anchor(tmp_path: Path) -> None:
