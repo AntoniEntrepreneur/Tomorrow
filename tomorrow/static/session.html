@@ -320,6 +320,12 @@
     .sheet .danger { background: var(--danger); color: #fff; margin-left: auto; }
     .sheet .duration-toggle { background: transparent; border: none; color: var(--muted); text-decoration: underline; padding: 0.2rem 0; margin-bottom: 0.4rem; }
     .sheet .field-error { font-size: 0.8rem; color: var(--danger); margin-bottom: 0.6rem; }
+    #template-editor { display: grid; gap: 0.45rem; margin-bottom: 1rem; }
+    #template-editor[hidden] { display: none; }
+    #template-editor .ghost { background: transparent; color: var(--ink); border: 1px solid rgba(224,168,74,0.28); }
+    #template-editor [role="status"] { color: var(--anchor); min-height: 1.2em; }
+    .template-actions { display: flex; gap: 0.4rem; margin-bottom: 0.6rem; flex-wrap: wrap; }
+    .template-actions button { border: 1px solid rgba(224,168,74,0.35); background: transparent; color: var(--ink); border-radius: 8px; padding: 0.4rem 0.6rem; cursor: pointer; }
   </style>
 </head>
 <body>
@@ -336,7 +342,8 @@
       </div>
     </header>
 
-    <form id="template-editor" hidden>
+    <form id="template-editor" hidden data-mode="template">
+      <strong id="template-mode-label">Reusable Day Template</strong>
       <label>Template name <input name="name" required></label>
       <label>Weekday <select name="weekday">
         <option value="">No weekday</option>
@@ -347,6 +354,7 @@
       <label>Wake <input name="wake" required></label>
       <label>Sleep <input name="sleep" required></label>
       <button type="submit" class="primary">Save Template</button>
+      <button type="button" class="ghost" id="template-reset">Reset changes</button>
       <span id="template-saved" role="status"></span>
     </form>
 
@@ -392,6 +400,42 @@
   <script>
     let current = null;
     let templateDraft = null;
+    let templateInitial = null;
+    let templateMode = false;
+    let templateDirty = false;
+
+    function markTemplateDirty() {
+      if (!templateMode) return;
+      templateDirty = true;
+      document.getElementById("template-saved").textContent = "Unsaved changes";
+    }
+
+    function cloneTemplate(value) {
+      return JSON.parse(JSON.stringify(value));
+    }
+
+    window.addEventListener("beforeunload", event => {
+      if (!templateMode || !templateDirty) return;
+      event.preventDefault();
+      event.returnValue = "You have unsaved template changes.";
+      return event.returnValue;
+    });
+
+    document.getElementById("template-editor").addEventListener("input", markTemplateDirty);
+    document.getElementById("template-reset").addEventListener("click", () => {
+      if (!templateMode || !templateInitial) return;
+      if (templateDirty && !window.confirm("Discard unsaved template changes?")) return;
+      const source = templateInitial.template;
+      templateDraft = cloneTemplate(templateInitial.draft);
+      const form = document.getElementById("template-editor");
+      form.elements.name.value = source.name || "";
+      form.elements.weekday.value = source.weekday || "";
+      form.elements.wake.value = source.bounds.wake;
+      form.elements.sleep.value = source.bounds.sleep;
+      templateDirty = false;
+      document.getElementById("template-saved").textContent = "Reset";
+      renderTemplateEntries();
+    });
     let sheetOpen = false;
     let sheetKind = null;
     let armedFlexId = null;
@@ -1208,6 +1252,16 @@
           esc(entry.name || ("Activity: " + entry.activity)) + (entry.duration ? " · " + esc(entry.duration) + " min" : "") +
           "</button>"
         ).join("");
+      const tray = document.getElementById("tray");
+      tray.className = "tray";
+      tray.innerHTML = '<div class="tray-label">Reusable flex entries</div>' +
+        (flexes.length
+          ? '<div class="tray-chips">' + flexes.map((entry, index) =>
+            '<button type="button" class="flex-chip" data-template-entry="flex" data-template-source-kind="flex" data-template-index="' +
+            index + '">' + esc(entry.name || ("Flex " + (index + 1))) +
+            (entry.duration ? " · " + esc(entry.duration) + " min" : "") + "</button>"
+          ).join("") + "</div>"
+          : "<div>No reusable flex entries.</div>");
     }
 
     function sheetEditBound(which) {
@@ -1254,6 +1308,7 @@
     async function loadSession() {
       const templateQuery = new URLSearchParams(window.location.search).get("template");
       if (templateQuery !== null) {
+        templateMode = true;
         const templateId = templateQuery === "new" ? "" : templateQuery;
         const response = await fetch("/api/template?id=" + encodeURIComponent(templateId));
         const template = await response.json();
@@ -1270,10 +1325,21 @@
           flexes: (template.flexes || []).map(entry => ({...entry})),
           activityOptions: template.activity_templates || []
         };
+        templateInitial = cloneTemplate({
+          template,
+          draft: templateDraft
+        });
+        templateDirty = false;
         renderTemplateEntries();
         document.querySelector(".stamps").hidden = true;
         document.getElementById("template-offer").hidden = true;
         document.getElementById("submit").hidden = true;
+        document.getElementById("undo").hidden = true;
+        document.getElementById("redo").hidden = true;
+        document.getElementById("reset").hidden = true;
+        document.getElementById("todos-tray").hidden = true;
+        document.getElementById("template-mode-label").textContent =
+          "Reusable Day Template · " + (template.template_id || "new");
         document.getElementById("template-editor").onsubmit = async (event) => {
           event.preventDefault();
           const form = new FormData(event.target);
@@ -1296,6 +1362,8 @@
             return;
           }
           document.getElementById("template-saved").textContent = "Saved";
+          templateDirty = false;
+          templateInitial = cloneTemplate({template: result, draft: templateDraft});
           window.history.replaceState({}, "", "/?template=" + encodeURIComponent(result.template_id));
         };
         return;
@@ -1475,6 +1543,7 @@
         } else {
           form[resetField].value = "";
         }
+        markTemplateDirty();
         return;
       }
       const removeId = event.target.dataset.remove;
@@ -1609,6 +1678,7 @@
         const index = Number(form.dataset.index);
         if (index === -1) entries.push(entry);
         else entries[index] = entry;
+        markTemplateDirty();
         closeSheet();
         renderTemplateEntries();
         return;
@@ -1630,6 +1700,7 @@
           source.splice(old, 1);
         }
         entries.push(entry);
+        markTemplateDirty();
         closeSheet();
         renderTemplateEntries();
         return;
