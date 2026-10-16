@@ -180,6 +180,37 @@ def test_template_mode_saves_shared_planner_entries_with_safe_timing_fields(
     assert entries["flexes"] == [{"name": "First", "duration": 20}]
 
 
+def test_template_mode_resolves_reference_overrides_and_keeps_missing_references(
+    tmp_path: Path,
+) -> None:
+    _write_defaults(tmp_path)
+    save_activity_template(
+        tmp_path, name="Deep work", duration_minutes=90, checklist="focus-kit"
+    )
+    save_day_template(
+        tmp_path,
+        name="Tuesday",
+        anchors=[
+            {
+                "activity": "deep-work",
+                "shape": "anchor",
+                "name": "Short focus",
+                "start": "09:00",
+                "duration": 45,
+            },
+            {"activity": "deleted"},
+        ],
+    )
+
+    view = template_mode_view(tmp_path, template_id="tuesday")
+
+    assert view["anchors"][0]["name"] == "Short focus"
+    assert view["anchors"][0]["checklist"] == "focus-kit"
+    assert view["anchors"][0]["broken"] is False
+    assert view["anchors"][1]["broken"] is True
+    assert view["anchors"][1]["activity"] == "deleted"
+
+
 def _write_defaults(tmp_path: Path) -> None:
     data_dir = tmp_path / "data"
     data_dir.mkdir()

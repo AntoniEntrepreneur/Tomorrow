@@ -1149,8 +1149,30 @@
       suggestFromName(document.getElementById("edit-anchor"));
     }
 
-    function templateEntryForm(kind, index) {
-      const entry = templateDraft[kind === "anchor" ? "anchors" : "flexes"][index] || {};
+    function templateEntryForm(kind, index, sourceKind) {
+      const entry = kind === "activity"
+        ? (templateDraft[sourceKind === "anchor" ? "anchors" : "flexes"][index] || {})
+        : (templateDraft[kind === "anchor" ? "anchors" : "flexes"][index] || {});
+      if (kind === "activity") {
+        const options = (templateDraft.activityOptions || []).map(option =>
+          '<option value="' + esc(option.id) + '"' + (option.id === entry.activity ? " selected" : "") + '>' +
+          esc(option.name) + "</option>").join("");
+        openSheet(
+          "<h2>" + (index === -1 ? "Add " : "Edit ") + "Activity Template</h2>" +
+          '<form id="template-activity-entry" data-index="' + index + '" data-source-kind="' + (sourceKind || "") + '">' +
+          '<label>Shared template <select name="activity" required>' + options + '</select></label>' +
+          '<label>Shape <select name="shape"><option value="flex">Flex</option><option value="anchor">Anchor</option></select><button type="button" class="ghost" data-reset-field="shape">Reset</button></label>' +
+          '<label>Name override (optional) <input name="name" value="' + esc(entry.name_overridden ? entry.name : "") + '"><button type="button" class="ghost" data-reset-field="name">Reset</button></label>' +
+          '<label>Checklist override (optional) <input name="checklist" value="' + esc(entry.checklist_overridden ? entry.checklist : "") + '"><button type="button" class="ghost" data-reset-field="checklist">Reset</button></label>' +
+          '<label>Start override (Anchor) <input name="start" type="time" value="' + esc(entry.start_overridden ? entry.start : "") + '"><button type="button" class="ghost" data-reset-field="timing">Reset timing</button></label>' +
+          '<label>Duration override <input name="duration" type="number" min="1" value="' + esc(entry.timing_overridden ? (entry.duration || "") : "") + '"></label>' +
+          '<p class="hint">Leave an override blank to inherit. Resetting shape also resets its timing.</p>' +
+          '<div class="actions"><button class="primary" type="submit">Update</button><button type="button" class="ghost" data-close>Cancel</button></div></form>',
+          "edit"
+        );
+        document.querySelector("#template-activity-entry [name=shape]").value = entry.shape || "flex";
+        return;
+      }
       const duration = entry.duration || entry.duration_minutes || "";
       const timing = kind === "anchor"
         ? formFields(entry.name || "", entry.start || "", duration)
@@ -1173,15 +1195,16 @@
       const flexes = templateDraft.flexes || [];
       rail.innerHTML =
         '<div class="template-actions"><button type="button" data-template-add="anchor">Add Anchor</button>' +
-        '<button type="button" data-template-add="flex">Add Flex</button></div>' +
+        '<button type="button" data-template-add="flex">Add Flex</button>' +
+        '<button type="button" data-template-add="activity">Add Activity Template</button></div>' +
         anchors.map((entry, index) =>
-          '<button type="button" class="block anchor" data-template-entry="anchor" data-template-index="' + index + '">' +
+          '<button type="button" class="block anchor" data-template-entry="' + (entry.activity ? "activity" : "anchor") + '" data-template-source-kind="anchor" data-template-index="' + index + '">' +
           '<span class="block-title">' + esc(entry.name || ("Activity: " + entry.activity)) + '</span><div class="block-range">' +
           esc([entry.start, entry.end || (entry.duration && (entry.duration + " min"))].filter(Boolean).join(" · ")) +
           "</div></button>"
         ).join("") +
         flexes.map((entry, index) =>
-          '<button type="button" class="block flex" data-template-entry="flex" data-template-index="' + index + '">' +
+          '<button type="button" class="block flex" data-template-entry="' + (entry.activity ? "activity" : "flex") + '" data-template-source-kind="flex" data-template-index="' + index + '">' +
           esc(entry.name || ("Activity: " + entry.activity)) + (entry.duration ? " · " + esc(entry.duration) + " min" : "") +
           "</button>"
         ).join("");
@@ -1244,7 +1267,8 @@
         document.getElementById("template-editor").elements.sleep.value = template.bounds.sleep;
         templateDraft = {
           anchors: (template.anchors || []).map(entry => ({...entry})),
-          flexes: (template.flexes || []).map(entry => ({...entry}))
+          flexes: (template.flexes || []).map(entry => ({...entry})),
+          activityOptions: template.activity_templates || []
         };
         renderTemplateEntries();
         document.querySelector(".stamps").hidden = true;
@@ -1434,6 +1458,25 @@
     });
 
     document.getElementById("sheet").addEventListener("click", async event => {
+      const resetField = event.target.dataset.resetField;
+      if (resetField) {
+        event.preventDefault();
+        const form = event.target.form;
+        if (resetField === "timing") {
+          form.start.value = "";
+          form.duration.value = "";
+        } else if (resetField === "shape") {
+          const option = (templateDraft.activityOptions || []).find(
+            item => item.id === form.activity.value
+          );
+          form.shape.value = option && option.is_anchor_shaped ? "anchor" : "flex";
+          form.start.value = "";
+          form.duration.value = "";
+        } else {
+          form[resetField].value = "";
+        }
+        return;
+      }
       const removeId = event.target.dataset.remove;
       if (removeId) {
         event.preventDefault();
@@ -1515,7 +1558,9 @@
       }
       const kind = target.dataset.templateEntry;
       const index = target.dataset.templateIndex;
-      if (kind && index !== undefined && templateDraft) templateEntryForm(kind, Number(index));
+      if (kind && index !== undefined && templateDraft) {
+        templateEntryForm(kind, Number(index), target.dataset.templateSourceKind);
+      }
     });
 
     document.getElementById("sheet").addEventListener("input", event => {
@@ -1564,6 +1609,27 @@
         const index = Number(form.dataset.index);
         if (index === -1) entries.push(entry);
         else entries[index] = entry;
+        closeSheet();
+        renderTemplateEntries();
+        return;
+      }
+      if (form.id === "template-activity-entry") {
+        const value = name => form.elements[name].value.trim();
+        const entry = {
+          activity: form.elements.activity.value,
+          shape: form.elements.shape.value,
+        };
+        if (value("name")) entry.name = value("name");
+        if (value("checklist")) entry.checklist = value("checklist");
+        if (value("start")) entry.start = value("start");
+        if (value("duration")) entry.duration = Number(value("duration"));
+        const entries = entry.shape === "anchor" ? templateDraft.anchors : templateDraft.flexes;
+        const old = Number(form.dataset.index);
+        if (old >= 0) {
+          const source = form.dataset.sourceKind === "anchor" ? templateDraft.anchors : templateDraft.flexes;
+          source.splice(old, 1);
+        }
+        entries.push(entry);
         closeSheet();
         renderTemplateEntries();
         return;

@@ -140,6 +140,42 @@ duration = 30
     )
 
 
+def test_activity_reference_overrides_inherit_and_change_shape(tmp_path: Path) -> None:
+    template_file = tmp_path / "tuesday.toml"
+    template_file.write_text(
+        """
+[[anchor]]
+activity = "deep-work"
+shape = "anchor"
+name = "Focused work"
+start = "09:00"
+duration = 45
+checklist = "short-focus"
+""".strip(),
+        encoding="utf-8",
+    )
+    library = {
+        "deep-work": ActivityTemplate(
+            name="Deep work",
+            duration=timedelta(minutes=90),
+            checklist="focus-kit",
+        )
+    }
+
+    seed = load_day_template(template_file, library)
+
+    assert seed is not None
+    assert seed.anchors == (
+        Anchor(
+            name="Focused work",
+            start=time(9, 0),
+            duration=timedelta(minutes=45),
+            checklist="short-focus",
+            activity_template_id="deep-work",
+        ),
+    )
+
+
 def test_load_day_template_name_reads_name_field(tmp_path: Path) -> None:
     template_file = tmp_path / "usual-tuesday.toml"
     template_file.write_text('name = "Usual Tuesday"\n', encoding="utf-8")

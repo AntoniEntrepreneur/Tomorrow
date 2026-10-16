@@ -193,6 +193,14 @@ def _unassign_other_weekday_owners(directory: Path, weekday: str, keep: str) -> 
 
 def _validate_anchor_entry(entry: dict[str, object]) -> None:
     if "activity" in entry:
+        shape = entry.get("shape")
+        if shape is not None and shape not in {"anchor", "flex"}:
+            raise ValueError("Activity Template shape must be Anchor or Flex.")
+        if shape == "flex":
+            _validate_flex_entry({**entry, "name": entry.get("name", "reference"), "duration": entry.get("duration", 1)})
+            return
+        if entry.get("start") is None and entry.get("shape") == "anchor":
+            raise ValueError("An Anchor-shaped Activity Template requires a start time.")
         return
     name = entry.get("name")
     if not isinstance(name, str) or not name.strip():
@@ -223,6 +231,11 @@ def _validate_anchor_entry(entry: dict[str, object]) -> None:
 
 def _validate_flex_entry(entry: dict[str, object]) -> None:
     if "activity" in entry:
+        shape = entry.get("shape")
+        if shape is not None and shape not in {"anchor", "flex"}:
+            raise ValueError("Activity Template shape must be Anchor or Flex.")
+        if shape == "anchor":
+            _validate_anchor_entry({**entry, "name": entry.get("name", "reference")})
         return
     name = entry.get("name")
     if not isinstance(name, str) or not name.strip():
@@ -310,6 +323,11 @@ def _entry_lines(entry: dict[str, object]) -> list[str]:
     lines: list[str] = []
     if "activity" in entry:
         lines.append(f"activity = {_toml_string(str(entry['activity']))}")
+        for key in ("shape", "name", "start", "end", "checklist"):
+            if entry.get(key) is not None:
+                lines.append(f"{key} = {_toml_string(str(entry[key]))}")
+        if entry.get("duration") is not None:
+            lines.append(f"duration = {int(entry['duration'])}")  # type: ignore[arg-type]
         return lines
     lines.append(f"name = {_toml_string(str(entry['name']))}")
     if entry.get("start") is not None:

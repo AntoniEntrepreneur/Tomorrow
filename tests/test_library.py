@@ -363,6 +363,29 @@ def test_save_day_template_with_activity_reference(tmp_path: Path) -> None:
     assert seed.anchors[0].name == "Therapy"
 
 
+def test_save_day_template_preserves_activity_overrides(tmp_path: Path) -> None:
+    save_day_template(
+        tmp_path,
+        name="Tuesday",
+        flexes=[
+            {
+                "activity": "deep-work",
+                "shape": "anchor",
+                "name": "Short focus",
+                "start": "09:00",
+                "duration": 45,
+                "checklist": "focus-kit",
+            }
+        ],
+    )
+
+    text = (tmp_path / "data" / "templates" / "tuesday.toml").read_text()
+    assert 'activity = "deep-work"' in text
+    assert 'shape = "anchor"' in text
+    assert 'name = "Short focus"' in text
+    assert 'start = "09:00"' in text
+
+
 def test_activity_reference_stored_under_the_wrong_section_still_resolves_by_current_shape(
     tmp_path: Path,
 ) -> None:

@@ -1036,6 +1036,39 @@ def template_mode_view(repo_root: Path, *, template_id: str | None) -> dict:
         "anchors": [],
         "flexes": [],
     }
+    activity_library = load_activity_template_library(repo_root / "data")
+
+    def present(raw: list[dict[str, object]], section: str) -> list[dict[str, object]]:
+        result = []
+        for source in raw:
+            entry = dict(source)
+            activity_id = entry.get("activity")
+            if activity_id is None:
+                result.append(entry)
+                continue
+            activity = activity_library.get(str(activity_id))
+            shape = str(entry.get("shape") or (
+                "anchor" if activity is not None and activity.start is not None
+                else "flex"
+            ))
+            entry["shape"] = shape
+            if activity is None:
+                entry.update({"broken": True, "name": entry.get("name") or f"Missing Activity Template: {activity_id}"})
+            else:
+                entry.setdefault("name", activity.name)
+                entry.setdefault("checklist", activity.checklist)
+                if shape == "anchor":
+                    entry.setdefault("start", activity.start.strftime("%H:%M") if activity.start else None)
+                entry.setdefault("duration", int(activity.duration.total_seconds() // 60))
+                entry["broken"] = False
+            entry["name_overridden"] = "name" in source
+            entry["checklist_overridden"] = "checklist" in source
+            entry["timing_overridden"] = any(key in source for key in ("start", "end", "duration"))
+            entry["shape_overridden"] = "shape" in source
+            entry["start_overridden"] = "start" in source
+            result.append(entry)
+        return result
+
     return {
         "mode": "template",
         "template_id": template_id,
@@ -1045,8 +1078,9 @@ def template_mode_view(repo_root: Path, *, template_id: str | None) -> dict:
             "wake": entries["wake"] or defaults.wake,
             "sleep": entries["sleep"] or defaults.sleep,
         },
-        "anchors": entries["anchors"],
-        "flexes": entries["flexes"],
+        "anchors": present(entries["anchors"], "anchor"),
+        "flexes": present(entries["flexes"], "flex"),
+        "activity_templates": _list_activity_templates(repo_root / "data"),
         "saved": False,
     }
 
@@ -1078,7 +1112,33 @@ def save_template_mode(
         """Translate the shared planner's fields to the template file shape."""
 
         if "activity" in entry:
-            return {"activity": entry["activity"]}
+            cleaned = {
+                key: value
+                for key, value in entry.items()
+                if key in {
+                    "activity", "shape", "name", "start", "end", "duration",
+                    "duration_minutes", "checklist",
+                }
+                and value is not None
+            }
+            for key, flag in (
+                ("name", "name_overridden"),
+                ("checklist", "checklist_overridden"),
+                ("start", "start_overridden"),
+                ("shape", "shape_overridden"),
+            ):
+                if not entry.get(flag, key in entry):
+                    cleaned.pop(key, None)
+            if not entry.get("timing_overridden", any(
+                key in entry for key in ("start", "end", "duration", "duration_minutes")
+            )):
+                for key in ("start", "end", "duration", "duration_minutes"):
+                    cleaned.pop(key, None)
+            return cleaned | (
+                {"duration": entry["duration_minutes"]}
+                if "duration_minutes" in entry
+                else {}
+            )
         result = {
             key: value
             for key, value in entry.items()
