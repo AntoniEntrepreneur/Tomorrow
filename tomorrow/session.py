@@ -1066,6 +1066,23 @@ def save_template_mode(
 
     if not name.strip():
         raise ValueError("Day Template name cannot be blank.")
+
+    def literal_entry(entry: dict[str, object], *, flex: bool) -> dict[str, object]:
+        """Translate the shared planner's fields to the template file shape."""
+
+        if "activity" in entry:
+            return {"activity": entry["activity"]}
+        result = {
+            key: value
+            for key, value in entry.items()
+            if key in {"name", "start", "end", "duration", "checklist"}
+        }
+        if "duration_minutes" in entry:
+            result["duration"] = entry["duration_minutes"]
+        return result
+
+    template_anchors = [literal_entry(entry, flex=False) for entry in anchors]
+    template_flexes = [literal_entry(entry, flex=True) for entry in flexes]
     saved_id = save_day_template(
         repo_root,
         id=template_id,
@@ -1073,8 +1090,8 @@ def save_template_mode(
         weekday=weekday or None,
         wake=wake,
         sleep=sleep,
-        anchors=anchors,
-        flexes=flexes,
+        anchors=template_anchors,
+        flexes=template_flexes,
     )
     result = template_mode_view(repo_root, template_id=saved_id)
     result["saved"] = True
