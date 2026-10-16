@@ -20,7 +20,7 @@ from tomorrow.domain import (
 from tomorrow.activity_templates import activity_templates_dir
 from tomorrow.defaults import DayBounds
 from tomorrow.library import save_activity_template, save_day_template
-from tomorrow.session import save_template_mode, template_mode_view
+from tomorrow.session import save_session, save_template_mode, template_mode_view
 from tomorrow.name_times import parse_name_time
 from tomorrow.plan import PLAN_FILENAME
 from tomorrow.session import (
@@ -107,6 +107,48 @@ def test_template_mode_saves_reusable_data_without_changing_concrete_session(
     assert result["saved"] is True
     assert template_mode_view(tmp_path, template_id="legacy")["name"] == "Edited"
     assert json.loads((tmp_path / "data" / "session.json").read_text())["anchors"][0]["name"] == "Only plan"
+
+
+def test_template_mode_save_leaves_open_plan_file_and_session_unchanged(
+    tmp_path: Path,
+) -> None:
+    _write_defaults(tmp_path)
+    output_dir = _output_dir(tmp_path)
+    concrete = load_session(tmp_path, output_dir=output_dir)
+    concrete["anchors"].append(
+        {
+            "id": "concrete",
+            "name": "Open plan",
+            "start": "09:00",
+            "duration_minutes": 30,
+            "checklist": None,
+        }
+    )
+    save_session(tmp_path, concrete)
+    plan_path = output_dir / PLAN_FILENAME
+    plan_path.parent.mkdir(parents=True)
+    plan_path.write_text("open concrete plan", encoding="utf-8")
+
+    before_session = json.loads(
+        (tmp_path / "data" / "session.json").read_text(encoding="utf-8")
+    )
+    before_plan = plan_path.read_bytes()
+
+    save_template_mode(
+        tmp_path,
+        template_id=None,
+        name="Reusable morning",
+        weekday="monday",
+        wake="07:00",
+        sleep="22:00",
+        anchors=[{"name": "Template anchor", "start": "08:00", "duration": 45}],
+        flexes=[{"name": "Template flex", "duration": 30}],
+    )
+
+    assert json.loads(
+        (tmp_path / "data" / "session.json").read_text(encoding="utf-8")
+    ) == before_session
+    assert plan_path.read_bytes() == before_plan
 
 
 def _write_defaults(tmp_path: Path) -> None:

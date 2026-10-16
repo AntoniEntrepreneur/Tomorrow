@@ -1062,10 +1062,19 @@ def save_template_mode(
     anchors: list[dict[str, object]],
     flexes: list[dict[str, object]],
 ) -> dict:
-    """Persist only reusable Day Template data and return template mode."""
+    """Persist only reusable Day Template data and return template mode.
+
+    Template-mode entries are copied at this boundary so a caller can safely
+    pass data derived from an open concrete Session without handing mutable
+    Session records to the library writer. Concrete Session and Plan storage
+    is intentionally not touched here; applying a template remains an
+    explicit operation.
+    """
 
     if not name.strip():
         raise ValueError("Day Template name cannot be blank.")
+    template_anchors = [dict(entry) for entry in anchors]
+    template_flexes = [dict(entry) for entry in flexes]
     saved_id = save_day_template(
         repo_root,
         id=template_id,
@@ -1073,8 +1082,8 @@ def save_template_mode(
         weekday=weekday or None,
         wake=wake,
         sleep=sleep,
-        anchors=anchors,
-        flexes=flexes,
+        anchors=template_anchors,
+        flexes=template_flexes,
     )
     result = template_mode_view(repo_root, template_id=saved_id)
     result["saved"] = True
