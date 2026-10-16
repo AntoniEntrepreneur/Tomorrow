@@ -19,7 +19,8 @@ from tomorrow.domain import (
 )
 from tomorrow.activity_templates import activity_templates_dir
 from tomorrow.defaults import DayBounds
-from tomorrow.library import save_activity_template
+from tomorrow.library import save_activity_template, save_day_template
+from tomorrow.session import save_template_mode, template_mode_view
 from tomorrow.name_times import parse_name_time
 from tomorrow.plan import PLAN_FILENAME
 from tomorrow.session import (
@@ -58,6 +59,54 @@ from tomorrow.session import (
 
 def _output_dir(tmp_path: Path) -> Path:
     return tmp_path / "Desktop"
+
+
+def test_new_template_mode_uses_application_bounds_without_creating_session(
+    tmp_path: Path,
+) -> None:
+    (tmp_path / "data").mkdir()
+    (tmp_path / "data" / "defaults.toml").write_text(
+        'wake = "06:30"\nsleep = "23:00"\n', encoding="utf-8"
+    )
+
+    view = template_mode_view(tmp_path, template_id=None)
+
+    assert view["mode"] == "template"
+    assert view["template_id"] is None
+    assert view["name"] == ""
+    assert view["weekday"] is None
+    assert view["bounds"] == {"wake": "06:30", "sleep": "23:00"}
+    assert not (tmp_path / "data" / "session.json").exists()
+
+
+def test_template_mode_saves_reusable_data_without_changing_concrete_session(
+    tmp_path: Path,
+) -> None:
+    (tmp_path / "data").mkdir()
+    (tmp_path / "data" / "defaults.toml").write_text(
+        'wake = "06:30"\nsleep = "23:00"\n', encoding="utf-8"
+    )
+    save_day_template(tmp_path, name="Legacy", anchors=[{"name": "Old", "start": "08:00", "duration": 30}])
+    output_dir = _output_dir(tmp_path)
+    concrete = load_session(tmp_path, output_dir=output_dir)
+    concrete["anchors"].append({"id": "concrete", "name": "Only plan", "start": "09:00", "duration_minutes": 30, "checklist": None})
+    (tmp_path / "data" / "session.json").write_text(json.dumps(concrete), encoding="utf-8")
+
+    result = save_template_mode(
+        tmp_path,
+        template_id="legacy",
+        name="Edited",
+        weekday=None,
+        wake="07:00",
+        sleep="22:30",
+        anchors=[{"name": "New", "start": "10:00", "duration": 45}],
+        flexes=[{"name": "Focus", "duration": 60}],
+    )
+
+    assert result["mode"] == "template"
+    assert result["saved"] is True
+    assert template_mode_view(tmp_path, template_id="legacy")["name"] == "Edited"
+    assert json.loads((tmp_path / "data" / "session.json").read_text())["anchors"][0]["name"] == "Only plan"
 
 
 def _write_defaults(tmp_path: Path) -> None:

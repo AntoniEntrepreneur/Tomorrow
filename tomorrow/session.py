@@ -4,7 +4,7 @@ from datetime import date, datetime, time, timedelta
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Callable, Sequence
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 from urllib.request import Request, urlopen
 import copy
 import errno
@@ -1015,6 +1015,72 @@ def apply_named_day_template(
     return _commit(repo_root, document, _seed_mutation(seed), output_dir=output_dir, now=now, opener=opener)
 
 
+def template_mode_view(repo_root: Path, *, template_id: str | None) -> dict:
+    """Return the shared planner's editable Day Template context.
+
+    This deliberately reads the template directly rather than creating or
+    loading the concrete Session, so editing a template cannot alter a plan
+    that is already in progress.
+    """
+
+    defaults = load_defaults(repo_root / "data" / "defaults.toml")
+    path = (
+        named_day_template_path(repo_root / "data", template_id)
+        if template_id
+        else None
+    )
+    entries = load_day_template_entries(path) if path is not None else {
+        "weekday": None,
+        "wake": None,
+        "sleep": None,
+        "anchors": [],
+        "flexes": [],
+    }
+    return {
+        "mode": "template",
+        "template_id": template_id,
+        "name": load_day_template_name(path) if path is not None else "",
+        "weekday": entries["weekday"],
+        "bounds": {
+            "wake": entries["wake"] or defaults.wake,
+            "sleep": entries["sleep"] or defaults.sleep,
+        },
+        "anchors": entries["anchors"],
+        "flexes": entries["flexes"],
+        "saved": False,
+    }
+
+
+def save_template_mode(
+    repo_root: Path,
+    *,
+    template_id: str | None,
+    name: str,
+    weekday: str | None,
+    wake: str,
+    sleep: str,
+    anchors: list[dict[str, object]],
+    flexes: list[dict[str, object]],
+) -> dict:
+    """Persist only reusable Day Template data and return template mode."""
+
+    if not name.strip():
+        raise ValueError("Day Template name cannot be blank.")
+    saved_id = save_day_template(
+        repo_root,
+        id=template_id,
+        name=name.strip(),
+        weekday=weekday or None,
+        wake=wake,
+        sleep=sleep,
+        anchors=anchors,
+        flexes=flexes,
+    )
+    result = template_mode_view(repo_root, template_id=saved_id)
+    result["saved"] = True
+    return result
+
+
 def decline_template(
     repo_root: Path,
     *,
@@ -1646,6 +1712,8 @@ def _save_day_template_entity(repo_root: Path, payload: dict) -> None:
         anchors=payload.get("anchors"),
         flexes=payload.get("flexes"),
         weekday=payload.get("weekday") or None,
+        wake=payload.get("wake") or None,
+        sleep=payload.get("sleep") or None,
     )
 
 
@@ -1695,13 +1763,20 @@ class SessionHandler(BaseHTTPRequestHandler):
         }
 
     def do_GET(self) -> None:
-        path = urlparse(self.path).path
+        parsed = urlparse(self.path)
+        path = parsed.path
         if path in {"/", "/index.html"}:
             body = _PAGE_PATH.read_bytes()
             self._send(200, "text/html; charset=utf-8", body)
             return
         if path == "/api/session":
             self._send_json(200, session_view(self.server.repo_root, **self._view_args()))
+            return
+        if path == "/api/template":
+            template_id = parse_qs(parsed.query).get("id", [None])[0]
+            self._send_json(
+                200, template_mode_view(self.server.repo_root, template_id=template_id)
+            )
             return
         if path in {"/library", "/library.html"}:
             body = _LIBRARY_PAGE_PATH.read_bytes()
@@ -1952,6 +2027,23 @@ class SessionHandler(BaseHTTPRequestHandler):
         if path == "/api/template":
             payload = self._read_json()
             action = payload.get("action")
+            if action == "save":
+                try:
+                    view = save_template_mode(
+                        self.server.repo_root,
+                        template_id=payload.get("template_id") or None,
+                        name=payload["name"],
+                        weekday=payload.get("weekday") or None,
+                        wake=payload["wake"],
+                        sleep=payload["sleep"],
+                        anchors=list(payload.get("anchors", [])),
+                        flexes=list(payload.get("flexes", [])),
+                    )
+                except (KeyError, ValueError) as exc:
+                    self._send_json(400, {"error": str(exc)})
+                    return
+                self._send_json(200, view)
+                return
             if action == "apply":
                 view = apply_template(self.server.repo_root, **self._view_args())
                 self._send_json(200, view)

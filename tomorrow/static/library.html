@@ -73,6 +73,7 @@
     <section>
       <h2>Day Templates</h2>
       <div id="day-template-list"></div>
+      <button type="button" id="day-template-new">New Day Template</button>
       <form id="day-template-form">
         <input name="name" placeholder="Name" required>
         <select name="weekday" id="day-template-weekday"></select>
@@ -485,19 +486,12 @@
     }
 
     function editDayTemplate(entry) {
-      editingDayTemplateId = entry.id;
-      dayTemplateForm.elements.name.value = entry.name;
-      renderWeekdayOptions(entry.weekday || "", entry.id);
-      dayTemplateEntries.innerHTML = "";
-      for (const anchor of entry.anchors || []) {
-        dayTemplateEntries.appendChild(buildEntryRow(anchor));
-      }
-      for (const flex of entry.flexes || []) {
-        dayTemplateEntries.appendChild(buildEntryRow(flex));
-      }
-      dayTemplateCancelEdit.hidden = false;
-      dayTemplateForm.scrollIntoView({ behavior: "smooth", block: "center" });
+      window.location.href = "/?template=" + encodeURIComponent(entry.id);
     }
+
+    document.getElementById("day-template-new").addEventListener("click", () => {
+      window.location.href = "/?template=new";
+    });
 
     dayTemplateCancelEdit.addEventListener("click", resetDayTemplateForm);
 

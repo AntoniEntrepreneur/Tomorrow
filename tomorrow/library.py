@@ -213,6 +213,8 @@ def save_day_template(
     anchors: list[dict[str, object]] | None = None,
     flexes: list[dict[str, object]] | None = None,
     weekday: str | None = None,
+    wake: str | None = None,
+    sleep: str | None = None,
 ) -> str:
     """Create (id=None) or update (existing id) a Day Template TOML file.
 
@@ -230,10 +232,17 @@ def save_day_template(
 
     if weekday is not None:
         _unassign_other_weekday_owners(directory, weekday, slug)
+    if (wake is None) != (sleep is None):
+        raise ValueError("Give both wake and sleep bounds, or neither.")
+    if wake is not None and sleep is not None:
+        minutes_from_bound(parse_clock(wake), parse_clock(sleep))
 
     lines = [f"name = {_toml_string(name)}"]
     if weekday is not None:
         lines.append(f"weekday = {_toml_string(weekday)}")
+    if wake is not None:
+        lines.append(f"wake = {_toml_string(wake)}")
+        lines.append(f"sleep = {_toml_string(sleep)}")
     lines.append("")
 
     for anchor in anchors or []:

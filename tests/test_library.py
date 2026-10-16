@@ -8,6 +8,7 @@ from tomorrow.checklists import load_checklist_library
 from tomorrow.day_templates import (
     default_day_template_path,
     load_day_template,
+    load_day_template_entries,
     named_day_template_path,
 )
 from tomorrow.library import (
@@ -408,6 +409,26 @@ def test_save_day_template_end_bound_anchor_round_trips(tmp_path: Path) -> None:
 
     assert seed is not None
     assert seed.anchors[0].duration.total_seconds() / 60 == 120
+
+
+def test_day_template_persists_optional_bounds_and_legacy_defaults(tmp_path: Path) -> None:
+    save_day_template(
+        tmp_path,
+        name="Focused Tuesday",
+        weekday="tuesday",
+        wake="07:30",
+        sleep="23:15",
+    )
+
+    path = named_day_template_path(tmp_path / "data", "focused-tuesday")
+    entries = load_day_template_entries(path)
+    assert entries["wake"] == "07:30"
+    assert entries["sleep"] == "23:15"
+
+    legacy = tmp_path / "data" / "templates" / "legacy.toml"
+    legacy.write_text('name = "Legacy"\n', encoding="utf-8")
+    assert load_day_template_entries(legacy)["wake"] is None
+    assert load_day_template_entries(legacy)["sleep"] is None
 
 
 def test_save_day_template_rejects_both_duration_and_end_on_an_anchor(tmp_path: Path) -> None:

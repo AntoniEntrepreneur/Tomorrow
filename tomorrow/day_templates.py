@@ -73,10 +73,12 @@ def load_day_template_entries(path: Path) -> dict[str, object]:
     """
 
     if not path.exists():
-        return {"weekday": None, "anchors": [], "flexes": []}
+        return {"weekday": None, "wake": None, "sleep": None, "anchors": [], "flexes": []}
     data = tomllib.loads(path.read_text(encoding="utf-8"))
     return {
         "weekday": data.get("weekday"),
+        "wake": data.get("wake"),
+        "sleep": data.get("sleep"),
         "anchors": list(data.get("anchor", ())),
         "flexes": list(data.get("flex", ())),
     }

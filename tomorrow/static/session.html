@@ -336,6 +336,20 @@
       </div>
     </header>
 
+    <form id="template-editor" hidden>
+      <label>Template name <input name="name" required></label>
+      <label>Weekday <select name="weekday">
+        <option value="">No weekday</option>
+        <option>monday</option><option>tuesday</option><option>wednesday</option>
+        <option>thursday</option><option>friday</option><option>saturday</option>
+        <option>sunday</option>
+      </select></label>
+      <label>Wake <input name="wake" required></label>
+      <label>Sleep <input name="sleep" required></label>
+      <button type="submit" class="primary">Save Template</button>
+      <span id="template-saved" role="status"></span>
+    </form>
+
     <div class="template-offer" id="template-offer" hidden>
       <p>Use this weekday's Template?</p>
       <div class="actions">
@@ -1176,6 +1190,65 @@
     }
 
     async function loadSession() {
+      const templateQuery = new URLSearchParams(window.location.search).get("template");
+      if (templateQuery !== null) {
+        const templateId = templateQuery === "new" ? "" : templateQuery;
+        const response = await fetch("/api/template?id=" + encodeURIComponent(templateId));
+        const template = await response.json();
+        document.querySelector(".kicker").textContent = "Day Template";
+        document.getElementById("plan-date").textContent = template.name || "New Template";
+        document.getElementById("weather").textContent = "Reusable template · changes stay in template mode";
+        document.getElementById("template-editor").hidden = false;
+        document.getElementById("template-editor").elements.name.value = template.name;
+        document.getElementById("template-editor").elements.weekday.value = template.weekday || "";
+        document.getElementById("template-editor").elements.wake.value = template.bounds.wake;
+        document.getElementById("template-editor").elements.sleep.value = template.bounds.sleep;
+        const templateRail = document.getElementById("rail");
+        for (const anchor of template.anchors || []) {
+          const block = document.createElement("div");
+          block.className = "block anchor";
+          block.innerHTML = '<span class="block-title"></span><div class="block-range"></div>';
+          block.querySelector(".block-title").textContent = anchor.name || ("Activity: " + anchor.activity);
+          block.querySelector(".block-range").textContent =
+            [anchor.start, anchor.end || (anchor.duration && (anchor.duration + " min"))].filter(Boolean).join(" · ");
+          templateRail.appendChild(block);
+        }
+        for (const flex of template.flexes || []) {
+          const block = document.createElement("div");
+          block.className = "block flex";
+          block.textContent = (flex.name || ("Activity: " + flex.activity)) +
+            (flex.duration ? " · " + flex.duration + " min" : "");
+          templateRail.appendChild(block);
+        }
+        document.querySelector(".stamps").hidden = true;
+        document.getElementById("template-offer").hidden = true;
+        document.getElementById("submit").hidden = true;
+        document.getElementById("template-editor").onsubmit = async (event) => {
+          event.preventDefault();
+          const form = new FormData(event.target);
+          const result = await fetch("/api/template", {
+            method: "POST",
+            headers: {"Content-Type": "application/json"},
+            body: JSON.stringify({
+              action: "save",
+              template_id: template.template_id,
+              name: form.get("name"),
+              weekday: form.get("weekday") || null,
+              wake: form.get("wake"),
+              sleep: form.get("sleep"),
+              anchors: template.anchors,
+              flexes: template.flexes
+            })
+          }).then((r) => r.json());
+          if (result.error) {
+            alert(result.error);
+            return;
+          }
+          document.getElementById("template-saved").textContent = "Saved";
+          window.history.replaceState({}, "", "/?template=" + encodeURIComponent(result.template_id));
+        };
+        return;
+      }
       const response = await fetch("/api/session");
       render(await response.json());
     }

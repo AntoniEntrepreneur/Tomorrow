@@ -185,7 +185,13 @@ def test_load_day_template_entries_returns_empty_shape_when_file_missing(
 ) -> None:
     entries = load_day_template_entries(tmp_path / "missing.toml")
 
-    assert entries == {"weekday": None, "anchors": [], "flexes": []}
+    assert entries == {
+        "weekday": None,
+        "wake": None,
+        "sleep": None,
+        "anchors": [],
+        "flexes": [],
+    }
 
 
 def test_load_day_template_entries_returns_raw_entry_dicts(tmp_path: Path) -> None:
@@ -215,6 +221,8 @@ duration = 30
 
     assert entries == {
         "weekday": "tuesday",
+        "wake": None,
+        "sleep": None,
         "anchors": [
             {
                 "name": "Standup",
