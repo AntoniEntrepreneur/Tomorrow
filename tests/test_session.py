@@ -4611,3 +4611,39 @@ def test_sleep_repair_leaves_free_space_and_moves_connected_flex_group(
     assert next(item for item in view["flexes"] if item["name"] == "Close-up")["start"] == "19:50"
     assert next(item for item in view["flexes"] if item["name"] == "Reading")["start"] == "18:00"
     assert view["blockers"] == []
+
+
+def test_overnight_bounds_repair_orders_after_midnight_and_is_one_undo_step(
+    tmp_path: Path,
+) -> None:
+    _write_defaults(tmp_path)
+    now = datetime(2026, 8, 10, 22, 0)
+    edit_bounds(
+        tmp_path, output_dir=tmp_path / "Desktop", wake="22:00", sleep="06:00", now=now
+    )
+    add_anchor(
+        tmp_path, output_dir=tmp_path / "Desktop",
+        name="After midnight", start="01:00", duration_minutes=30, now=now,
+    )
+    before = session_view(tmp_path, output_dir=tmp_path / "Desktop", now=now)
+
+    changed = edit_bounds(
+        tmp_path, output_dir=tmp_path / "Desktop", wake="23:00", sleep="05:00", now=now
+    )
+    assert changed["bounds"] == {"wake": "23:00", "sleep": "05:00", "sleep_is_next_day": True}
+    assert changed["anchors"][0]["start"] == "01:00"
+    assert changed["can_undo"] is True
+
+    undone = undo_session(tmp_path, output_dir=tmp_path / "Desktop", now=now)
+    assert undone["bounds"]["wake"] == before["bounds"]["wake"]
+    assert undone["bounds"]["sleep"] == before["bounds"]["sleep"]
+    assert undone["anchors"][0]["start"] == "01:00"
+    persisted = json.loads((tmp_path / "data" / "session.json").read_text(encoding="utf-8"))
+    assert persisted["bounds"] == {
+        "wake": before["bounds"]["wake"],
+        "sleep": before["bounds"]["sleep"],
+    }
+
+    redone = redo_session(tmp_path, output_dir=tmp_path / "Desktop", now=now)
+    assert redone["bounds"]["wake"] == "23:00"
+    assert redone["bounds"]["sleep"] == "05:00"

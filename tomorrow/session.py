@@ -1169,19 +1169,34 @@ def edit_bounds(
             )
             return value.strftime("%H:%M")
 
-        wraps_midnight = minutes_since_midnight(final_sleep) <= minutes_since_midnight(
-            final_wake
-        )
         for entry in scheduled:
             item = entry["item"]
             start = parse_clock(item["start"])
-            entry["offset"] = (
-                minutes_since_midnight(start) - minutes_since_midnight(final_wake)
-                if not wraps_midnight
-                and minutes_since_midnight(start) < minutes_since_midnight(final_wake)
-                else minutes_since_wake(start, wake=final_wake)
+            # Keep every activity in the same wake-relative coordinate system,
+            # including activities that were already outside the old bounds.
+            # A pre-wake clock value is negative only for a non-wrapping day;
+            # on an overnight day it is the following morning.
+            signed_offset = minutes_since_midnight(start) - minutes_since_midnight(
+                final_wake
             )
+            if (
+                minutes_since_midnight(final_sleep)
+                <= minutes_since_midnight(final_wake)
+                or signed_offset >= 0
+            ):
+                entry["offset"] = signed_offset % 1440
+            else:
+                entry["offset"] = signed_offset
             entry["duration"] = int(item["duration_minutes"])
+
+            if (
+                entry["offset"] < 0
+                and entry["offset"] + entry["duration"] > day_length
+            ):
+                raise ValueError(
+                    f"{entry['kind']} '{item['name']}' crosses both final day bounds "
+                    "and cannot be repaired without changing its duration."
+                )
 
         def overlaps(
             first: dict, first_shift: int, second: dict, second_shift: int
@@ -1229,7 +1244,7 @@ def edit_bounds(
         wake_seeds = [
             index
             for index, entry in enumerate(scheduled)
-            if not wraps_midnight and entry["offset"] < 0
+            if entry["offset"] < 0
         ]
         sleep_seeds = [
             index
@@ -1259,7 +1274,6 @@ def edit_bounds(
                         "Wake-side and sleep-side repairs meet or overlap and "
                         "cannot both fit within the final day."
                     )
-
         shifts = {index: 0 for index in range(len(scheduled))}
         for group, shift in groups:
             for index in group:
