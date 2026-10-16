@@ -1265,7 +1265,8 @@
     }
 
     function sheetEditBound(which) {
-      const value = current.bounds[which];
+      const bounds = templateMode ? templateDraft.bounds : current.bounds;
+      const value = bounds[which];
       const label = which === "wake" ? "Wake" : "Sleep";
       openSheet(
         "<h2>Edit " + label + "</h2><form id=\"edit-bounds\" data-which=\"" + which + "\">" +
@@ -1323,6 +1324,7 @@
         templateDraft = {
           anchors: (template.anchors || []).map(entry => ({...entry})),
           flexes: (template.flexes || []).map(entry => ({...entry})),
+          bounds: {...template.bounds},
           activityOptions: template.activity_templates || []
         };
         templateInitial = cloneTemplate({
@@ -1815,6 +1817,14 @@
         return;
       }
       if (form.id === "edit-bounds") {
+        if (templateMode) {
+          templateDraft.bounds[form.dataset.which] = clockValue(form.clock);
+          document.getElementById("template-editor").elements[form.dataset.which].value =
+            templateDraft.bounds[form.dataset.which];
+          markTemplateDirty();
+          closeSheet();
+          return;
+        }
         const payload = { kind: "bounds" };
         payload[form.dataset.which] = clockValue(form.clock);
         await mutate("/api/edit", payload);
