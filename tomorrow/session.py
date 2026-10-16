@@ -1149,6 +1149,11 @@ def edit_bounds(
         # keeps an edit atomic when an item is longer than the final day.
         repaired_anchors = copy.deepcopy(current["anchors"])
         repaired_flexes = copy.deepcopy(current["flexes"])
+        current_wake = parse_clock(current["bounds"]["wake"])
+        final_wraps_midnight = (
+            minutes_since_midnight(final_sleep)
+            <= minutes_since_midnight(final_wake)
+        )
         scheduled = [
             {"kind": "Anchor", "item": item} for item in repaired_anchors
         ] + [
@@ -1176,17 +1181,21 @@ def edit_bounds(
             # including activities that were already outside the old bounds.
             # A pre-wake clock value is negative only for a non-wrapping day;
             # on an overnight day it is the following morning.
-            signed_offset = minutes_since_midnight(start) - minutes_since_midnight(
-                final_wake
-            )
-            if (
-                minutes_since_midnight(final_sleep)
-                <= minutes_since_midnight(final_wake)
-                or signed_offset >= 0
-            ):
-                entry["offset"] = signed_offset % 1440
+            if final_wraps_midnight:
+                entry["offset"] = minutes_since_wake(start, wake=final_wake)
             else:
-                entry["offset"] = signed_offset
+                entry["offset"] = (
+                    minutes_since_midnight(start)
+                    - minutes_since_midnight(final_wake)
+                )
+                if (
+                    final_wake > current_wake
+                    and current_wake < start < final_wake
+                ):
+                    entry["offset"] = (
+                        minutes_since_midnight(start)
+                        - minutes_since_midnight(current_wake)
+                    )
             entry["duration"] = int(item["duration_minutes"])
 
             if (
@@ -1261,19 +1270,6 @@ def edit_bounds(
         groups = repair_groups(wake_seeds, side="wake") + repair_groups(
             sleep_seeds, side="sleep"
         )
-        for left, (left_group, left_shift) in enumerate(groups):
-            for right_group, right_shift in groups[left + 1 :]:
-                if any(
-                    overlaps(
-                        scheduled[first], left_shift, scheduled[second], right_shift
-                    )
-                    for first in left_group
-                    for second in right_group
-                ):
-                    raise ValueError(
-                        "Wake-side and sleep-side repairs meet or overlap and "
-                        "cannot both fit within the final day."
-                    )
         shifts = {index: 0 for index in range(len(scheduled))}
         for group, shift in groups:
             for index in group:
@@ -1286,7 +1282,6 @@ def edit_bounds(
                     "the final day bounds without changing its duration."
                 )
             entry["item"]["start"] = clock_at(final_offset)
-
         current["bounds"]["wake"] = wake or current["bounds"]["wake"]
         current["bounds"]["sleep"] = sleep or current["bounds"]["sleep"]
         current["anchors"] = repaired_anchors
