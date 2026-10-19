@@ -318,7 +318,9 @@
     }
     .sheet .hint { font-size: 0.8rem; color: var(--muted); margin-bottom: 0.6rem; }
     .sheet .danger { background: var(--danger); color: #fff; margin-left: auto; }
-    .sheet .duration-toggle { background: transparent; border: none; color: var(--muted); text-decoration: underline; padding: 0.2rem 0; margin-bottom: 0.4rem; }
+    .sheet .timing-field { transition: opacity 120ms ease; }
+    .sheet .timing-field.is-authoritative input { border-color: var(--wick); box-shadow: 0 0 0 1px rgba(224,168,74,0.35); }
+    .sheet .timing-field.is-derived { opacity: 0.55; }
     .sheet .field-error { font-size: 0.8rem; color: var(--danger); margin-bottom: 0.6rem; }
     #template-editor { display: grid; gap: 0.45rem; margin-bottom: 1rem; }
     #template-editor[hidden] { display: none; }
@@ -879,39 +881,57 @@
     function durationFields(start, durationMin, startLabelId) {
       return '<div class="row">' +
         '<label' + (startLabelId ? ' id="' + startLabelId + '"' : "") + '>Start <input name="start" type="time" required value="' + esc(start || "") + '"></label>' +
-        '<label id="duration-label">Duration (min) <input name="duration_minutes" type="number" min="1" required value="' +
+        '<label class="timing-field" id="duration-label">Duration (min) <input name="duration_minutes" type="number" min="1" required value="' +
         esc(durationMin || "") + '"></label>' +
-        '<label id="end-label" hidden>Ends at <input name="end" type="time"></label>' +
+        '<label class="timing-field" id="end-label">Ends at <input name="end" type="time"></label>' +
         "</div>" +
-        '<button type="button" class="duration-toggle" data-toggle-duration-mode>Use end time instead</button>' +
         '<p class="field-error" id="end-error" hidden>End must be after start.</p>';
     }
 
     function setDurationMode(form, mode) {
       const asEnd = mode === "end";
       form.dataset.durationMode = mode;
-      document.getElementById("duration-label").hidden = asEnd;
-      document.getElementById("end-label").hidden = !asEnd;
-      form.duration_minutes.required = !asEnd;
-      form.end.required = asEnd;
+      const durationLabel = form.querySelector("#duration-label");
+      const endLabel = form.querySelector("#end-label");
+      if (durationLabel) durationLabel.classList.toggle("is-derived", asEnd);
+      if (durationLabel) durationLabel.classList.toggle("is-authoritative", !asEnd);
+      if (endLabel) endLabel.classList.toggle("is-derived", !asEnd);
+      if (endLabel) endLabel.classList.toggle("is-authoritative", asEnd);
+      if (form.duration_minutes) form.duration_minutes.required = !asEnd;
+      if (form.end) form.end.required = asEnd;
       document.getElementById("end-error").hidden = true;
-      const toggleBtn = form.querySelector("[data-toggle-duration-mode]");
-      if (toggleBtn) toggleBtn.textContent = asEnd ? "Use duration instead" : "Use end time instead";
     }
 
     function initDurationToggle(form) {
       setDurationMode(form, "duration");
-      const toggleBtn = form.querySelector("[data-toggle-duration-mode]");
-      if (toggleBtn) {
-        toggleBtn.addEventListener("click", () => {
-          setDurationMode(form, form.dataset.durationMode === "end" ? "duration" : "end");
-        });
-      }
       form.addEventListener("input", event => {
+        if (event.target.name === "duration_minutes") setDurationMode(form, "duration");
+        if (event.target.name === "end") setDurationMode(form, "end");
         if (event.target.name === "start" || event.target.name === "end") {
           document.getElementById("end-error").hidden = true;
         }
+        updateTimingCounterpart(form);
       });
+      form.addEventListener("change", event => {
+        if (event.target.name === "duration_minutes") setDurationMode(form, "duration");
+        if (event.target.name === "end") setDurationMode(form, "end");
+        updateTimingCounterpart(form);
+      });
+      updateTimingCounterpart(form);
+    }
+
+    function updateTimingCounterpart(form) {
+      if (!form.start || !form.duration_minutes || !form.end) return;
+      const start = form.start.value;
+      if (!start) return;
+      if (form.dataset.durationMode === "end") {
+        if (!form.end.value) return;
+        const duration = toWakeMin(clockValue(form.end), clockValue(start));
+        if (duration > 0) form.duration_minutes.value = duration;
+      } else {
+        const duration = Number(form.duration_minutes.value);
+        if (Number.isFinite(duration) && duration > 0) form.end.value = endClock(start, duration);
+      }
     }
 
     function resolveDurationMinutes(form) {
@@ -1042,8 +1062,6 @@
       if (form.checklist) form.checklist.closest("label").hidden = asTodo;
       const row = form.querySelector(".row");
       if (row) row.hidden = asTodo;
-      const toggleBtn = form.querySelector("[data-toggle-duration-mode]");
-      if (toggleBtn) toggleBtn.hidden = asFlex || asTodo;
       form.duration_minutes.required = !asTodo && form.dataset.durationMode !== "end";
       if ((asFlex || asTodo) && form.dataset.durationMode === "end") setDurationMode(form, "duration");
     }
@@ -1214,13 +1232,50 @@
           '<label>Shape <select name="shape"><option value="flex">Flex</option><option value="anchor">Anchor</option></select><button type="button" class="ghost" data-reset-field="shape">Reset</button></label>' +
           '<label>Name override (optional) <input name="name" value="' + esc(entry.name_overridden ? entry.name : "") + '"><button type="button" class="ghost" data-reset-field="name">Reset</button></label>' +
           '<label>Checklist override (optional) <select name="checklist"><option value="">Inherit</option>' + checklistOptions + '</select><button type="button" class="ghost" data-reset-field="checklist">Reset</button></label>' +
-          '<label>Start override (Anchor) <input name="start" type="time" value="' + esc(entry.start_overridden ? entry.start : "") + '"><button type="button" class="ghost" data-reset-field="timing">Reset timing</button></label>' +
-          '<label>Duration override <input name="duration" type="number" min="1" value="' + esc(entry.timing_overridden ? (entry.duration || "") : "") + '"></label>' +
+          '<label>Start override (Anchor) <input name="start" type="time" value="' + esc(entry.start || "") + '"><button type="button" class="ghost" data-reset-field="timing">Reset timing</button></label>' +
+          '<label class="timing-field" id="activity-duration-label">Duration override <input name="duration" type="number" min="1" value="' + esc(entry.duration || "") + '"></label>' +
+          '<label class="timing-field" id="activity-end-label">End override <input name="end" type="time" value="' + esc(entry.end || "") + '"></label>' +
           '<p class="hint">Leave an override blank to inherit. Resetting shape also resets its timing.</p>' +
           '<div class="actions"><button class="primary" type="submit">Update</button><button type="button" class="ghost" data-close>Cancel</button></div></form>',
           "edit"
         );
         document.querySelector("#template-activity-entry [name=shape]").value = entry.shape || "flex";
+        const activityForm = document.getElementById("template-activity-entry");
+        activityForm.dataset.durationMode = entry.end ? "end" : "duration";
+        function updateActivityTemplateTiming() {
+          const duration = activityForm.elements.duration;
+          const end = activityForm.elements.end;
+          const start = activityForm.elements.start.value;
+          const asEnd = activityForm.dataset.durationMode === "end";
+          document.getElementById("activity-duration-label").classList.toggle("is-derived", asEnd);
+          document.getElementById("activity-duration-label").classList.toggle("is-authoritative", !asEnd);
+          document.getElementById("activity-end-label").classList.toggle("is-derived", !asEnd);
+          document.getElementById("activity-end-label").classList.toggle("is-authoritative", asEnd);
+          if (!start) return;
+          if (asEnd && end.value) {
+            const span = toWakeMin(clockValue(end), clockValue(activityForm.elements.start));
+            if (span > 0) duration.value = span;
+          } else if (!asEnd && Number(duration.value) > 0) {
+            end.value = endClock(start, Number(duration.value));
+          }
+        }
+        activityForm.addEventListener("input", event => {
+          if (event.target.name === "duration") activityForm.dataset.durationMode = "duration";
+          if (event.target.name === "end") activityForm.dataset.durationMode = "end";
+          if (["start", "duration", "end"].includes(event.target.name)) {
+            activityForm.dataset.timingTouched = "1";
+            if (event.target.name === "start") activityForm.elements.shape.value = event.target.value ? "anchor" : "flex";
+            updateActivityTemplateTiming();
+          }
+        });
+        activityForm.elements.shape.addEventListener("change", () => {
+          activityForm.dataset.timingTouched = "1";
+          if (activityForm.elements.shape.value === "flex") {
+            const duration = Number(activityForm.elements.duration.value);
+            if (duration > 0) activityForm.elements.duration.value = duration;
+          }
+        });
+        updateActivityTemplateTiming();
         return;
       }
       const duration = entry.duration || entry.duration_minutes || "";
@@ -1240,9 +1295,9 @@
       if (kind === "anchor") {
         const form = document.getElementById("template-entry");
         initDurationToggle(form);
-        setDurationMode(form, "end");
-        form.end.value = entry.end ||
-          (entry.start && duration ? endClock(entry.start, duration) : "");
+        const authority = entry.end ? "end" : "duration";
+        form.end.value = entry.end || (entry.start && duration ? endClock(entry.start, duration) : "");
+        setDurationMode(form, authority);
       }
     }
 
@@ -1734,8 +1789,23 @@
         };
         if (value("name")) entry.name = value("name");
         if (value("checklist")) entry.checklist = value("checklist");
-        if (value("start")) entry.start = value("start");
-        if (value("duration")) entry.duration = Number(value("duration"));
+        const timingTouched = form.dataset.timingTouched === "1";
+        if (timingTouched) {
+          if (entry.shape === "anchor" && value("start")) entry.start = value("start");
+          const duration = Number(value("duration"));
+          const end = value("end");
+          if (entry.shape === "anchor" && value("start") && form.dataset.durationMode === "end" && end) {
+            entry.end = end;
+            delete entry.duration;
+          } else if (duration > 0) {
+            entry.duration = duration;
+            delete entry.end;
+          }
+          if (entry.shape === "flex") {
+            delete entry.start;
+            delete entry.end;
+          }
+        }
         const entries = entry.shape === "anchor" ? templateDraft.anchors : templateDraft.flexes;
         const old = Number(form.dataset.index);
         if (old >= 0) {

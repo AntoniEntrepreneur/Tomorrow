@@ -36,6 +36,9 @@
     .entry-row-fields { display: grid; gap: 0.35rem; }
     .entry-row-fields[hidden], .entry-row-fields .field[hidden] { display: none; }
     .bound-toggle { display: flex; gap: 0.6rem; align-items: center; font-size: 0.85rem; }
+    .timing-derived { opacity: 0.55; }
+    .timing-authoritative { border-color: #e0a84a !important; box-shadow: 0 0 0 1px rgba(224,168,74,0.35); }
+    .field-error { color: #e07a6a; font-size: 0.8rem; }
   </style>
 </head>
 <body>
@@ -62,11 +65,8 @@
         <input name="name" placeholder="Name" required>
         <input name="duration_minutes" id="activity-duration" type="number" placeholder="Duration (minutes)">
         <input name="start" id="activity-start" placeholder="Start HH:MM (leave blank for Flex)">
-        <div id="activity-bound-toggle" class="bound-toggle" hidden>
-          <label><input type="radio" name="activity-bound-kind" value="duration" checked> Duration</label>
-          <label><input type="radio" name="activity-bound-kind" value="end"> End</label>
-          <input name="end" id="activity-end" placeholder="End HH:MM" hidden>
-        </div>
+        <label id="activity-end-label">End <input name="end" id="activity-end" type="time"></label>
+        <p id="activity-timing-error" class="field-error" hidden>End must be later than Start.</p>
         <select name="checklist" id="activity-checklist"></select>
         <label><input type="checkbox" name="daily" id="activity-daily"> Daily</label>
         <button type="submit">Save Activity Template</button>
@@ -268,7 +268,6 @@
     const activityEndInput = document.getElementById("activity-end");
     const activityDurationInput = document.getElementById("activity-duration");
     const activityDailyInput = document.getElementById("activity-daily");
-    const activityBoundToggle = document.getElementById("activity-bound-toggle");
     const activityChecklistSelect = document.getElementById("activity-checklist");
     let editingActivityId = null;
 
@@ -281,36 +280,62 @@
       activityChecklistSelect.innerHTML = html;
     }
 
-    function applyActivityBoundKind() {
-      const kind = activityForm.elements["activity-bound-kind"].value;
-      activityEndInput.hidden = kind !== "end";
-      activityDurationInput.hidden = kind !== "duration";
-    }
+    let activityTimingAuthority = "duration";
 
-    for (const radio of activityForm.elements["activity-bound-kind"]) {
-      radio.addEventListener("change", applyActivityBoundKind);
+    function updateActivityCounterpart() {
+      const start = activityStartInput.value;
+      const endIsActive = Boolean(start) && activityTimingAuthority === "end";
+      activityDurationInput.required = !endIsActive;
+      activityEndInput.required = endIsActive;
+      activityDurationInput.classList.toggle("timing-derived", activityTimingAuthority === "end");
+      activityDurationInput.classList.toggle("timing-authoritative", activityTimingAuthority !== "end");
+      activityEndInput.classList.toggle("timing-derived", activityTimingAuthority !== "end");
+      activityEndInput.classList.toggle("timing-authoritative", activityTimingAuthority === "end");
+      if (!start) return;
+      if (activityTimingAuthority === "end") {
+        if (!activityEndInput.value) return;
+        const [sh, sm] = start.split(":").map(Number);
+        const [eh, em] = activityEndInput.value.split(":").map(Number);
+        const duration = (eh * 60 + em - (sh * 60 + sm) + 1440) % 1440;
+        if (duration > 0) activityDurationInput.value = duration;
+      } else {
+        const duration = Number(activityDurationInput.value);
+        if (duration > 0) {
+          const [hours, minutes] = start.split(":").map(Number);
+          const end = (hours * 60 + minutes + duration) % 1440;
+          activityEndInput.value = String(Math.floor(end / 60)).padStart(2, "0") + ":" + String(end % 60).padStart(2, "0");
+        }
+      }
     }
 
     function applyActivityShape() {
       const hasStart = activityStartInput.value.trim().length > 0;
-      activityBoundToggle.hidden = !hasStart;
       if (hasStart) {
         activityDailyInput.checked = false;
         activityDailyInput.disabled = true;
-        applyActivityBoundKind();
       } else {
         activityDailyInput.disabled = false;
-        activityEndInput.hidden = true;
-        activityDurationInput.hidden = false;
+        activityEndInput.value = "";
       }
+      document.getElementById("activity-end-label").hidden = !hasStart;
+      updateActivityCounterpart();
     }
     activityStartInput.addEventListener("input", applyActivityShape);
+    activityDurationInput.addEventListener("input", () => { activityTimingAuthority = "duration"; updateActivityCounterpart(); });
+    activityEndInput.addEventListener("input", () => {
+      activityTimingAuthority = "end";
+      document.getElementById("activity-timing-error").hidden = true;
+      updateActivityCounterpart();
+    });
+    activityStartInput.addEventListener("input", () => { document.getElementById("activity-timing-error").hidden = true; });
 
     function resetActivityForm() {
       activityForm.reset();
       editingActivityId = null;
       activityCancelEdit.hidden = true;
       activityDailyInput.disabled = false;
+      activityTimingAuthority = "duration";
+      document.getElementById("activity-timing-error").hidden = true;
       applyActivityShape();
     }
 
@@ -320,15 +345,9 @@
       activityForm.elements.start.value = entry.start || "";
       activityForm.elements.daily.checked = !!entry.daily;
       renderChecklistOptions(entry.checklist || "");
-      if (entry.is_anchor_shaped && entry.end != null) {
-        activityForm.elements["activity-bound-kind"].value = "end";
-        activityEndInput.value = entry.end;
-        activityDurationInput.value = "";
-      } else {
-        activityForm.elements["activity-bound-kind"].value = "duration";
-        activityDurationInput.value = entry.duration_minutes != null ? entry.duration_minutes : "";
-        activityEndInput.value = "";
-      }
+      activityTimingAuthority = entry.is_anchor_shaped && entry.end != null ? "end" : "duration";
+      activityDurationInput.value = entry.duration_minutes != null ? entry.duration_minutes : "";
+      activityEndInput.value = entry.end || "";
       applyActivityShape();
       activityCancelEdit.hidden = false;
       activityForm.scrollIntoView({ behavior: "smooth", block: "center" });
@@ -345,11 +364,21 @@
         alert("A Daily Activity cannot have a fixed start.");
         return;
       }
-      const boundKind = start ? form.get("activity-bound-kind") : "duration";
+      const boundKind = start ? activityTimingAuthority : "duration";
       const durationMinutes = boundKind === "duration" && form.get("duration_minutes")
         ? Number(form.get("duration_minutes"))
         : null;
       const end = boundKind === "end" ? (form.get("end") || null) : null;
+      if (start && boundKind === "end" && (!end || end === start)) {
+        document.getElementById("activity-timing-error").hidden = false;
+        activityEndInput.focus();
+        return;
+      }
+      if (!durationMinutes && !end) {
+        document.getElementById("activity-timing-error").textContent = "Enter a positive duration or a valid end time.";
+        document.getElementById("activity-timing-error").hidden = false;
+        return;
+      }
       const result = await api("/api/library/activity-template", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
