@@ -100,6 +100,7 @@ test("Session interactions render wake-relative time, preserve checklist edits, 
   const draftEdit = page.locator('[data-promote="draft-1"]');
   assert.equal(await draftEdit.textContent(), "Edit");
   await draftEdit.click();
+  assert.equal(await page.locator("#sheet h2").textContent(), "Edit Draft · Therapy 8:30");
   assert.equal(await page.locator('#promote-draft input[name="start"]').inputValue(), "08:30");
   const promoteRequest = page.waitForRequest(request => request.url().endsWith("/api/promote"));
   await page.locator('#promote-draft button[type="submit"]').click();

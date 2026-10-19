@@ -493,7 +493,7 @@ import { autofill, checklistItemsPayload, checklistPayload, clockLabel, clockVal
       const suggestedDuration = item.suggested_duration_minutes || 30;
       const defaultKind = item.default_kind || "anchor";
       openSheet(
-        "<h2>Promote Draft · " + esc(item.name) + "</h2>" +
+        "<h2>Edit Draft · " + esc(item.name) + "</h2>" +
         '<p class="hint">A new opaque id is minted. The Draft’s id does not leak.</p>' +
         '<form id="promote-draft" data-id="' + esc(item.id) + '" data-original-name="' + esc(item.name) + '" data-stripped-name="' + esc(strippedName) + '">' +
         '<label>Name <input name="name" required value="' + esc(strippedName) + '"></label>' +
@@ -533,13 +533,7 @@ import { autofill, checklistItemsPayload, checklistPayload, clockLabel, clockVal
     }
 
     function sheetEditDraft(item) {
-      openSheet(
-        "<h2>Edit Draft</h2>" +
-        '<form id="edit-draft" data-id="' + esc(item.id) + '">' +
-        '<label>Name <input name="name" required value="' + esc(item.name) + '"></label>' +
-        '<div class="actions"><button class="primary" type="submit">Save</button>' +
-        '<button type="button" class="ghost" data-close>Cancel</button></div></form>'
-      );
+      sheetPromote(item);
     }
 
     function syncPromoteFields(form) {

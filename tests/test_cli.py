@@ -244,7 +244,7 @@ def test_construction_page_is_blank_canvas_with_domain_jargon(tmp_path: Path) ->
     assert "Drop" in html
     assert "Submit" in html
     assert "Unplaced Flex" in html
-    assert "Promote" in html
+    assert '<script type="module" src="/static/session-page.js"></script>' in html
     assert "Template" in html
     assert "Undo" in html
     assert "Redo" in html
