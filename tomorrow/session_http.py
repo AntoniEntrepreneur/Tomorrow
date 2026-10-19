@@ -188,6 +188,14 @@ class SessionHandler(BaseHTTPRequestHandler):
             body = _PAGE_PATH.read_bytes()
             self._send(200, "text/html; charset=utf-8", body)
             return
+        if path in {
+            "/static/session-page.js",
+            "/static/session-state.js",
+            "/static/construction-shared.js",
+        }:
+            asset = Path(__file__).parent / "static" / Path(path).name
+            self._send(200, "text/javascript; charset=utf-8", asset.read_bytes())
+            return
         if path == "/api/session":
             self._send_json(200, session_view(self.server.repo_root, **self._view_args()))
             return
