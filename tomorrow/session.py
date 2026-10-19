@@ -1065,6 +1065,8 @@ def template_mode_view(repo_root: Path, *, template_id: str | None) -> dict:
                 entry.setdefault("checklist", activity.checklist)
                 if shape == "anchor":
                     entry.setdefault("start", activity.start.strftime("%H:%M") if activity.start else None)
+                    if "end" not in source and "duration" not in source and activity.end is not None:
+                        entry.setdefault("end", activity.end)
                 entry.setdefault("duration", int(activity.duration.total_seconds() // 60))
                 entry["broken"] = False
             entry["name_overridden"] = "name" in source
