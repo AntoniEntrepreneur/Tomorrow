@@ -49,6 +49,20 @@ duration = 30
     )
 
 
+def test_load_day_template_reads_optional_bounds(tmp_path: Path) -> None:
+    template_file = tmp_path / "monday.toml"
+    template_file.write_text(
+        'wake = "09:00"\nsleep = "23:30"\n',
+        encoding="utf-8",
+    )
+
+    seed = load_day_template(template_file)
+
+    assert seed is not None
+    assert seed.wake == "09:00"
+    assert seed.sleep == "23:30"
+
+
 def test_load_day_template_preserves_optional_checklist_names(tmp_path: Path) -> None:
     template_file = tmp_path / "tuesday.toml"
     template_file.write_text(
