@@ -284,7 +284,6 @@ import { autofill, checklistItemsPayload, checklistPayload, clockLabel, clockVal
           '<div class="row"><span>' + esc(item.name) +
           (item.source === "icloud" ? ' <span class="icloud-tag">📅 iCloud</span>' : "") +
           "</span>" +
-          '<button type="button" data-promote="' + esc(item.id) + '">Promote</button>' +
           '<button type="button" data-edit-draft="' + esc(item.id) + '">Edit</button>' +
           '<button type="button" data-drop-draft="' + esc(item.id) + '">Drop</button>' +
           "</div>" +
