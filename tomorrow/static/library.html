@@ -20,6 +20,10 @@
     .entry:last-child { border-bottom: none; }
     .entry .meta { font-size: 0.8rem; color: #8b93a7; }
     .entry .actions { display: flex; gap: 0.4rem; }
+    .day-template-entry { cursor: grab; }
+    .day-template-entry.dragging { opacity: 0.45; }
+    .day-template-entry.drop-target { border-top: 2px solid #e0a84a; }
+    #day-template-order-status { min-height: 1em; margin-top: 0.4rem; }
     button { background: #1a2030; color: #e6e1d4; border: 1px solid #2a3142; border-radius: 0.35rem; padding: 0.3rem 0.6rem; cursor: pointer; }
     button.danger { color: #e07a6a; }
     form { display: grid; gap: 0.4rem; margin-top: 0.6rem; }
@@ -73,6 +77,7 @@
     <section>
       <h2>Day Templates</h2>
       <div id="day-template-list"></div>
+      <p id="day-template-order-status" class="hint" role="status" aria-live="polite">Drag templates to change their order.</p>
       <button type="button" id="day-template-new">New Day Template</button>
     </section>
   </div>
@@ -124,6 +129,76 @@
       }
     }
 
+    function renderDayTemplates(entries) {
+      const el = document.getElementById("day-template-list");
+      el.innerHTML = "";
+      entries.forEach((entry, index) => {
+        const row = document.createElement("div");
+        row.className = "entry day-template-entry";
+        row.draggable = true;
+        row.dataset.id = entry.id;
+        row.setAttribute("aria-label", `${entry.name}, position ${index + 1}. Drag to reorder.`);
+        const handle = document.createElement("span");
+        handle.textContent = "⠿ " + entry.name;
+        handle.title = "Drag to reorder";
+        const actions = document.createElement("div");
+        actions.className = "actions";
+        const edit = document.createElement("button");
+        edit.textContent = "Edit";
+        edit.onclick = () => editDayTemplate(entry);
+        const del = document.createElement("button");
+        del.className = "danger";
+        del.textContent = "Delete";
+        del.onclick = async () => {
+          await api("/api/library/day-template", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ action: "delete", id: entry.id }),
+          });
+          load();
+        };
+        actions.append(edit, del);
+        row.append(handle, actions);
+        row.addEventListener("dragstart", (event) => {
+          row.classList.add("dragging");
+          event.dataTransfer.effectAllowed = "move";
+          event.dataTransfer.setData("text/plain", entry.id);
+        });
+        row.addEventListener("dragend", () => {
+          row.classList.remove("dragging");
+          el.querySelectorAll(".drop-target").forEach((item) => item.classList.remove("drop-target"));
+        });
+        row.addEventListener("dragover", (event) => {
+          event.preventDefault();
+          row.classList.add("drop-target");
+        });
+        row.addEventListener("dragleave", () => row.classList.remove("drop-target"));
+        row.addEventListener("drop", async (event) => {
+          event.preventDefault();
+          row.classList.remove("drop-target");
+          const draggedId = event.dataTransfer.getData("text/plain");
+          if (!draggedId || draggedId === entry.id) return;
+          const ids = entries.map((item) => item.id);
+          const from = ids.indexOf(draggedId);
+          const to = ids.indexOf(entry.id);
+          if (from < 0 || to < 0) return;
+          ids.splice(to, 0, ids.splice(from, 1)[0]);
+          const result = await api("/api/library/day-template", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ action: "reorder", ids }),
+          });
+          if (result && result.error) {
+            document.getElementById("day-template-order-status").textContent = result.error;
+          } else {
+            document.getElementById("day-template-order-status").textContent = "Order saved.";
+          }
+          load();
+        });
+        el.appendChild(row);
+      });
+    }
+
     async function load() {
       const data = await api("/api/library");
       currentActivityOptions = data.activity_templates;
@@ -131,12 +206,7 @@
       currentDayTemplateOptions = data.day_templates;
       renderList(document.getElementById("checklist-list"), data.checklists, "checklist", editChecklist);
       renderList(document.getElementById("activity-list"), data.activity_templates, "activity-template", editActivityTemplate);
-      renderList(
-        document.getElementById("day-template-list"),
-        data.day_templates,
-        "day-template",
-        editDayTemplate
-      );
+      renderDayTemplates(data.day_templates);
       renderWeekdayOptions();
       if (editingActivityId === null) {
         renderChecklistOptions("");
