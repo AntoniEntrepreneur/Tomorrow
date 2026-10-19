@@ -45,12 +45,14 @@ from tomorrow.day_templates import (
 )
 from tomorrow.library import (
     _slugify,
+    day_template_order,
     delete_activity_template,
     delete_checklist,
     delete_day_template,
     save_activity_template,
     save_checklist,
     save_day_template,
+    reorder_day_templates,
 )
 from tomorrow.icloud import try_import_icloud_items
 from tomorrow.name_times import NameTimeResult, parse_name_time
@@ -1799,7 +1801,10 @@ def _list_activity_templates(data_dir: Path) -> list[dict]:
 
 def _list_day_templates(data_dir: Path) -> list[dict]:
     templates_dir = data_dir / "templates"
-    paths = sorted(templates_dir.glob("*.toml")) if templates_dir.is_dir() else []
+    paths = [
+        templates_dir / f"{template_id}.toml"
+        for template_id in day_template_order(templates_dir)
+    ]
     return [
         {
             "id": path.stem,
@@ -1824,9 +1829,11 @@ class _LibraryEntityOps:
         self,
         save: Callable[[Path, dict], None],
         delete: Callable[[Path, dict], None],
+        reorder: Callable[[Path, dict], None] | None = None,
     ) -> None:
         self.save = save
         self.delete = delete
+        self.reorder = reorder
 
 
 def _save_checklist_entity(repo_root: Path, payload: dict) -> None:
@@ -1882,6 +1889,9 @@ _LIBRARY_ENTITY_OPS: dict[str, _LibraryEntityOps] = {
         save=_save_day_template_entity,
         delete=lambda repo_root, payload: delete_day_template(
             repo_root, template_id=payload["id"]
+        ),
+        reorder=lambda repo_root, payload: reorder_day_templates(
+            repo_root, ids=list(payload.get("ids", []))
         ),
     ),
 }
@@ -2267,6 +2277,12 @@ class SessionHandler(BaseHTTPRequestHandler):
                 return
         elif action == "delete":
             ops.delete(repo_root, payload)
+        elif action == "reorder" and ops.reorder is not None:
+            try:
+                ops.reorder(repo_root, payload)
+            except ValueError as exc:
+                self._send_json(409, {"error": str(exc)})
+                return
         else:
             self.send_error(404)
             return

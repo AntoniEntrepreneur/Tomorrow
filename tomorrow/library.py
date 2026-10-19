@@ -9,6 +9,7 @@ already taken); renaming an entry never renames its file.
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 import tomllib
 
@@ -359,3 +360,30 @@ def _entry_lines(entry: dict[str, object]) -> list[str]:
 def delete_day_template(repo_root: Path, *, template_id: str) -> None:
     path = day_templates_dir(repo_root / "data") / f"{template_id}.toml"
     path.unlink(missing_ok=True)
+
+
+def day_template_order(directory: Path) -> list[str]:
+    """Return saved Day Template order, followed by any new templates by id."""
+
+    ids = {path.stem for path in directory.glob("*.toml")} if directory.is_dir() else set()
+    order_path = directory / ".order.json"
+    try:
+        saved = json.loads(order_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        saved = []
+    ordered = [item for item in saved if isinstance(item, str) and item in ids]
+    ordered.extend(sorted(ids - set(ordered)))
+    return ordered
+
+
+def reorder_day_templates(repo_root: Path, *, ids: list[str]) -> None:
+    """Persist a complete Day Template ordering, rejecting stale or partial lists."""
+
+    directory = day_templates_dir(repo_root / "data")
+    current = {path.stem for path in directory.glob("*.toml")} if directory.is_dir() else set()
+    if len(ids) != len(set(ids)) or set(ids) != current:
+        raise ValueError("Day Templates changed. Reload the Library and try again.")
+    directory.mkdir(parents=True, exist_ok=True)
+    (directory / ".order.json").write_text(
+        json.dumps(ids, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+    )
