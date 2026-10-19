@@ -355,6 +355,7 @@
       <label>Sleep <input name="sleep" required></label>
       <button type="submit" class="primary">Save Template</button>
       <button type="button" class="ghost" id="template-reset">Reset changes</button>
+      <button type="button" class="ghost" id="template-back">Back to Library</button>
       <span id="template-saved" role="status"></span>
     </form>
 
@@ -435,6 +436,9 @@
       templateDirty = false;
       document.getElementById("template-saved").textContent = "Reset";
       renderTemplateEntries();
+    });
+    document.getElementById("template-back").addEventListener("click", () => {
+      window.location.href = "/library";
     });
     let sheetOpen = false;
     let sheetKind = null;
