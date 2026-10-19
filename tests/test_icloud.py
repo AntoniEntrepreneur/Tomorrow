@@ -1,5 +1,6 @@
 from datetime import date, datetime, time, timedelta
 from pathlib import Path
+import sys
 
 from tomorrow.domain import Anchor
 from tomorrow.icloud import (
@@ -291,6 +292,43 @@ def test_try_import_icloud_items_returns_empty_when_fetch_raises(tmp_path: Path)
     )
 
     assert result == ClassifiedIcloudItems(anchors=[], drafts=[])
+
+
+def test_try_import_icloud_items_returns_empty_when_eventkit_is_unavailable(
+    tmp_path: Path, monkeypatch
+) -> None:
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
+    (data_dir / "icloud.toml").write_text(
+        'calendars = ["Work"]\nreminder_lists = ["Errands"]\n', encoding="utf-8"
+    )
+    monkeypatch.setitem(sys.modules, "EventKit", None)
+
+    result = try_import_icloud_items(data_dir, PLAN_DATE, existing_anchors=[])
+
+    assert result == ClassifiedIcloudItems(anchors=[], drafts=[])
+
+
+def test_classification_uses_plain_records_when_eventkit_is_unavailable(monkeypatch) -> None:
+    monkeypatch.setitem(sys.modules, "EventKit", None)
+
+    result = classify_icloud_items(
+        existing_anchors=[],
+        events=[
+            RawEvent(
+                title="Standup",
+                calendar="Work",
+                start=datetime(2026, 8, 11, 9, 0),
+                duration_minutes=30,
+            )
+        ],
+        reminders=[RawReminder(title="Call dentist", list_name="Errands", due_date=PLAN_DATE)],
+        plan_date=PLAN_DATE,
+        config=CONFIG,
+    )
+
+    assert [item.name for item in result.anchors] == ["Standup"]
+    assert [item.name for item in result.drafts] == ["Call dentist"]
 
 
 def test_try_import_icloud_items_fetches_and_classifies(tmp_path: Path) -> None:
