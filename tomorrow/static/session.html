@@ -788,7 +788,6 @@
           '<div class="row"><span>' + esc(item.name) +
           (item.source === "icloud" ? ' <span class="icloud-tag">📅 iCloud</span>' : "") +
           "</span>" +
-          '<button type="button" data-promote="' + esc(item.id) + '">Promote</button>' +
           '<button type="button" data-edit-draft="' + esc(item.id) + '">Edit</button>' +
           '<button type="button" data-drop-draft="' + esc(item.id) + '">Drop</button>' +
           "</div>" +
@@ -1020,13 +1019,7 @@
     }
 
     function sheetEditDraft(item) {
-      openSheet(
-        "<h2>Edit Draft</h2>" +
-        '<form id="edit-draft" data-id="' + esc(item.id) + '">' +
-        '<label>Name <input name="name" required value="' + esc(item.name) + '"></label>' +
-        '<div class="actions"><button class="primary" type="submit">Save</button>' +
-        '<button type="button" class="ghost" data-close>Cancel</button></div></form>'
-      );
+      sheetPromote(item);
     }
 
     function syncPromoteFields(form) {
@@ -1464,12 +1457,6 @@
       const dropId = event.target.dataset.dropDraft;
       if (dropId) {
         dropDraft(dropId);
-        return;
-      }
-      const promoteId = event.target.dataset.promote;
-      if (promoteId) {
-        const item = findDraft(promoteId);
-        if (item) sheetPromote(item);
         return;
       }
       const editId = event.target.dataset.editDraft;
