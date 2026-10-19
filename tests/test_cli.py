@@ -300,6 +300,18 @@ def test_session_json_omits_undo_stacks(tmp_path: Path) -> None:
     assert payload["show_template_offer"] is False
 
 
+def test_unknown_construction_action_keeps_http_404_response(tmp_path: Path) -> None:
+    _write_defaults(tmp_path)
+    server, thread = _start_server(tmp_path)
+    try:
+        status, body = _http("POST", "/api/add", payload={"kind": "unknown"})
+    finally:
+        _stop_server(server, thread)
+
+    assert status == 404
+    assert b"Error code: 404" in body
+
+
 def test_submit_writes_plan_opens_file_and_exits(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
