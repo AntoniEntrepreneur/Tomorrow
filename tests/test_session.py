@@ -3634,6 +3634,25 @@ def test_apply_named_day_template_seeds_a_blank_session(tmp_path: Path) -> None:
     assert view["template_offer"] == "accepted"
 
 
+def test_apply_named_day_template_applies_template_bounds(tmp_path: Path) -> None:
+    _write_defaults(tmp_path)
+    templates = tmp_path / "data" / "templates"
+    templates.mkdir(parents=True, exist_ok=True)
+    (templates / "monday.toml").write_text(
+        'name = "Monday"\nwake = "09:00"\nsleep = "23:30"\n',
+        encoding="utf-8",
+    )
+
+    view = apply_named_day_template(
+        tmp_path,
+        output_dir=tmp_path / "Desktop",
+        template_id="monday",
+        now=datetime(2026, 8, 10, 22, 0),
+    )
+
+    assert view["bounds"] == {"wake": "09:00", "sleep": "23:30"}
+
+
 def test_apply_named_day_template_is_a_no_op_when_session_has_items(
     tmp_path: Path,
 ) -> None:

@@ -17,6 +17,8 @@ class TemplateSeed:
 
     anchors: tuple[Anchor, ...]
     flexes: tuple[Flex, ...]
+    wake: str | None = None
+    sleep: str | None = None
 
 
 def day_templates_dir(data_dir: Path) -> Path:
@@ -160,7 +162,14 @@ def load_day_template(
             continue
         flexes.append(_parse_literal_flex(entry))
 
-    return TemplateSeed(anchors=tuple(anchors), flexes=tuple(flexes))
+    wake_value = data.get("wake")
+    sleep_value = data.get("sleep")
+    return TemplateSeed(
+        anchors=tuple(anchors),
+        flexes=tuple(flexes),
+        wake=str(wake_value) if wake_value is not None else None,
+        sleep=str(sleep_value) if sleep_value is not None else None,
+    )
 
 
 def _parse_duration_minutes(entry: dict[str, object]) -> int:

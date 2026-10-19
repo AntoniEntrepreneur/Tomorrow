@@ -931,6 +931,10 @@ def _seed_mutation(seed) -> Callable[[dict], None]:
     entry_names = {entry.name.strip().lower() for entry in (*seed.anchors, *seed.flexes)}
 
     def mutate(current: dict) -> None:
+        if seed.wake is not None:
+            current["bounds"]["wake"] = parse_clock(seed.wake).strftime("%H:%M")
+        if seed.sleep is not None:
+            current["bounds"]["sleep"] = parse_clock(seed.sleep).strftime("%H:%M")
         current["flexes"] = [
             flex
             for flex in current["flexes"]
