@@ -97,9 +97,9 @@ test("Session interactions render wake-relative time, preserve checklist edits, 
   assert.deepEqual(edited.postDataJSON().checklist_items, ["Keys", "Wallet"]);
   await page.locator("#sheet-backdrop.open").waitFor({ state: "detached" });
 
-  const directPromotion = page.locator('[data-promote="draft-1"]');
-  if (await directPromotion.count()) await directPromotion.click();
-  else await page.locator('[data-edit-draft="draft-1"]').click();
+  const draftEdit = page.locator('[data-promote="draft-1"]');
+  assert.equal(await draftEdit.textContent(), "Edit");
+  await draftEdit.click();
   assert.equal(await page.locator('#promote-draft input[name="start"]').inputValue(), "08:30");
   const promoteRequest = page.waitForRequest(request => request.url().endsWith("/api/promote"));
   await page.locator('#promote-draft button[type="submit"]').click();
