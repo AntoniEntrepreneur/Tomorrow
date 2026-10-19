@@ -68,6 +68,10 @@ def test_new_template_mode_uses_application_bounds_without_creating_session(
     (tmp_path / "data" / "defaults.toml").write_text(
         'wake = "06:30"\nsleep = "23:00"\n', encoding="utf-8"
     )
+    (tmp_path / "data" / "checklists").mkdir()
+    (tmp_path / "data" / "checklists" / "morning.toml").write_text(
+        'name = "Morning"\nitems = ["Water"]\n', encoding="utf-8"
+    )
 
     view = template_mode_view(tmp_path, template_id=None)
 
@@ -76,6 +80,7 @@ def test_new_template_mode_uses_application_bounds_without_creating_session(
     assert view["name"] == ""
     assert view["weekday"] is None
     assert view["bounds"] == {"wake": "06:30", "sleep": "23:00"}
+    assert view["checklists"] == [{"id": "morning", "name": "Morning", "items": ["Water"]}]
     assert not (tmp_path / "data" / "session.json").exists()
 
 

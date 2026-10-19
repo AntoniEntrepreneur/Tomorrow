@@ -1085,6 +1085,7 @@ def template_mode_view(repo_root: Path, *, template_id: str | None) -> dict:
         "anchors": present(entries["anchors"], "anchor"),
         "flexes": present(entries["flexes"], "flex"),
         "activity_templates": _list_activity_templates(repo_root / "data"),
+        "checklists": _list_checklists(repo_root / "data"),
         "saved": False,
     }
 

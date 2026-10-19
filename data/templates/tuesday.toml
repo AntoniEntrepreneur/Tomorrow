@@ -1,5 +1,12 @@
 name = "Tuesday"
 weekday = "tuesday"
+wake = "07:00"
+sleep = "23:30"
+
+[[anchor]]
+name = "Drive to Politechnika"
+start = "7:50"
+end = "8:10"
 
 [[anchor]]
 name = "GIS"
@@ -9,10 +16,11 @@ checklist = "university"
 
 [[anchor]]
 name = "Eksploracja danych"
-start = "13:45"
-end = "15:25"
+start = "11:55"
+duration = 100
 
 [[anchor]]
-name = "Drive to Politechnika"
-start = "7:50"
-end = "8:10"
+name = "Upper body"
+start = "13:50"
+duration = 70
+checklist = "gym-sauna"

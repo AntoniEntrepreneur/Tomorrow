@@ -351,8 +351,6 @@
         <option>thursday</option><option>friday</option><option>saturday</option>
         <option>sunday</option>
       </select></label>
-      <label>Wake <input name="wake" required></label>
-      <label>Sleep <input name="sleep" required></label>
       <button type="submit" class="primary">Save Template</button>
       <button type="button" class="ghost" id="template-reset">Reset changes</button>
       <button type="button" class="ghost" id="template-back">Back to Library</button>
@@ -431,8 +429,6 @@
       const form = document.getElementById("template-editor");
       form.elements.name.value = source.name || "";
       form.elements.weekday.value = source.weekday || "";
-      form.elements.wake.value = source.bounds.wake;
-      form.elements.sleep.value = source.bounds.sleep;
       templateDirty = false;
       document.getElementById("template-saved").textContent = "Reset";
       renderTemplateEntries();
@@ -499,8 +495,9 @@
     }
 
     function checklistRows(checklistId) {
-      if (!checklistId || !current) return [];
-      const entry = (current.checklists || []).find(item => item.id === checklistId);
+      const entries = current ? current.checklists : (templateDraft && templateDraft.checklists) || [];
+      if (!checklistId) return [];
+      const entry = entries.find(item => item.id === checklistId);
       return entry ? (entry.items || []) : [];
     }
 
@@ -513,7 +510,8 @@
         ? selectedItems
         : checklistRows(selected)
       ).join("\n");
-      const options = (current && current.checklists || []).map(entry =>
+      const entries = current ? current.checklists : (templateDraft && templateDraft.checklists) || [];
+      const options = entries.map(entry =>
         '<option value="' + esc(entry.id) + '"' +
         (entry.id === selected ? " selected" : "") + ">" +
         esc(entry.name) + "</option>"
@@ -1205,13 +1203,17 @@
         const options = (templateDraft.activityOptions || []).map(option =>
           '<option value="' + esc(option.id) + '"' + (option.id === entry.activity ? " selected" : "") + '>' +
           esc(option.name) + "</option>").join("");
+        const checklistOptions = (templateDraft.checklists || []).map(option =>
+          '<option value="' + esc(option.id) + '"' +
+          (entry.checklist_overridden && option.id === entry.checklist ? " selected" : "") + ">" +
+          esc(option.name) + "</option>").join("");
         openSheet(
           "<h2>" + (index === -1 ? "Add " : "Edit ") + "Activity Template</h2>" +
           '<form id="template-activity-entry" data-index="' + index + '" data-source-kind="' + (sourceKind || "") + '">' +
           '<label>Shared template <select name="activity" required>' + options + '</select></label>' +
           '<label>Shape <select name="shape"><option value="flex">Flex</option><option value="anchor">Anchor</option></select><button type="button" class="ghost" data-reset-field="shape">Reset</button></label>' +
           '<label>Name override (optional) <input name="name" value="' + esc(entry.name_overridden ? entry.name : "") + '"><button type="button" class="ghost" data-reset-field="name">Reset</button></label>' +
-          '<label>Checklist override (optional) <input name="checklist" value="' + esc(entry.checklist_overridden ? entry.checklist : "") + '"><button type="button" class="ghost" data-reset-field="checklist">Reset</button></label>' +
+          '<label>Checklist override (optional) <select name="checklist"><option value="">Inherit</option>' + checklistOptions + '</select><button type="button" class="ghost" data-reset-field="checklist">Reset</button></label>' +
           '<label>Start override (Anchor) <input name="start" type="time" value="' + esc(entry.start_overridden ? entry.start : "") + '"><button type="button" class="ghost" data-reset-field="timing">Reset timing</button></label>' +
           '<label>Duration override <input name="duration" type="number" min="1" value="' + esc(entry.timing_overridden ? (entry.duration || "") : "") + '"></label>' +
           '<p class="hint">Leave an override blank to inherit. Resetting shape also resets its timing.</p>' +
@@ -1230,21 +1232,26 @@
         "<h2>" + (index === -1 ? "Add " : "Edit ") + (kind === "anchor" ? "Anchor" : "Flex") + "</h2>" +
         '<form id="template-entry" data-kind="' + kind + '" data-index="' + index + '">' +
         timing +
+        checklistField(entry.checklist) +
         '<div class="actions"><button class="primary" type="submit">Update</button>' +
         '<button type="button" class="ghost" data-close>Cancel</button></div></form>',
         "edit"
       );
-      if (kind === "anchor") initDurationToggle(document.getElementById("template-entry"));
+      if (kind === "anchor") {
+        const form = document.getElementById("template-entry");
+        initDurationToggle(form);
+        setDurationMode(form, "end");
+        form.end.value = entry.end ||
+          (entry.start && duration ? endClock(entry.start, duration) : "");
+      }
     }
 
     function renderTemplateEntries() {
+      renderBounds(templateDraft.bounds);
       const rail = document.getElementById("rail");
       const anchors = templateDraft.anchors || [];
       const flexes = templateDraft.flexes || [];
       rail.innerHTML =
-        '<div class="template-actions"><button type="button" data-template-add="anchor">Add Anchor</button>' +
-        '<button type="button" data-template-add="flex">Add Flex</button>' +
-        '<button type="button" data-template-add="activity">Add Activity Template</button></div>' +
         anchors.map((entry, index) =>
           '<button type="button" class="block anchor" data-template-entry="' + (entry.activity ? "activity" : "anchor") + '" data-template-source-kind="anchor" data-template-index="' + index + '">' +
           '<span class="block-title">' + esc(entry.name || ("Activity: " + entry.activity)) + '</span><div class="block-range">' +
@@ -1266,6 +1273,12 @@
             (entry.duration ? " · " + esc(entry.duration) + " min" : "") + "</button>"
           ).join("") + "</div>"
           : "<div>No reusable flex entries.</div>");
+    }
+
+    function renderBounds(bounds) {
+      document.getElementById("wake-cap").textContent = "↑ " + bounds.wake + " wake";
+      document.getElementById("sleep-cap").textContent =
+        clockLabel(bounds.sleep, bounds.wake) + " sleep ↓";
     }
 
     function sheetEditBound(which) {
@@ -1323,13 +1336,12 @@
         document.getElementById("template-editor").hidden = false;
         document.getElementById("template-editor").elements.name.value = template.name;
         document.getElementById("template-editor").elements.weekday.value = template.weekday || "";
-        document.getElementById("template-editor").elements.wake.value = template.bounds.wake;
-        document.getElementById("template-editor").elements.sleep.value = template.bounds.sleep;
         templateDraft = {
           anchors: (template.anchors || []).map(entry => ({...entry})),
           flexes: (template.flexes || []).map(entry => ({...entry})),
           bounds: {...template.bounds},
-          activityOptions: template.activity_templates || []
+          activityOptions: template.activity_templates || [],
+          checklists: template.checklists || []
         };
         templateInitial = cloneTemplate({
           template,
@@ -1357,8 +1369,8 @@
               template_id: template.template_id,
               name: form.get("name"),
               weekday: form.get("weekday") || null,
-              wake: form.get("wake"),
-              sleep: form.get("sleep"),
+              wake: templateDraft.bounds.wake,
+              sleep: templateDraft.bounds.sleep,
               anchors: templateDraft.anchors,
               flexes: templateDraft.flexes
             })
@@ -1406,8 +1418,20 @@
       await mutate("/api/promote-checklist", { id: itemId, kind: itemKind, name: name });
     }
 
-    document.getElementById("stamp-anchor").addEventListener("click", sheetAddAnchor);
-    document.getElementById("stamp-flex").addEventListener("click", sheetAddFlex);
+    document.getElementById("stamp-anchor").addEventListener("click", () => {
+      if (templateMode && templateDraft) {
+        templateEntryForm("anchor", -1);
+      } else {
+        sheetAddAnchor();
+      }
+    });
+    document.getElementById("stamp-flex").addEventListener("click", () => {
+      if (templateMode && templateDraft) {
+        templateEntryForm("flex", -1);
+      } else {
+        sheetAddFlex();
+      }
+    });
     document.getElementById("stamp-draft").addEventListener("click", sheetAddDraft);
     document.getElementById("stamp-todo").addEventListener("click", sheetAddTodo);
     document.getElementById("wake-cap").addEventListener("click", () => sheetEditBound("wake"));
@@ -1663,6 +1687,10 @@
       event.preventDefault();
       const form = event.target;
       if (form.id === "add-anchor") {
+        if (templateMode && templateDraft) {
+          templateEntryForm("anchor", -1);
+          return;
+        }
         const duration = resolveDurationMinutes(form);
         if (duration === null) return;
         await mutate("/api/add", {
@@ -1677,10 +1705,19 @@
       }
       if (form.id === "template-entry") {
         const entries = form.dataset.kind === "anchor" ? templateDraft.anchors : templateDraft.flexes;
+        const duration = form.dataset.kind === "anchor"
+          ? resolveDurationMinutes(form)
+          : Number(form.duration_minutes.value);
+        if (duration === null) return;
         const entry = form.dataset.kind === "anchor"
-          ? {name: form.name.value, start: clockValue(form.start), duration: resolveDurationMinutes(form)}
-          : {name: form.name.value, duration: Number(form.duration_minutes.value)};
-        if (!entry.duration) return;
+          ? {name: form.name.value, start: clockValue(form.start), checklist: checklistPayload(form)}
+          : {name: form.name.value, checklist: checklistPayload(form)};
+        if (form.dataset.kind === "anchor" && form.dataset.durationMode === "end") {
+          entry.end = clockValue(form.end);
+        } else {
+          entry.duration = duration;
+        }
+        if (!duration) return;
         const index = Number(form.dataset.index);
         if (index === -1) entries.push(entry);
         else entries[index] = entry;
@@ -1712,6 +1749,10 @@
         return;
       }
       if (form.id === "add-flex") {
+        if (templateMode && templateDraft) {
+          templateEntryForm("flex", -1);
+          return;
+        }
         await mutate("/api/add", {
           kind: "flex",
           name: form.name.value,
@@ -1823,8 +1864,7 @@
       if (form.id === "edit-bounds") {
         if (templateMode) {
           templateDraft.bounds[form.dataset.which] = clockValue(form.clock);
-          document.getElementById("template-editor").elements[form.dataset.which].value =
-            templateDraft.bounds[form.dataset.which];
+          renderBounds(templateDraft.bounds);
           markTemplateDirty();
           closeSheet();
           return;
@@ -1851,10 +1891,18 @@
         if (isTypingTarget(event.target)) return;
         if (key === "a") {
           event.preventDefault();
-          sheetAddAnchor();
+          if (templateMode && templateDraft) {
+            templateEntryForm("anchor", -1);
+          } else {
+            sheetAddAnchor();
+          }
         } else if (key === "f") {
           event.preventDefault();
-          sheetAddFlex();
+          if (templateMode && templateDraft) {
+            templateEntryForm("flex", -1);
+          } else {
+            sheetAddFlex();
+          }
         } else if (key === "d") {
           event.preventDefault();
           sheetAddDraft();
