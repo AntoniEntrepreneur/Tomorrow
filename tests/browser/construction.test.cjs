@@ -76,6 +76,15 @@ test("Session interactions render wake-relative time, preserve checklist edits, 
       await route.fulfill({ json: current });
       return;
     }
+    if (request.method() === "POST" && url.pathname === "/api/suggest-activity") {
+      await route.fulfill({ json: { suggestion: null } });
+      return;
+    }
+    if (request.method() === "POST" && url.pathname === "/api/undo") {
+      current = { ...current, can_undo: false, can_redo: true };
+      await route.fulfill({ json: current });
+      return;
+    }
     if (request.method() === "POST" && url.pathname === "/api/edit") {
       current = { ...current, anchors: current.anchors.map(item => item.id === body.id ? { ...item, checklist_items: body.checklist_items, checklist: null } : item) };
       await route.fulfill({ json: current });
@@ -136,5 +145,63 @@ test("Day Template mode loads and saves through its HTTP endpoint", async () => 
   assert.equal(saved.postDataJSON().name, "Weekday plan");
   assert.deepEqual(pageErrors, []);
   assert.equal(requests.at(-1).body.name, "Weekday plan");
+  await page.close();
+});
+
+test("Draft Edit applies Activity Template suggestions and keyboard undo", async () => {
+  const page = await browser.newPage();
+  let current = sessionView();
+  current.can_undo = true;
+  current.drafts = [{ id: "draft-gym", name: "Gym" }];
+  const requests = [];
+  await page.route("**/api/**", async route => {
+    const request = route.request();
+    const url = new URL(request.url());
+    const body = request.postDataJSON() || {};
+    requests.push({ path: url.pathname, body });
+    if (request.method() === "GET" && url.pathname === "/api/session") {
+      await route.fulfill({ json: current });
+      return;
+    }
+    if (request.method() === "POST" && url.pathname === "/api/suggest-activity") {
+      assert.equal(body.name, "Gym");
+      await route.fulfill({
+        json: {
+          suggestion: {
+            kind: "activity",
+            activity_id: "gym",
+            name: "Gym",
+            start: "18:00",
+            duration_minutes: 60,
+            checklist: "prep"
+          }
+        }
+      });
+      return;
+    }
+    if (request.method() === "POST" && url.pathname === "/api/undo") {
+      current = { ...current, can_undo: false, can_redo: true };
+      await route.fulfill({ json: current });
+      return;
+    }
+    await route.fulfill({ json: current });
+  });
+
+  await page.goto(baseUrl);
+  await page.getByText("Late work", { exact: true }).waitFor();
+  const undoRequest = page.waitForRequest(request => request.url().endsWith("/api/undo"));
+  await page.keyboard.press("Control+z");
+  await undoRequest;
+  assert.equal(await page.locator("#stamp-draft").isEnabled(), true);
+  assert.equal(requests.some(item => item.path === "/api/undo"), true);
+
+  await page.locator("#stamp-draft").click();
+  await page.locator("#add-draft").waitFor();
+  await page.locator("#add-draft [data-close]").click();
+  await page.locator('[data-promote="draft-gym"]').click();
+  await page.waitForFunction(() => document.querySelector('#promote-draft input[name="start"]')?.value === "18:00");
+  assert.equal(await page.locator('#promote-draft input[name="duration_minutes"]').inputValue(), "60");
+  assert.equal(await page.locator('#promote-draft select[name="checklist"]').inputValue(), "prep");
+  assert.equal(requests.some(item => item.path === "/api/suggest-activity"), true);
   await page.close();
 });

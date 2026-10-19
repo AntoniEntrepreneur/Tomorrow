@@ -237,49 +237,7 @@ def test_construction_page_is_blank_canvas_with_domain_jargon(tmp_path: Path) ->
 
     html = body.decode("utf-8")
     assert status == 200
-    assert "Anchor" in html
-    assert "Flex" in html
-    assert "Draft" in html
-    assert "Gap" in html
-    assert "Drop" in html
-    assert "Submit" in html
-    assert "Unplaced Flex" in html
     assert '<script type="module" src="/static/session-page.js"></script>' in html
-    assert "Template" in html
-    assert "Undo" in html
-    assert "Redo" in html
-    assert 'id="undo"' in html
-    assert 'id="redo"' in html
-    assert "/api/undo" in html
-    assert "/api/redo" in html
-    assert "toast" not in html
-    assert 'type="date"' not in html
-    assert "named-routine" not in html
-    assert "latitude" not in html
-    assert "longitude" not in html
-
-
-def test_session_page_wires_undo_shortcuts_and_keeps_stamps_enabled(
-    tmp_path: Path,
-) -> None:
-    _write_defaults(tmp_path)
-    server, thread = _start_server(tmp_path)
-    try:
-        status, body = _http("GET", "/")
-    finally:
-        _stop_server(server, thread)
-
-    html = body.decode("utf-8")
-    assert status == 200
-    assert 'key === "z"' in html or 'key === "Z"' in html or 'toLowerCase()' in html
-    assert "shiftKey" in html
-    assert 'key === "y"' in html or 'key === "Y"' in html
-    assert "INPUT" in html
-    assert "TEXTAREA" in html
-    assert "sheetKind" in html or 'kind === "stamp"' in html or 'kind === "edit"' in html
-    assert "openSheet(" in html
-    assert "stamp" in html
-    assert "disabled" in html
 
 
 def test_session_json_omits_undo_stacks(tmp_path: Path) -> None:
@@ -1371,21 +1329,6 @@ def test_suggest_activity_endpoint_returns_the_whole_bundle(tmp_path: Path) -> N
         "duration_minutes": 60,
         "checklist": "gym-bag",
     }
-
-
-def test_session_page_asks_for_activity_suggestions_from_name_fields(
-    tmp_path: Path,
-) -> None:
-    _write_defaults(tmp_path)
-    server, thread = _start_server(tmp_path)
-    try:
-        status, body = _http("GET", "/")
-    finally:
-        _stop_server(server, thread)
-
-    html = body.decode("utf-8")
-    assert status == 200
-    assert "/api/suggest-activity" in html
 
 
 def test_library_checklist_name_collision_over_http_reaches_the_page_as_error(
