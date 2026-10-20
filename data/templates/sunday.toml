@@ -1,0 +1,7 @@
+name = "Sunday"
+wake = "09:00"
+sleep = "23:30"
+
+[[flex]]
+name = "Study for uni"
+duration = 90
