@@ -1044,6 +1044,12 @@ def template_mode_view(repo_root: Path, *, template_id: str | None) -> dict:
             entry = dict(source)
             activity_id = entry.get("activity")
             if activity_id is None:
+                matching_act = next(
+                    (act for act in activity_library.values() if act.name.strip().lower() == str(entry.get("name", "")).strip().lower()),
+                    None
+                )
+                if matching_act is not None and matching_act.daily:
+                    entry["daily"] = True
                 result.append(entry)
                 continue
             activity = activity_library.get(str(activity_id))
@@ -1063,6 +1069,8 @@ def template_mode_view(repo_root: Path, *, template_id: str | None) -> dict:
                         entry.setdefault("end", activity.end)
                 entry.setdefault("duration", int(activity.duration.total_seconds() // 60))
                 entry["broken"] = False
+                if activity.daily:
+                    entry["daily"] = True
             entry["name_overridden"] = "name" in source
             entry["checklist_overridden"] = "checklist" in source
             entry["timing_overridden"] = any(key in source for key in ("start", "end", "duration"))
@@ -1070,6 +1078,30 @@ def template_mode_view(repo_root: Path, *, template_id: str | None) -> dict:
             entry["start_overridden"] = "start" in source
             result.append(entry)
         return result
+
+    referenced_activity_ids = {
+        str(entry.get("activity"))
+        for entry in entries["anchors"] + entries["flexes"]
+        if entry.get("activity")
+    }
+    referenced_names = {
+        str(entry.get("name", "")).strip().lower()
+        for entry in entries["anchors"] + entries["flexes"]
+        if entry.get("name")
+    }
+    daily_activities = [
+        {
+            "id": activity_id,
+            "name": activity.name,
+            "duration_minutes": int(activity.duration.total_seconds() // 60),
+            "checklist": activity.checklist,
+            "daily": True,
+        }
+        for activity_id, activity in activity_library.items()
+        if activity.daily
+        and activity_id not in referenced_activity_ids
+        and activity.name.strip().lower() not in referenced_names
+    ]
 
     return {
         "mode": "template",
@@ -1082,6 +1114,7 @@ def template_mode_view(repo_root: Path, *, template_id: str | None) -> dict:
         },
         "anchors": present(entries["anchors"], "anchor"),
         "flexes": present(entries["flexes"], "flex"),
+        "daily_activities": daily_activities,
         "activity_templates": _list_activity_templates(repo_root / "data"),
         "checklists": _list_checklists(repo_root / "data"),
         "saved": False,

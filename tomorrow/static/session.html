@@ -324,12 +324,103 @@
     .sheet .timing-field.is-authoritative input { border-color: var(--wick); box-shadow: 0 0 0 1px rgba(224,168,74,0.35); }
     .sheet .timing-field.is-derived { opacity: 0.55; }
     .sheet .field-error { font-size: 0.8rem; color: var(--danger); margin-bottom: 0.6rem; }
-    #template-editor { display: grid; gap: 0.45rem; margin-bottom: 1rem; }
+    #template-editor {
+      display: grid;
+      gap: 0.75rem;
+      margin-bottom: 1.25rem;
+      padding: 0.9rem 1.1rem;
+      background: var(--paper);
+      border: 1px solid rgba(224,168,74,0.3);
+      border-radius: 12px;
+    }
     #template-editor[hidden] { display: none; }
-    #template-editor .ghost { background: transparent; color: var(--ink); border: 1px solid rgba(224,168,74,0.28); }
-    #template-editor [role="status"] { color: var(--anchor); min-height: 1.2em; }
-    .template-actions { display: flex; gap: 0.4rem; margin-bottom: 0.6rem; flex-wrap: wrap; }
-    .template-actions button { border: 1px solid rgba(224,168,74,0.35); background: transparent; color: var(--ink); border-radius: 8px; padding: 0.4rem 0.6rem; cursor: pointer; }
+    .template-header-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 0.5rem;
+    }
+    .template-fields {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 0.75rem;
+    }
+    .template-fields label {
+      display: flex;
+      flex-direction: column;
+      gap: 0.3rem;
+      font-size: 0.82rem;
+      font-weight: 500;
+      color: var(--muted);
+    }
+    .template-fields input, .template-fields select {
+      padding: 0.5rem 0.65rem;
+      font: inherit;
+      border: 1px solid rgba(224,168,74,0.28);
+      border-radius: 8px;
+      background: #12161f;
+      color: var(--ink);
+    }
+    .template-actions {
+      display: flex;
+      align-items: center;
+      gap: 0.6rem;
+      flex-wrap: wrap;
+      margin-top: 0.25rem;
+    }
+    .template-actions button {
+      font: 600 0.95rem/1.2 "IBM Plex Sans", system-ui, sans-serif;
+      padding: 0.65rem 1.25rem;
+      border-radius: 8px;
+      cursor: pointer;
+      letter-spacing: 0.02em;
+      transition: all 0.15s ease;
+    }
+    .template-actions button.primary, .template-btn-save {
+      background: var(--wick);
+      color: #12161f;
+      border: 1px solid var(--wick);
+      font-weight: 700;
+    }
+    .template-actions button.ghost, .template-btn {
+      background: rgba(224,168,74,0.08);
+      color: var(--ink);
+      border: 1px solid rgba(224,168,74,0.32);
+    }
+    .template-actions button.ghost:hover {
+      background: rgba(224,168,74,0.18);
+    }
+    #template-editor [role="status"] {
+      color: var(--anchor);
+      font-weight: 600;
+      font-size: 0.85rem;
+    }
+
+    body.template-mode .stamps {
+      grid-template-columns: 1fr 1fr;
+    }
+    body.template-mode #stamp-draft,
+    body.template-mode #stamp-todo {
+      display: none !important;
+    }
+
+    .block.anchor.overlap {
+      border: 2px dashed var(--danger) !important;
+      box-shadow: 0 0 8px rgba(224, 74, 74, 0.4);
+      position: relative;
+    }
+    .block.anchor.overlap::after {
+      content: "⚠️ Overlap";
+      position: absolute;
+      top: 0.35rem;
+      right: 0.5rem;
+      font-size: 0.68rem;
+      font-weight: 600;
+      color: var(--danger);
+      background: rgba(224, 74, 74, 0.15);
+      padding: 0.15rem 0.35rem;
+      border-radius: 4px;
+    }
   </style>
 </head>
 <body>
@@ -347,18 +438,24 @@
     </header>
 
     <form id="template-editor" hidden data-mode="template">
-      <strong id="template-mode-label">Reusable Day Template</strong>
-      <label>Template name <input name="name" required></label>
-      <label>Weekday <select name="weekday">
-        <option value="">No weekday</option>
-        <option>monday</option><option>tuesday</option><option>wednesday</option>
-        <option>thursday</option><option>friday</option><option>saturday</option>
-        <option>sunday</option>
-      </select></label>
-      <button type="submit" class="primary">Save Template</button>
-      <button type="button" class="ghost" id="template-reset">Reset changes</button>
-      <button type="button" class="ghost" id="template-back">Back to Library</button>
-      <span id="template-saved" role="status"></span>
+      <div class="template-header-row">
+        <strong id="template-mode-label">Reusable Day Template</strong>
+        <span id="template-saved" role="status"></span>
+      </div>
+      <div class="template-fields">
+        <label>Template name <input name="name" required></label>
+        <label>Weekday <select name="weekday">
+          <option value="">No weekday</option>
+          <option>monday</option><option>tuesday</option><option>wednesday</option>
+          <option>thursday</option><option>friday</option><option>saturday</option>
+          <option>sunday</option>
+        </select></label>
+      </div>
+      <div class="template-actions">
+        <button type="submit" class="primary template-btn-save">Save Template</button>
+        <button type="button" class="ghost template-btn" id="template-reset">Reset changes</button>
+        <button type="button" class="ghost template-btn" id="template-back">Back to Library</button>
+      </div>
     </form>
 
     <div class="template-offer" id="template-offer" hidden>

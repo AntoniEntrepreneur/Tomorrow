@@ -27,6 +27,7 @@ import { autofill, checklistItemsPayload, checklistPayload, clockLabel, clockVal
       if (state.templateDirty && !window.confirm("Discard unsaved template changes?")) return;
       const source = state.templateInitial.template;
       state.templateDraft = cloneTemplate(state.templateInitial.draft);
+      state.templateArmedFlex = null;
       const form = document.getElementById("template-editor");
       form.elements.name.value = source.name || "";
       form.elements.weekday.value = source.weekday || "";
@@ -727,7 +728,10 @@ import { autofill, checklistItemsPayload, checklistPayload, clockLabel, clockVal
           '<label class="timing-field" id="activity-duration-label">Duration override <input name="duration" type="number" min="1" value="' + esc(entry.duration || "") + '"></label>' +
           '<label class="timing-field" id="activity-end-label">End override <input name="end" type="time" value="' + esc(entry.end || "") + '"></label>' +
           '<p class="hint">Leave an override blank to inherit. Resetting shape also resets its timing.</p>' +
-          '<div class="actions"><button class="primary" type="submit">Update</button><button type="button" class="ghost" data-close>Cancel</button></div></form>',
+          '<div class="actions"><button class="primary" type="submit">Update</button>' +
+          (index >= 0 && (sourceKind === "anchor" || entry.shape === "anchor") ? '<button type="button" class="ghost" id="template-make-flex" data-index="' + index + '" data-activity="true">Make Flex</button>' : '') +
+          (index >= 0 ? '<button type="button" class="danger" id="template-drop-entry" data-index="' + index + '" data-kind="' + (sourceKind || "anchor") + '">Drop</button>' : '') +
+          '<button type="button" class="ghost" data-close>Cancel</button></div></form>',
           "edit"
         );
         document.querySelector("#template-activity-entry [name=shape]").value = entry.shape || "flex";
@@ -789,6 +793,8 @@ import { autofill, checklistItemsPayload, checklistPayload, clockLabel, clockVal
         timing +
         checklistField(entry.checklist) +
         '<div class="actions"><button class="primary" type="submit">Update</button>' +
+        (index >= 0 && kind === "anchor" ? '<button type="button" class="ghost" id="template-make-flex" data-index="' + index + '">Make Flex</button>' : '') +
+        (index >= 0 ? '<button type="button" class="danger" id="template-drop-entry" data-index="' + index + '" data-kind="' + kind + '">Drop</button>' : '') +
         '<button type="button" class="ghost" data-close>Cancel</button></div></form>',
         "edit"
       );
@@ -801,33 +807,187 @@ import { autofill, checklistItemsPayload, checklistPayload, clockLabel, clockVal
       }
     }
 
+    function templateRailRows() {
+      const wakeClock = state.templateDraft.bounds.wake;
+      const sleep = toWakeMin(state.templateDraft.bounds.sleep, wakeClock);
+      const occupied = (state.templateDraft.anchors || []).map((item, index) => {
+        const durationMin = item.end
+          ? toWakeMin(item.end, item.start)
+          : Number(item.duration || item.duration_minutes || 0);
+        const end = item.end || endClock(item.start, durationMin);
+        return {
+          kind: "anchor",
+          originalIndex: index,
+          name: item.name || (item.activity ? ("Activity: " + item.activity) : "Anchor"),
+          start: item.start,
+          durationMin: durationMin,
+          end: end,
+          checklist: item.checklist,
+          daily: Boolean(item.daily),
+          activity: item.activity,
+          overlap: false
+        };
+      }).sort((a, b) => toWakeMin(a.start, wakeClock) - toWakeMin(b.start, wakeClock));
+
+      for (let i = 0; i < occupied.length - 1; i++) {
+        const cur = occupied[i];
+        const nxt = occupied[i + 1];
+        if (toWakeMin(cur.end, wakeClock) > toWakeMin(nxt.start, wakeClock)) {
+          cur.overlap = true;
+          nxt.overlap = true;
+        }
+      }
+
+      const rows = [];
+      let cursor = 0;
+      for (const item of occupied) {
+        const start = toWakeMin(item.start, wakeClock);
+        if (start > cursor) {
+          rows.push({
+            kind: "gap",
+            start: toClock(toMin(wakeClock) + cursor),
+            end: item.start,
+            durationMin: start - cursor
+          });
+        }
+        rows.push(item);
+        cursor = Math.max(cursor, toWakeMin(item.end, wakeClock));
+      }
+      if (sleep > cursor) {
+        rows.push({
+          kind: "gap",
+          start: toClock(toMin(wakeClock) + cursor),
+          end: state.templateDraft.bounds.sleep,
+          durationMin: sleep - cursor
+        });
+      }
+      return rows;
+    }
+
     function renderTemplateEntries() {
       renderBounds(state.templateDraft.bounds);
+      const wakeClock = state.templateDraft.bounds.wake;
+      const total = Math.max(1, toWakeMin(state.templateDraft.bounds.sleep, wakeClock));
       const rail = document.getElementById("rail");
-      const anchors = state.templateDraft.anchors || [];
-      const flexes = state.templateDraft.flexes || [];
-      rail.innerHTML =
-        anchors.map((entry, index) =>
-          '<button type="button" class="block anchor" data-template-entry="' + (entry.activity ? "activity" : "anchor") + '" data-template-source-kind="anchor" data-template-index="' + index + '">' +
-          '<span class="block-title">' + esc(entry.name || ("Activity: " + entry.activity)) + '</span><div class="block-range">' +
-          esc([entry.start, entry.end || (entry.duration && (entry.duration + " min"))].filter(Boolean).join(" · ")) +
-          "</div></button>"
-        ).join("") +
-        flexes.map((entry, index) =>
-          '<button type="button" class="block flex" data-template-entry="' + (entry.activity ? "activity" : "flex") + '" data-template-source-kind="flex" data-template-index="' + index + '">' +
-          esc(entry.name || ("Activity: " + entry.activity)) + (entry.duration ? " · " + esc(entry.duration) + " min" : "") +
-          "</button>"
-        ).join("");
+      const rows = templateRailRows();
+
+      rail.innerHTML = rows.map(row => {
+        const startLabel = clockLabel(row.start, wakeClock);
+        const endLabel = row.end ? clockLabel(row.end, wakeClock) : row.end;
+        if (row.kind === "gap") {
+          const armed = state.templateArmedFlex ? " armed" : "";
+          const cta = state.templateArmedFlex ? "Place here" : "Place Flex";
+          return '<button type="button" class="gap' + armed + '" data-template-gap="true" data-start="' +
+            esc(row.start) + '" data-end="' + esc(row.end) + '" style="min-height:' +
+            heightPx(row.durationMin, total, 40) + 'px">' +
+            '<span class="time-tag">' + esc(startLabel) + "</span>" +
+            "<span>Gap · " + esc(fmtDur(row.durationMin)) + "</span>" +
+            '<span class="cta">' + cta + "</span></button>";
+        }
+        const checklistLabel = checklistName(row.checklist);
+        const dailyTag = row.daily ? '<span class="daily-tag">🔁 daily</span>' : "";
+        const overlapClass = row.overlap ? " overlap" : "";
+        return '<button type="button" class="block anchor' + overlapClass + '" data-template-entry="' +
+          (row.activity ? "activity" : "anchor") + '" data-template-source-kind="anchor" data-template-index="' +
+          row.originalIndex + '" style="min-height:' + heightPx(row.durationMin, total, 52) + 'px">' +
+          '<span class="time-tag">' + esc(startLabel) + "</span>" +
+          '<div class="block-title">' + esc(row.name) + dailyTag + "</div>" +
+          (checklistLabel ? '<div class="block-checklist">' + esc(checklistLabel) + "</div>" : "") +
+          '<div class="block-range">' + esc(startLabel) + "–" + esc(endLabel) +
+          " · " + esc(fmtDur(row.durationMin)) + "</div></button>";
+      }).join("");
+
+      renderTemplateTray();
+    }
+
+    function renderTemplateTray() {
       const tray = document.getElementById("tray");
       tray.className = "tray";
-      tray.innerHTML = '<div class="tray-label">Reusable flex entries</div>' +
-        (flexes.length
-          ? '<div class="tray-chips">' + flexes.map((entry, index) =>
-            '<button type="button" class="flex-chip" data-template-entry="flex" data-template-source-kind="flex" data-template-index="' +
-            index + '">' + esc(entry.name || ("Flex " + (index + 1))) +
-            (entry.duration ? " · " + esc(entry.duration) + " min" : "") + "</button>"
-          ).join("") + "</div>"
-          : "<div>No reusable flex entries.</div>");
+      const flexes = state.templateDraft.flexes || [];
+      const daily = state.templateDraft.dailyActivities || [];
+      const totalCount = flexes.length + daily.length;
+      if (!totalCount) {
+        tray.classList.add("empty");
+        tray.innerHTML =
+          '<div class="tray-label">Unplaced Flex & Daily Activities — Place / Change Duration / Drop any time</div>' +
+          "<div>No unplaced Flex or Daily Activities.</div>";
+        return;
+      }
+      tray.classList.remove("empty");
+      const flexChips = flexes.map((entry, index) => {
+        const isArmed = state.templateArmedFlex && state.templateArmedFlex.source === "flex" && state.templateArmedFlex.index === index;
+        const armedClass = isArmed ? " armed" : "";
+        const dailyTag = entry.daily ? '<span class="daily-tag">🔁 daily</span>' : "";
+        const dur = entry.duration || entry.duration_minutes || 0;
+        return '<div class="flex-chip' + armedClass + '" data-template-chip="true" data-source="flex" data-index="' + index + '">' +
+          '<span class="name">' + esc(entry.name || (entry.activity ? ("Activity: " + entry.activity) : ("Flex " + (index + 1)))) + dailyTag + '</span>' +
+          '<span class="meta">' + esc(fmtDur(dur)) + ' · unplaced</span>' +
+          '<div class="ops">' +
+          '<button type="button" data-template-action="edit" data-source="flex" data-index="' + index + '">Edit</button>' +
+          '<button type="button" data-template-action="place" data-source="flex" data-index="' + index + '">Place</button>' +
+          '<button type="button" data-template-action="change-duration" data-source="flex" data-index="' + index + '">Change Duration</button>' +
+          '<button type="button" data-template-action="drop" data-source="flex" data-index="' + index + '">Drop</button>' +
+          '</div></div>';
+      });
+
+      const dailyChips = daily.map((entry, index) => {
+        const isArmed = state.templateArmedFlex && state.templateArmedFlex.source === "daily" && state.templateArmedFlex.index === index;
+        const armedClass = isArmed ? " armed" : "";
+        const dur = entry.duration_minutes || entry.duration || 0;
+        return '<div class="flex-chip' + armedClass + '" data-template-chip="true" data-source="daily" data-index="' + index + '">' +
+          '<span class="name">' + esc(entry.name) + '<span class="daily-tag">🔁 daily</span></span>' +
+          '<span class="meta">' + esc(fmtDur(dur)) + ' · unplaced</span>' +
+          '<div class="ops">' +
+          '<button type="button" data-template-action="place" data-source="daily" data-index="' + index + '">Place</button>' +
+          '<button type="button" data-template-action="change-duration" data-source="daily" data-index="' + index + '">Change Duration</button>' +
+          '<button type="button" data-template-action="drop" data-source="daily" data-index="' + index + '">Drop</button>' +
+          '</div></div>';
+      });
+
+      tray.innerHTML =
+        '<div class="tray-label">Unplaced Flex & Daily Activities — Place / Change Duration / Drop any time</div>' +
+        '<div class="tray-chips">' + flexChips.concat(dailyChips).join("") + '</div>';
+    }
+
+    function placeTemplateArmedFlex(start) {
+      if (!state.templateArmedFlex) return;
+      const { source, index } = state.templateArmedFlex;
+      state.templateArmedFlex = null;
+      if (source === "flex") {
+        const entry = state.templateDraft.flexes.splice(index, 1)[0];
+        entry.start = start;
+        entry.shape = "anchor";
+        delete entry.end;
+        state.templateDraft.anchors.push(entry);
+      } else if (source === "daily") {
+        const item = state.templateDraft.dailyActivities.splice(index, 1)[0];
+        state.templateDraft.anchors.push({
+          activity: item.id,
+          name: item.name,
+          start: start,
+          duration: item.duration_minutes,
+          checklist: item.checklist,
+          shape: "anchor",
+          daily: true
+        });
+      }
+      markTemplateDirty();
+      renderTemplateEntries();
+    }
+
+    function templateSheetChangeDuration(source, index) {
+      const item = source === "flex"
+        ? state.templateDraft.flexes[index]
+        : state.templateDraft.dailyActivities[index];
+      const dur = item.duration || item.duration_minutes || 30;
+      openSheet(
+        "<h2>Change Duration · " + esc(item.name || ("Activity: " + item.activity)) + "</h2>" +
+        '<form id="template-change-duration" data-source="' + source + '" data-index="' + index + '">' +
+        '<label>Duration (min) <input name="duration" type="number" min="1" required value="' + esc(dur) + '"></label>' +
+        '<div class="actions"><button class="primary" type="submit">Update</button>' +
+        '<button type="button" class="ghost" data-close>Cancel</button></div></form>',
+        "edit"
+      );
     }
 
     function renderBounds(bounds) {
@@ -906,6 +1066,7 @@ import { autofill, checklistItemsPayload, checklistPayload, clockLabel, clockVal
           flexes: (template.flexes || []).map(entry => ({...entry})),
           bounds: {...template.bounds},
           activityOptions: template.activity_templates || [],
+          dailyActivities: (template.daily_activities || []).map(entry => ({...entry})),
           checklists: template.checklists || []
         };
         state.templateInitial = cloneTemplate({
@@ -913,8 +1074,10 @@ import { autofill, checklistItemsPayload, checklistPayload, clockLabel, clockVal
           draft: state.templateDraft
         });
         state.templateDirty = false;
+        state.templateArmedFlex = null;
+        document.body.classList.add("template-mode");
         renderTemplateEntries();
-        document.querySelector(".stamps").hidden = true;
+        document.querySelector(".stamps").hidden = false;
         document.getElementById("template-offer").hidden = true;
         document.getElementById("submit").hidden = true;
         document.getElementById("undo").hidden = true;
@@ -1044,6 +1207,76 @@ import { autofill, checklistItemsPayload, checklistPayload, clockLabel, clockVal
     });
 
     document.getElementById("tray").addEventListener("click", event => {
+      if (state.templateMode && state.templateDraft) {
+        const actionBtn = event.target.closest("[data-template-action]");
+        if (actionBtn) {
+          event.stopPropagation();
+          const action = actionBtn.dataset.templateAction;
+          const source = actionBtn.dataset.source;
+          const index = Number(actionBtn.dataset.index);
+          if (action === "place") {
+            if (state.templateArmedFlex && state.templateArmedFlex.source === source && state.templateArmedFlex.index === index) {
+              state.templateArmedFlex = null;
+            } else {
+              state.templateArmedFlex = { source, index };
+            }
+            renderTemplateEntries();
+            return;
+          }
+          if (action === "edit") {
+            if (source === "flex") {
+              const entry = state.templateDraft.flexes[index];
+              templateEntryForm(entry.activity ? "activity" : "flex", index, "flex");
+            } else if (source === "daily") {
+              const item = state.templateDraft.dailyActivities[index];
+              const entry = {
+                activity: item.id,
+                name: item.name,
+                duration: item.duration_minutes,
+                checklist: item.checklist,
+                shape: "flex",
+                daily: true
+              };
+              state.templateDraft.dailyActivities.splice(index, 1);
+              state.templateDraft.flexes.push(entry);
+              markTemplateDirty();
+              templateEntryForm("activity", state.templateDraft.flexes.length - 1, "flex");
+            }
+            return;
+          }
+          if (action === "change-duration") {
+            templateSheetChangeDuration(source, index);
+            return;
+          }
+          if (action === "drop") {
+            if (source === "flex") {
+              state.templateDraft.flexes.splice(index, 1);
+            } else if (source === "daily") {
+              state.templateDraft.dailyActivities.splice(index, 1);
+            }
+            if (state.templateArmedFlex && state.templateArmedFlex.source === source && state.templateArmedFlex.index === index) {
+              state.templateArmedFlex = null;
+            }
+            markTemplateDirty();
+            renderTemplateEntries();
+            return;
+          }
+        }
+        const chip = event.target.closest("[data-template-chip]");
+        if (chip) {
+          event.stopPropagation();
+          const source = chip.dataset.source;
+          const index = Number(chip.dataset.index);
+          if (state.templateArmedFlex && state.templateArmedFlex.source === source && state.templateArmedFlex.index === index) {
+            state.templateArmedFlex = null;
+          } else {
+            state.templateArmedFlex = { source, index };
+          }
+          renderTemplateEntries();
+          return;
+        }
+        return;
+      }
       const dropId = event.target.dataset.drop;
       if (dropId) {
         event.stopPropagation();
@@ -1142,6 +1375,35 @@ import { autofill, checklistItemsPayload, checklistPayload, clockLabel, clockVal
         markTemplateDirty();
         return;
       }
+      if (event.target.id === "template-make-flex") {
+        event.preventDefault();
+        const index = Number(event.target.dataset.index);
+        const isActivity = event.target.dataset.activity === "true";
+        if (index >= 0 && index < state.templateDraft.anchors.length) {
+          const entry = state.templateDraft.anchors.splice(index, 1)[0];
+          delete entry.start;
+          delete entry.end;
+          entry.shape = "flex";
+          state.templateDraft.flexes.push(entry);
+          markTemplateDirty();
+          closeSheet();
+          renderTemplateEntries();
+        }
+        return;
+      }
+      if (event.target.id === "template-drop-entry") {
+        event.preventDefault();
+        const index = Number(event.target.dataset.index);
+        const kind = event.target.dataset.kind;
+        const list = kind === "anchor" ? state.templateDraft.anchors : state.templateDraft.flexes;
+        if (index >= 0 && index < list.length) {
+          list.splice(index, 1);
+          markTemplateDirty();
+          closeSheet();
+          renderTemplateEntries();
+        }
+        return;
+      }
       const removeId = event.target.dataset.remove;
       if (removeId) {
         event.preventDefault();
@@ -1214,6 +1476,15 @@ import { autofill, checklistItemsPayload, checklistPayload, clockLabel, clockVal
     });
 
     document.getElementById("rail").addEventListener("click", event => {
+      if (state.templateMode && state.templateDraft) {
+        const gap = event.target.closest("[data-template-gap]");
+        if (gap) {
+          if (state.templateArmedFlex) {
+            placeTemplateArmedFlex(gap.dataset.start);
+          }
+          return;
+        }
+      }
       const target = event.target.closest("[data-template-add], [data-template-entry]");
       if (!target) return;
       const addKind = target.dataset.templateAdd;
@@ -1327,6 +1598,32 @@ import { autofill, checklistItemsPayload, checklistPayload, clockLabel, clockVal
         markTemplateDirty();
         closeSheet();
         renderTemplateEntries();
+        return;
+      }
+      if (form.id === "template-change-duration") {
+        const source = form.dataset.source;
+        const index = Number(form.dataset.index);
+        const dur = Number(form.duration.value);
+        if (dur > 0) {
+          if (source === "flex") {
+            state.templateDraft.flexes[index].duration = dur;
+            delete state.templateDraft.flexes[index].duration_minutes;
+          } else if (source === "daily") {
+            const item = state.templateDraft.dailyActivities.splice(index, 1)[0];
+            state.templateDraft.flexes.push({
+              activity: item.id,
+              name: item.name,
+              duration: dur,
+              checklist: item.checklist,
+              shape: "flex",
+              daily: true,
+              timing_overridden: true
+            });
+          }
+          markTemplateDirty();
+          closeSheet();
+          renderTemplateEntries();
+        }
         return;
       }
       if (form.id === "add-flex") {

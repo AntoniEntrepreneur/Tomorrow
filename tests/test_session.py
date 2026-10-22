@@ -216,6 +216,33 @@ def test_template_mode_resolves_reference_overrides_and_keeps_missing_references
     assert view["anchors"][1]["activity"] == "deleted"
 
 
+def test_template_mode_view_surfaces_unreferenced_daily_activities(tmp_path: Path) -> None:
+    _write_defaults(tmp_path)
+    save_activity_template(tmp_path, name="Deep Work", duration_minutes=90, daily=True)
+    save_activity_template(tmp_path, name="Morning Walk", duration_minutes=30, daily=True)
+    save_activity_template(tmp_path, name="Guitar Practice", duration_minutes=20, daily=True)
+    save_activity_template(tmp_path, name="Doctor", duration_minutes=60, daily=False)
+
+    # Save a template that already references Deep Work as an anchor
+    save_day_template(
+        tmp_path,
+        name="Tuesday",
+        anchors=[{"activity": "deep-work", "start": "09:00", "duration": 90}],
+    )
+
+    view = template_mode_view(tmp_path, template_id="tuesday")
+
+    assert view["anchors"][0]["name"] == "Deep Work"
+    assert view["anchors"][0]["daily"] is True
+
+    # Morning Walk and Guitar Practice should be in daily_activities, but not Deep Work (already in anchors) or Doctor (not daily)
+    daily_names = [a["name"] for a in view["daily_activities"]]
+    assert "Morning Walk" in daily_names
+    assert "Guitar Practice" in daily_names
+    assert "Deep Work" not in daily_names
+    assert "Doctor" not in daily_names
+
+
 def _write_defaults(tmp_path: Path) -> None:
     data_dir = tmp_path / "data"
     data_dir.mkdir()
