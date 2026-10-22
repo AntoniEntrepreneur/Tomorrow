@@ -302,7 +302,8 @@
       color: var(--ink);
     }
     .sheet .row { display: grid; grid-template-columns: 1fr 1fr; gap: 0.6rem; }
-    #promote-start-label[hidden] ~ #duration-label { grid-column: 1 / -1; }
+    #promote-start-label[hidden] ~ #duration-label,
+    #edit-start-label[hidden] ~ #duration-label { grid-column: 1 / -1; }
     [hidden], .sheet [hidden] { display: none !important; }
     .sheet .actions { display: flex; gap: 0.5rem; margin-top: 1rem; flex-wrap: wrap; }
     .sheet button {
