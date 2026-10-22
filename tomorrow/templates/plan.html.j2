@@ -277,7 +277,7 @@
           <div class="plan-date">{{ plan_date_label }}</div>
           <div class="plan-bounds">Wake {{ wake }} · Sleep {{ sleep }}</div>
           {% if weather %}
-          <div class="plan-weather">{{ weather }}</div>
+          <div class="plan-weather">{{ weather.summary if weather is mapping else weather }}</div>
           {% endif %}
         </div>
       </header>
