@@ -544,6 +544,10 @@ import { autofill, checklistItemsPayload, checklistPayload, clockLabel, clockVal
       }
       form.start.required = !asFlex && !asTodo;
       document.getElementById("promote-start-label").hidden = asFlex || asTodo;
+      const endLabel = document.getElementById("end-label");
+      if (endLabel) endLabel.hidden = asFlex || asTodo;
+      const endError = document.getElementById("end-error");
+      if (endError && (asFlex || asTodo)) endError.hidden = true;
       document.getElementById("promote-flex-hint").hidden = !asFlex;
       document.getElementById("promote-todo-hint").hidden = !asTodo;
       if (form.checklist) form.checklist.closest("label").hidden = asTodo;
@@ -719,7 +723,7 @@ import { autofill, checklistItemsPayload, checklistPayload, clockLabel, clockVal
           '<label>Shape <select name="shape"><option value="flex">Flex</option><option value="anchor">Anchor</option></select><button type="button" class="ghost" data-reset-field="shape">Reset</button></label>' +
           '<label>Name override (optional) <input name="name" value="' + esc(entry.name_overridden ? entry.name : "") + '"><button type="button" class="ghost" data-reset-field="name">Reset</button></label>' +
           '<label>Checklist override (optional) <select name="checklist"><option value="">Inherit</option>' + checklistOptions + '</select><button type="button" class="ghost" data-reset-field="checklist">Reset</button></label>' +
-          '<label>Start override (Anchor) <input name="start" type="time" value="' + esc(entry.start || "") + '"><button type="button" class="ghost" data-reset-field="timing">Reset timing</button></label>' +
+          '<label id="activity-start-label">Start override (Anchor) <input name="start" type="time" value="' + esc(entry.start || "") + '"><button type="button" class="ghost" data-reset-field="timing">Reset timing</button></label>' +
           '<label class="timing-field" id="activity-duration-label">Duration override <input name="duration" type="number" min="1" value="' + esc(entry.duration || "") + '"></label>' +
           '<label class="timing-field" id="activity-end-label">End override <input name="end" type="time" value="' + esc(entry.end || "") + '"></label>' +
           '<p class="hint">Leave an override blank to inherit. Resetting shape also resets its timing.</p>' +
@@ -729,7 +733,15 @@ import { autofill, checklistItemsPayload, checklistPayload, clockLabel, clockVal
         document.querySelector("#template-activity-entry [name=shape]").value = entry.shape || "flex";
         const activityForm = document.getElementById("template-activity-entry");
         activityForm.dataset.durationMode = entry.end ? "end" : "duration";
+        function syncActivityTemplateShape() {
+          const isAnchor = activityForm.elements.shape.value === "anchor";
+          const startLabel = document.getElementById("activity-start-label");
+          const endLabel = document.getElementById("activity-end-label");
+          if (startLabel) startLabel.hidden = !isAnchor;
+          if (endLabel) endLabel.hidden = !isAnchor;
+        }
         function updateActivityTemplateTiming() {
+          syncActivityTemplateShape();
           const duration = activityForm.elements.duration;
           const end = activityForm.elements.end;
           const start = activityForm.elements.start.value;
@@ -761,6 +773,7 @@ import { autofill, checklistItemsPayload, checklistPayload, clockLabel, clockVal
             const duration = Number(activityForm.elements.duration.value);
             if (duration > 0) activityForm.elements.duration.value = duration;
           }
+          updateActivityTemplateTiming();
         });
         updateActivityTemplateTiming();
         return;
@@ -1112,6 +1125,7 @@ import { autofill, checklistItemsPayload, checklistPayload, clockLabel, clockVal
           form.shape.value = option && option.is_anchor_shaped ? "anchor" : "flex";
           form.start.value = "";
           form.duration.value = "";
+          form.shape.dispatchEvent(new Event("change"));
         } else {
           form[resetField].value = "";
         }
