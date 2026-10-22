@@ -397,7 +397,8 @@ import { autofill, checklistItemsPayload, checklistPayload, clockLabel, clockVal
       state.sheetOpen = true;
       state.sheetKind = kind || "edit";
       setChromeEnabled();
-      const first = document.getElementById("sheet").querySelector("input, button");
+      const first = document.getElementById("sheet").querySelector("[autofocus]") ||
+        document.getElementById("sheet").querySelector("input, button");
       if (first) first.focus();
     }
 
@@ -673,16 +674,30 @@ import { autofill, checklistItemsPayload, checklistPayload, clockLabel, clockVal
       );
     }
 
-    function sheetGapPlace(start, end) {
+    function sheetGapPlace(gapStart, gapEnd, preferredOrientation = "start") {
       const unplaced = (state.current.flexes || []).filter(item => !item.start);
-      const opts = unplaced.map(item =>
-        '<button type="button" data-place-at="' + esc(item.id) + '" data-start="' + esc(start) + '">' +
-        esc(item.name) + " · " + esc(fmtDur(item.duration_minutes)) + "</button>"
-      ).join("");
+      const isStartPref = preferredOrientation === "start";
+      const isEndPref = preferredOrientation === "end";
+      const opts = unplaced.map((item, index) => {
+        const duration = Number(item.duration_minutes != null ? item.duration_minutes : item.duration);
+        const endStart = toClock(toMin(gapEnd) - duration);
+        const startClass = isStartPref ? "primary" : "ghost";
+        const endClass = isEndPref ? "primary" : "ghost";
+        const startAutofocus = (index === 0 && isStartPref) ? ' autofocus data-prioritized="true"' : (isStartPref ? ' data-prioritized="true"' : "");
+        const endAutofocus = (index === 0 && isEndPref) ? ' autofocus data-prioritized="true"' : (isEndPref ? ' data-prioritized="true"' : "");
+        return (
+          '<div class="gap-place-row" data-flex-id="' + esc(item.id) + '">' +
+          '<div class="gap-place-label"><strong>' + esc(item.name) + '</strong> · ' + esc(fmtDur(duration)) + '</div>' +
+          '<div class="actions" style="margin-top: 0.3rem;">' +
+          '<button type="button" class="' + startClass + '" data-place-at="' + esc(item.id) + '" data-start="' + esc(gapStart) + '" data-placement="start"' + startAutofocus + '>At start</button>' +
+          '<button type="button" class="' + endClass + '" data-place-at="' + esc(item.id) + '" data-start="' + esc(endStart) + '" data-placement="end"' + endAutofocus + '>At end</button>' +
+          '</div></div>'
+        );
+      }).join("");
       openSheet(
         "<h2>Place into this Gap</h2>" +
-        '<p class="hint">Gap ' + esc(start) + "–" + esc(end) + ". Stamp Flex to add to the tray; clicking a Gap Places it.</p>" +
-        '<div class="choice-row">' + (opts || "<span>No unplaced Flex.</span>") + "</div>" +
+        '<p class="hint">Gap ' + esc(gapStart) + "–" + esc(gapEnd) + ". Stamp Flex to add to the tray; clicking a Gap Places it.</p>" +
+        '<div class="gap-place-list">' + (opts || "<span>No unplaced Flex.</span>") + "</div>" +
         '<div class="actions"><button type="button" class="ghost" data-close>Cancel</button></div>'
       );
     }
@@ -1262,6 +1277,8 @@ import { autofill, checklistItemsPayload, checklistPayload, clockLabel, clockVal
       if (!state.current) return;
       const gap = event.target.closest("[data-kind='gap']");
       if (gap) {
+        const rect = gap.getBoundingClientRect();
+        const isBottom = rect.height > 0 && (event.clientY - rect.top) >= (rect.height / 2);
         if (state.armedFlexId) {
           const armedFlex = (state.current.flexes || []).find(item => item.id === state.armedFlexId);
           const duration = Number(armedFlex ? (armedFlex.duration_minutes != null ? armedFlex.duration_minutes : armedFlex.duration) : 0);
@@ -1274,8 +1291,6 @@ import { autofill, checklistItemsPayload, checklistPayload, clockLabel, clockVal
             showToast(`${flexName} (${fmtDur(duration)}) does not fit in this gap (${fmtDur(gapDuration)})`);
             return;
           }
-          const rect = gap.getBoundingClientRect();
-          const isBottom = rect.height > 0 && (event.clientY - rect.top) >= (rect.height / 2);
           if (isBottom) {
             const targetMin = toMin(gap.dataset.end) - duration;
             const computedStart = toClock(targetMin);
@@ -1285,7 +1300,7 @@ import { autofill, checklistItemsPayload, checklistPayload, clockLabel, clockVal
           }
           return;
         }
-        sheetGapPlace(gap.dataset.start, gap.dataset.end);
+        sheetGapPlace(gap.dataset.start, gap.dataset.end, isBottom ? "end" : "start");
         return;
       }
       const block = event.target.closest("[data-kind]");
@@ -1561,10 +1576,11 @@ import { autofill, checklistItemsPayload, checklistPayload, clockLabel, clockVal
         if (item) sheetTodoToAnchor(item);
         return;
       }
-      const placeAt = event.target.dataset.placeAt;
+      const placeAtBtn = event.target.closest ? event.target.closest("[data-place-at]") : null;
+      const placeAt = placeAtBtn ? placeAtBtn.dataset.placeAt : event.target.dataset?.placeAt;
       if (placeAt) {
         event.preventDefault();
-        await placeFlexAt(placeAt, event.target.dataset.start);
+        await placeFlexAt(placeAt, (placeAtBtn || event.target).dataset.start);
         return;
       }
       const placeId = event.target.dataset.place;
