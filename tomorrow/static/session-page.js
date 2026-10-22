@@ -250,6 +250,7 @@ import { autofill, checklistItemsPayload, checklistPayload, clockLabel, clockVal
     }
 
     function renderRail(session) {
+      clearGapHover();
       const wakeClock = session.bounds.wake;
       const total = Math.max(1, toWakeMin(session.bounds.sleep, wakeClock));
       document.getElementById("rail").innerHTML = railRows(session).map(row => {
@@ -903,6 +904,7 @@ import { autofill, checklistItemsPayload, checklistPayload, clockLabel, clockVal
     }
 
     function renderTemplateEntries() {
+      clearGapHover();
       renderBounds(state.templateDraft.bounds);
       const wakeClock = state.templateDraft.bounds.wake;
       const total = Math.max(1, toWakeMin(state.templateDraft.bounds.sleep, wakeClock));
@@ -988,6 +990,7 @@ import { autofill, checklistItemsPayload, checklistPayload, clockLabel, clockVal
     }
 
     function placeTemplateArmedFlex(start) {
+      clearGapHover();
       if (!state.templateArmedFlex) return;
       const { source, index } = state.templateArmedFlex;
       state.templateArmedFlex = null;
@@ -1166,6 +1169,7 @@ import { autofill, checklistItemsPayload, checklistPayload, clockLabel, clockVal
     }
 
     async function placeFlexAt(itemId, start) {
+      clearGapHover();
       state.armedFlexId = null;
       await mutate("/api/place", { id: itemId, start: start });
     }
@@ -1202,6 +1206,58 @@ import { autofill, checklistItemsPayload, checklistPayload, clockLabel, clockVal
     document.getElementById("stamp-todo").addEventListener("click", sheetAddTodo);
     document.getElementById("wake-cap").addEventListener("click", () => sheetEditBound("wake"));
     document.getElementById("sleep-cap").addEventListener("click", () => sheetEditBound("sleep"));
+
+    function clearGapHover(gap) {
+      if (gap) {
+        gap.classList.remove("hover-start", "hover-end");
+        const cta = gap.querySelector(".cta");
+        if (cta) {
+          const isArmed = (state.armedFlexId && gap.matches("[data-kind='gap']")) ||
+                          (state.templateArmedFlex && gap.matches("[data-template-gap]"));
+          cta.textContent = isArmed ? "Place here" : "Place Flex";
+        }
+      } else {
+        document.querySelectorAll(".gap.hover-start, .gap.hover-end").forEach(clearGapHover);
+      }
+    }
+
+    document.getElementById("rail").addEventListener("mousemove", event => {
+      const gap = event.target.closest("[data-kind='gap'], [data-template-gap]");
+      if (!gap) {
+        clearGapHover();
+        return;
+      }
+      const isArmed = (state.armedFlexId && gap.matches("[data-kind='gap']")) ||
+                      (state.templateArmedFlex && gap.matches("[data-template-gap]"));
+      if (!isArmed) {
+        clearGapHover(gap);
+        return;
+      }
+      const rect = gap.getBoundingClientRect();
+      const isBottom = rect.height > 0 && (event.clientY - rect.top) >= (rect.height / 2);
+      const cta = gap.querySelector(".cta");
+      if (isBottom) {
+        gap.classList.remove("hover-start");
+        gap.classList.add("hover-end");
+        if (cta) cta.textContent = "Place at end";
+      } else {
+        gap.classList.remove("hover-end");
+        gap.classList.add("hover-start");
+        if (cta) cta.textContent = "Place at start";
+      }
+    });
+
+    document.getElementById("rail").addEventListener("mouseleave", () => {
+      clearGapHover();
+    });
+
+    document.getElementById("rail").addEventListener("mouseout", event => {
+      const gap = event.target.closest("[data-kind='gap'], [data-template-gap]");
+      if (gap && (!event.relatedTarget || !gap.contains(event.relatedTarget))) {
+        clearGapHover(gap);
+      }
+    });
+
     document.getElementById("rail").addEventListener("click", event => {
       if (!state.current) return;
       const gap = event.target.closest("[data-kind='gap']");
