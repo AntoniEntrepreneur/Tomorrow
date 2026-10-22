@@ -55,6 +55,58 @@ def load_weather_location(data_dir: Path) -> WeatherLocation | None:
         return None
 
 
+def save_weather_location(
+    data_dir: Path,
+    *,
+    latitude: float,
+    longitude: float,
+    name: str | None = None,
+) -> None:
+    data_dir.mkdir(parents=True, exist_ok=True)
+    path = data_dir / "weather.toml"
+    lines = [
+        f"latitude = {latitude}",
+        f"longitude = {longitude}",
+    ]
+    if name:
+        escaped_name = name.replace('"', '\\"')
+        lines.append(f'name = "{escaped_name}"')
+    lines.append("")
+    path.write_text("\n".join(lines), encoding="utf-8")
+
+
+def reverse_geocode(
+    latitude: float,
+    longitude: float,
+    *,
+    opener: Callable[[Request], object] = urlopen,
+) -> str | None:
+    url = f"https://nominatim.openstreetmap.org/reverse?lat={latitude}&lon={longitude}&format=json"
+    try:
+        request = Request(url, headers={"User-Agent": "Tomorrow/0.1"})
+        with opener(request) as response:
+            data = json.load(response)
+        if not isinstance(data, dict):
+            return None
+        address = data.get("address")
+        if isinstance(address, dict):
+            for key in ("city", "town", "village", "municipality", "suburb", "county"):
+                val = address.get(key)
+                if val:
+                    return str(val)
+        for key in ("city", "locality", "principalSubdivision"):
+            val = data.get(key)
+            if val:
+                return str(val)
+        name = data.get("name")
+        if name:
+            return str(name)
+        return None
+    except Exception:
+        return None
+
+
+
 def weather_code_label(code: int) -> str:
     if code in {0, 1}:
         return "clear"

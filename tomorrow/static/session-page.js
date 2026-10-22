@@ -953,6 +953,32 @@ import { autofill, checklistItemsPayload, checklistPayload, clockLabel, clockVal
       }
       const response = await request("/api/session");
       render(await response.json());
+      if (navigator.geolocation && !state.locationRequested) {
+        state.locationRequested = true;
+        navigator.geolocation.getCurrentPosition(
+          async (pos) => {
+            try {
+              const locRes = await request("/api/location", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  latitude: pos.coords.latitude,
+                  longitude: pos.coords.longitude,
+                }),
+              });
+              if (locRes.ok) {
+                render(await locRes.json());
+              }
+            } catch (err) {
+              // Silently ignore geolocation failure
+            }
+          },
+          () => {
+            // Geolocation permission declined or unavailable, silently ignored
+          },
+          { timeout: 10000 }
+        );
+      }
     }
 
     async function dropFlex(itemId) {
