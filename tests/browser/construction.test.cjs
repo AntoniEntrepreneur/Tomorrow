@@ -469,3 +469,115 @@ test("Gap split-half placement dispatches place request at start or wake-relativ
   assert.deepEqual(pageErrors, []);
   await page.close();
 });
+
+test("Place into this Gap sheet offers At start and At end actions and prioritizes based on clicked half", async () => {
+  const page = await browser.newPage();
+  const pageErrors = [];
+  page.on("pageerror", error => pageErrors.push(error.message));
+  const requests = [];
+  let current = {
+    ...sessionView(),
+    bounds: { wake: "07:00", sleep: "02:00", sleep_is_next_day: true },
+    anchors: [
+      { id: "anchor-1", name: "Morning Standup", start: "09:00", duration_minutes: 60, checklist: null },
+      { id: "anchor-2", name: "Late Walk", start: "00:30", duration_minutes: 30, checklist: null }
+    ],
+    flexes: [
+      { id: "flex-1", name: "Deep Work", duration_minutes: 60, start: null },
+      { id: "flex-2", name: "Short Break", duration_minutes: 30, start: null }
+    ]
+  };
+
+  await page.route("**/api/**", async route => {
+    const request = route.request();
+    const url = new URL(request.url());
+    const body = request.postDataJSON() || {};
+    if (request.method() === "GET" && url.pathname === "/api/session") {
+      await route.fulfill({ json: current });
+      return;
+    }
+    if (request.method() === "POST" && url.pathname === "/api/place") {
+      requests.push({ path: url.pathname, body });
+      await route.fulfill({ json: current });
+      return;
+    }
+    await route.fulfill({ json: current });
+  });
+
+  await page.goto(baseUrl);
+  await page.getByText("Morning Standup", { exact: true }).waitFor();
+
+  const morningGap = page.locator('[data-kind="gap"][data-start="07:00"]');
+  const midnightGap = page.locator('[data-kind="gap"][data-start="10:00"]');
+  await morningGap.waitFor();
+  await midnightGap.waitFor();
+
+  // Ensure flex is not armed
+  assert.equal(await page.locator('.tray-card.armed').count(), 0);
+
+  // 1. Click upper half (< 50% height) of unarmed Gap -> opens sheet with "At start" prioritized/pre-focused
+  const morningBox = await morningGap.boundingBox();
+  await morningGap.click({ position: { x: morningBox.width / 2, y: morningBox.height * 0.25 } });
+
+  const sheet = page.locator("#sheet");
+  await sheet.waitFor();
+  assert.equal(await page.locator("#sheet h2").textContent(), "Place into this Gap");
+
+  // Verify both "At start" and "At end" action buttons exist for flex-1
+  const startBtn1 = page.locator('#sheet [data-place-at="flex-1"][data-placement="start"]');
+  const endBtn1 = page.locator('#sheet [data-place-at="flex-1"][data-placement="end"]');
+  await startBtn1.waitFor();
+  await endBtn1.waitFor();
+
+  assert.equal(await startBtn1.textContent(), "At start");
+  assert.equal(await endBtn1.textContent(), "At end");
+
+  // "At start" should be prioritized: styled as primary and pre-focused
+  assert.equal(await startBtn1.evaluate(el => el.classList.contains("primary")), true);
+  assert.equal(await endBtn1.evaluate(el => el.classList.contains("ghost")), true);
+  assert.equal(await startBtn1.evaluate(el => document.activeElement === el), true);
+
+  // Clicking "At start" dispatches POST /api/place with gap.start ("07:00")
+  const placeReq1 = page.waitForRequest(req => req.url().endsWith("/api/place"));
+  await startBtn1.click();
+  const req1 = await placeReq1;
+  assert.deepEqual(req1.postDataJSON(), { id: "flex-1", start: "07:00" });
+
+  // 2. Click lower half (>= 50% height) of unarmed Gap -> opens sheet with "At end" prioritized/pre-focused
+  await morningGap.click({ position: { x: morningBox.width / 2, y: morningBox.height * 0.75 } });
+  await sheet.waitFor();
+
+  const startBtn2 = page.locator('#sheet [data-place-at="flex-1"][data-placement="start"]');
+  const endBtn2 = page.locator('#sheet [data-place-at="flex-1"][data-placement="end"]');
+  await startBtn2.waitFor();
+  await endBtn2.waitFor();
+
+  // "At end" should be prioritized: styled as primary and pre-focused
+  assert.equal(await endBtn2.evaluate(el => el.classList.contains("primary")), true);
+  assert.equal(await startBtn2.evaluate(el => el.classList.contains("ghost")), true);
+  assert.equal(await endBtn2.evaluate(el => document.activeElement === el), true);
+
+  // Clicking "At end" dispatches POST /api/place with flush time: gap.end (09:00) - flex.duration (60m) = "08:00"
+  const placeReq2 = page.waitForRequest(req => req.url().endsWith("/api/place"));
+  await endBtn2.click();
+  const req2 = await placeReq2;
+  assert.deepEqual(req2.postDataJSON(), { id: "flex-1", start: "08:00" });
+
+  // 3. Lower half click on midnightGap (crosses midnight: 10:00 to 00:30, flex-1 duration 60m -> 23:30)
+  const midnightBox = await midnightGap.boundingBox();
+  await midnightGap.click({ position: { x: midnightBox.width / 2, y: midnightBox.height * 0.75 } });
+  await sheet.waitFor();
+
+  const midnightEndBtn = page.locator('#sheet [data-place-at="flex-1"][data-placement="end"]');
+  await midnightEndBtn.waitFor();
+  assert.equal(await midnightEndBtn.evaluate(el => el.classList.contains("primary")), true);
+  assert.equal(await midnightEndBtn.evaluate(el => document.activeElement === el), true);
+
+  const placeReq3 = page.waitForRequest(req => req.url().endsWith("/api/place"));
+  await midnightEndBtn.click();
+  const req3 = await placeReq3;
+  assert.deepEqual(req3.postDataJSON(), { id: "flex-1", start: "23:30" });
+
+  assert.deepEqual(pageErrors, []);
+  await page.close();
+});
