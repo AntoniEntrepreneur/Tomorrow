@@ -327,22 +327,51 @@ import { autofill, checklistItemsPayload, checklistPayload, clockLabel, clockVal
       }
       document.title = session.plan_date_label;
       document.getElementById("plan-date").textContent = session.plan_date_label;
-      const weatherBits = [];
+      const weatherEl = document.getElementById("weather");
+      const hourlyStrip = document.getElementById("weather-hourly-strip");
       if (session.weather && session.weather.summary) {
-        if (session.weather.location_name) {
-          weatherBits.push('<span class="name">' + esc(session.weather.location_name) + "</span>");
-          const summaryWithoutName = `${session.weather.low_c}° / ${session.weather.high_c}° · ${session.weather.emoji} ${session.weather.condition}`;
-          weatherBits.push(esc(summaryWithoutName));
+        const hasHourly = Array.isArray(session.weather.hourly) && session.weather.hourly.length > 0;
+        if (hasHourly) {
+          weatherEl.innerHTML = `<button type="button" class="weather-pill" id="weather-toggle" aria-expanded="false" aria-controls="weather-hourly-strip"><span class="weather-summary">${esc(session.weather.summary)}</span> <span class="weather-indicator" aria-hidden="true">▾</span></button>`;
+          if (hourlyStrip) {
+            hourlyStrip.innerHTML = `<div class="weather-cards-scroll">` +
+              session.weather.hourly.map(card => `
+                <div class="weather-card">
+                  <span class="card-hour">${esc(card.hour)}</span>
+                  <span class="card-emoji">${esc(card.emoji)}</span>
+                  <span class="card-temp">${card.temperature_c}°</span>
+                  ${card.precipitation_probability > 0 ? `<span class="card-precip">💧 ${card.precipitation_probability}%</span>` : ""}
+                </div>
+              `).join("") +
+            `</div>`;
+            const toggle = document.getElementById("weather-toggle");
+            toggle.onclick = () => {
+              const expanded = toggle.getAttribute("aria-expanded") === "true";
+              toggle.setAttribute("aria-expanded", String(!expanded));
+              hourlyStrip.hidden = expanded;
+              const ind = toggle.querySelector(".weather-indicator");
+              if (ind) ind.textContent = expanded ? "▾" : "▴";
+            };
+          }
         } else {
-          weatherBits.push(esc(session.weather.summary));
+          weatherEl.innerHTML = `<span class="weather-summary">${esc(session.weather.summary)}</span>`;
+          if (hourlyStrip) {
+            hourlyStrip.hidden = true;
+            hourlyStrip.innerHTML = "";
+          }
         }
       } else {
+        if (hourlyStrip) {
+          hourlyStrip.hidden = true;
+          hourlyStrip.innerHTML = "";
+        }
+        const weatherBits = [];
         if (session.weather_name) {
           weatherBits.push('<span class="name">' + esc(session.weather_name) + "</span>");
         }
         if (session.weather_one_liner) weatherBits.push(esc(session.weather_one_liner));
+        weatherEl.innerHTML = weatherBits.join(" · ");
       }
-      document.getElementById("weather").innerHTML = weatherBits.join(" · ");
       dropStaleBlockers(session.blockers || []);
       document.getElementById("wake-cap").textContent = "↑ " + session.bounds.wake + " wake";
       document.getElementById("sleep-cap").textContent =
@@ -898,6 +927,8 @@ import { autofill, checklistItemsPayload, checklistPayload, clockLabel, clockVal
         document.querySelector(".kicker").textContent = "Day Template";
         document.getElementById("plan-date").textContent = template.name || "New Template";
         document.getElementById("weather").textContent = "Reusable template · changes stay in template mode";
+        const strip = document.getElementById("weather-hourly-strip");
+        if (strip) { strip.hidden = true; strip.innerHTML = ""; }
         document.getElementById("template-editor").hidden = false;
         document.getElementById("template-editor").elements.name.value = template.name;
         document.getElementById("template-editor").elements.weekday.value = template.weekday || "";
