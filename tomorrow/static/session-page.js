@@ -328,10 +328,20 @@ import { autofill, checklistItemsPayload, checklistPayload, clockLabel, clockVal
       document.title = session.plan_date_label;
       document.getElementById("plan-date").textContent = session.plan_date_label;
       const weatherBits = [];
-      if (session.weather_name) {
-        weatherBits.push('<span class="name">' + esc(session.weather_name) + "</span>");
+      if (session.weather && session.weather.summary) {
+        if (session.weather.location_name) {
+          weatherBits.push('<span class="name">' + esc(session.weather.location_name) + "</span>");
+          const summaryWithoutName = `${session.weather.low_c}° / ${session.weather.high_c}° · ${session.weather.emoji} ${session.weather.condition}`;
+          weatherBits.push(esc(summaryWithoutName));
+        } else {
+          weatherBits.push(esc(session.weather.summary));
+        }
+      } else {
+        if (session.weather_name) {
+          weatherBits.push('<span class="name">' + esc(session.weather_name) + "</span>");
+        }
+        if (session.weather_one_liner) weatherBits.push(esc(session.weather_one_liner));
       }
-      if (session.weather_one_liner) weatherBits.push(esc(session.weather_one_liner));
       document.getElementById("weather").innerHTML = weatherBits.join(" · ");
       dropStaleBlockers(session.blockers || []);
       document.getElementById("wake-cap").textContent = "↑ " + session.bounds.wake + " wake";

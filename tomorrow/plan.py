@@ -249,7 +249,7 @@ def render_plan(
     flexes: Sequence[Flex] = (),
     todos: Sequence[ToDo] = (),
     checklists: Mapping[str, Checklist] | None = None,
-    weather: str | None = None,
+    weather: str | dict | None = None,
 ) -> str:
     library = dict(checklists or ())
     env = Environment(
@@ -283,7 +283,7 @@ def write_plan(
     flexes: Sequence[Flex] = (),
     todos: Sequence[ToDo] = (),
     checklists: Mapping[str, Checklist] | None = None,
-    weather: str | None = None,
+    weather: str | dict | None = None,
 ) -> Path:
     output_dir.mkdir(parents=True, exist_ok=True)
     path = output_dir / PLAN_FILENAME
@@ -310,7 +310,7 @@ def write_finalized_plan(
     output_dir: Path,
     plan_date: date,
     plan: FinalizedPlan,
-    weather: str | None = None,
+    weather: str | dict | None = None,
 ) -> Path:
     return write_plan(
         repo_root=repo_root,

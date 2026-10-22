@@ -61,7 +61,12 @@ from tomorrow.plan import (
     format_plan_date,
     write_finalized_plan,
 )
-from tomorrow.weather import load_weather_name, try_fetch_weather
+from tomorrow.weather import (
+    format_weather_one_liner,
+    load_weather_name,
+    try_fetch_weather,
+    try_fetch_weather_forecast,
+)
 
 SESSION_HOST = "127.0.0.1"
 SESSION_PORT = 8765
@@ -1636,6 +1641,30 @@ def session_view(
     bounds_view = dict(document["bounds"])
     if is_next_day(parse_clock(bounds.sleep), wake=wake_time):
         bounds_view["sleep_is_next_day"] = True
+    weather_forecast = try_fetch_weather_forecast(
+        data_dir, plan_date, bounds=bounds, opener=opener
+    )
+    if weather_forecast is not None:
+        document["weather"] = weather_forecast
+        save_session(repo_root, document)
+    else:
+        weather_forecast = document.get("weather")
+
+    weather_one_liner = (
+        format_weather_one_liner(
+            low_c=weather_forecast["low_c"],
+            high_c=weather_forecast["high_c"],
+            weather_code=weather_forecast["weather_code"],
+        )
+        if weather_forecast is not None
+        else None
+    )
+    weather_name = (
+        weather_forecast.get("location_name")
+        if weather_forecast
+        else load_weather_name(data_dir)
+    )
+
     return {
         "plan_date": document["plan_date"],
         "plan_date_label": format_plan_date(plan_date),
@@ -1654,8 +1683,9 @@ def session_view(
         + ([desktop_conflict] if desktop_conflict else []),
         "can_undo": bool(undo.get("past")),
         "can_redo": bool(undo.get("future")),
-        "weather_name": load_weather_name(data_dir),
-        "weather_one_liner": try_fetch_weather(data_dir, plan_date, opener=opener),
+        "weather": weather_forecast,
+        "weather_name": weather_name,
+        "weather_one_liner": weather_one_liner,
         "checklists": [
             {
                 "id": checklist_id,
@@ -1748,7 +1778,19 @@ def submit_session(
         raise PlanBlockedError(result.blockers)
     assert result.plan is not None
     plan_date = date.fromisoformat(document["plan_date"])
-    weather = try_fetch_weather(repo_root / "data", plan_date, opener=opener)
+    bounds = DayBounds(wake=document["bounds"]["wake"], sleep=document["bounds"]["sleep"])
+    try:
+        fresh_weather = try_fetch_weather_forecast(
+            repo_root / "data", plan_date, bounds=bounds, opener=opener
+        )
+    except Exception:
+        fresh_weather = None
+    if fresh_weather is not None:
+        weather = fresh_weather
+        document["weather"] = fresh_weather
+        save_session(repo_root, document)
+    else:
+        weather = document.get("weather")
     return write_finalized_plan(
         repo_root=repo_root,
         output_dir=output_dir,
