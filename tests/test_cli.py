@@ -756,6 +756,22 @@ def test_edit_draft_over_http_rejects_a_blank_name(tmp_path: Path) -> None:
     assert flushed["drafts"][0]["name"] == "Call dentist"
 
 
+def test_edit_draft_over_http_with_unknown_id_returns_400(tmp_path: Path) -> None:
+    _write_defaults(tmp_path)
+    server, thread = _start_server(tmp_path)
+    try:
+        status, body = _http(
+            "POST",
+            "/api/edit",
+            payload={"kind": "draft", "id": "missing-draft-id", "name": "Renamed"},
+        )
+    finally:
+        _stop_server(server, thread)
+
+    assert status == 400
+    assert "not found" in json.loads(body)["error"].lower()
+
+
 def test_promote_over_http_with_new_name_and_explicit_checklist(
     tmp_path: Path,
 ) -> None:
@@ -839,6 +855,27 @@ def test_promote_over_http_rejects_a_blank_new_name(tmp_path: Path) -> None:
     assert status == 400
     assert flushed["drafts"][0]["name"] == "Call dentist"
     assert flushed["flexes"] == []
+
+
+def test_promote_over_http_with_unknown_draft_id_returns_400(tmp_path: Path) -> None:
+    _write_defaults(tmp_path)
+    server, thread = _start_server(tmp_path)
+    try:
+        status, body = _http(
+            "POST",
+            "/api/promote",
+            payload={
+                "id": "missing-draft-id",
+                "kind": "flex",
+                "duration_minutes": 30,
+                "name": "Dentist",
+            },
+        )
+    finally:
+        _stop_server(server, thread)
+
+    assert status == 400
+    assert "not found" in json.loads(body)["error"].lower()
 
 
 def test_apply_template_over_http(tmp_path: Path) -> None:
