@@ -873,9 +873,44 @@ def test_session_view_shows_weather_name_and_one_liner(tmp_path: Path) -> None:
     assert view["weather_one_liner"] == "18° / 24° · partly cloudy"
     assert "52.23" not in str(view)
     assert "21.01" not in str(view)
-    assert "weather" not in document
+    assert "weather" in document
+    assert document["weather"]["location_name"] == "Warsaw"
     assert "weather_name" not in document
     assert "weather_one_liner" not in document
+
+
+def test_submit_session_falls_back_to_cached_weather_on_timeout(tmp_path: Path) -> None:
+    _write_defaults(tmp_path)
+    (tmp_path / "data" / "weather.toml").write_text(
+        'name = "Warsaw"\nlatitude = 52.23\nlongitude = 21.01\n',
+        encoding="utf-8",
+    )
+    document = load_session(tmp_path, output_dir=tmp_path / "Desktop", now=datetime(2026, 8, 10, 22, 0))
+    document["weather"] = {
+        "location_name": "Warsaw",
+        "low_c": 18,
+        "high_c": 24,
+        "weather_code": 2,
+        "condition": "partly cloudy",
+        "emoji": "⛅",
+        "summary": "Warsaw · 18° / 24° · ⛅ partly cloudy",
+        "hourly": [],
+    }
+    save_session(tmp_path, document)
+
+    def timed_out_opener(_request):
+        raise TimeoutError("slow")
+
+    path = submit_session(
+        tmp_path,
+        output_dir=tmp_path / "Desktop",
+        now=datetime(2026, 8, 10, 22, 0),
+        opener=timed_out_opener,
+    )
+    content = path.read_text(encoding="utf-8")
+
+    assert path.exists()
+    assert '<div class="plan-weather">Warsaw · 18° / 24° · ⛅ partly cloudy</div>' in content
 
 
 def test_session_view_keeps_weather_name_when_fetch_fails(tmp_path: Path) -> None:
@@ -924,7 +959,7 @@ def test_session_view_omits_coordinates_when_weather_has_no_name(
     assert "21.01" not in str(view)
 
 
-def test_submit_writes_weather_one_liner_not_location_name(tmp_path: Path) -> None:
+def test_submit_writes_weather_summary_pill_with_location_name(tmp_path: Path) -> None:
     _write_defaults(tmp_path)
     (tmp_path / "data" / "weather.toml").write_text(
         'name = "Warsaw"\nlatitude = 52.23\nlongitude = 21.01\n',
@@ -946,8 +981,8 @@ def test_submit_writes_weather_one_liner_not_location_name(tmp_path: Path) -> No
     )
     content = path.read_text(encoding="utf-8")
 
-    assert '<div class="plan-weather">18° / 24° · partly cloudy</div>' in content
-    assert "Warsaw" not in content
+    assert '<div class="plan-weather">Warsaw · 18° / 24° · ⛅ partly cloudy</div>' in content
+    assert "Warsaw" in content
     assert "52.23" not in content
 
 

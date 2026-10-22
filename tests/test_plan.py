@@ -58,6 +58,49 @@ def test_render_plan_shows_weather_one_liner_when_provided() -> None:
     assert '<div class="plan-weather">18° / 24° · partly cloudy</div>' in html
 
 
+def test_render_plan_shows_weather_pill_and_hourly_drawer_when_provided() -> None:
+    weather = {
+        "summary": "Warsaw · 10° / 15° · 🌧️ rain",
+        "hourly": [
+            {
+                "hour": "07:00",
+                "temperature_c": 11,
+                "weather_code": 61,
+                "condition": "rain",
+                "emoji": "🌧️",
+                "precipitation_probability": 40,
+            },
+            {
+                "hour": "00:00 +1",
+                "temperature_c": 9,
+                "weather_code": 0,
+                "condition": "clear",
+                "emoji": "☀️",
+                "precipitation_probability": 0,
+            },
+        ],
+    }
+    html = render_plan(
+        plan_date=date(2026, 8, 11),
+        bounds=DayBounds(wake="06:30", sleep="01:00"),
+        weather=weather,
+    )
+
+    assert 'class="plan-weather"' in html
+    assert 'class="weather-pill"' in html
+    assert 'aria-expanded="false"' in html
+    assert 'Warsaw · 10° / 15° · 🌧️ rain' in html
+    assert 'id="weather-hourly-strip"' in html
+    assert "07:00" in html
+    assert "11°" in html
+    assert "🌧️" in html
+    assert "40%" in html
+    assert "00:00 +1" in html
+    assert "9°" in html
+    assert "☀️" in html
+
+
+
 def test_render_plan_uses_tl_accordion_chrome() -> None:
     html = render_plan(
         plan_date=date(2026, 8, 11),

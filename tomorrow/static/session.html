@@ -53,6 +53,75 @@
     }
     .weather { font-size: 0.85rem; color: var(--muted); min-height: 1.2em; }
     .weather .name { color: var(--ink); font-weight: 500; }
+    .weather-pill {
+      background: var(--prep-bg, #1c212c);
+      border: 1px solid var(--prep-border, #2e3748);
+      border-radius: 999px;
+      padding: 0.2rem 0.65rem;
+      font-size: 0.85rem;
+      color: var(--ink);
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 0.35rem;
+      font-family: inherit;
+      transition: background 0.15s ease, border-color 0.15s ease;
+    }
+    .weather-pill:hover, .weather-pill:focus-visible {
+      border-color: var(--ink);
+      outline: none;
+    }
+    .weather-indicator {
+      font-size: 0.75rem;
+      opacity: 0.7;
+    }
+    .weather-hourly-strip {
+      margin: 0.6rem 0 0.8rem;
+      padding: 0.5rem 0;
+      overflow-x: auto;
+      border-top: 1px solid var(--rail, #2e3444);
+      border-bottom: 1px solid var(--rail, #2e3444);
+    }
+    .weather-hourly-strip[hidden] {
+      display: none;
+    }
+    .weather-cards-scroll {
+      display: flex;
+      gap: 0.6rem;
+      padding: 0.2rem 0;
+    }
+    .weather-card {
+      flex: 0 0 auto;
+      min-width: 3.8rem;
+      background: var(--prep-bg, #1c212c);
+      border: 1px solid var(--prep-border, #2e3748);
+      border-radius: 6px;
+      padding: 0.4rem 0.35rem;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      text-align: center;
+      gap: 0.2rem;
+    }
+    .card-hour {
+      font-size: 0.75rem;
+      color: var(--muted, #8b949e);
+      font-weight: 500;
+    }
+    .card-emoji {
+      font-size: 1.15rem;
+      line-height: 1;
+      margin: 0.1rem 0;
+    }
+    .card-temp {
+      font-size: 0.85rem;
+      font-weight: 600;
+      color: var(--ink);
+    }
+    .card-precip {
+      font-size: 0.7rem;
+      color: #58a6ff;
+    }
     .chrome {
       display: flex;
       flex-wrap: wrap;
@@ -436,6 +505,7 @@
         <button type="button" class="primary" id="submit">Submit</button>
       </div>
     </header>
+    <div id="weather-hourly-strip" class="weather-hourly-strip" hidden></div>
 
     <form id="template-editor" hidden data-mode="template">
       <div class="template-header-row">
