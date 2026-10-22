@@ -632,16 +632,16 @@ def edit_todo(
     now: datetime | None = None,
     opener: Callable[[Request], object] = _default_opener,
 ) -> dict:
-    document = load_session(repo_root, output_dir=output_dir, now=now)
-
-    def mutate(current: dict) -> None:
-        todo = _item_by_id(current["todos"], item_id)
-        if name is not None:
-            todo["name"] = name
-        if note is not None:
-            todo["note"] = note
-
-    return _commit(repo_root, document, mutate, output_dir=output_dir, now=now, opener=opener)
+    return edit_activity(
+        repo_root,
+        item_id=item_id,
+        kind="todo",
+        name=name,
+        note=note,
+        output_dir=output_dir,
+        now=now,
+        opener=opener,
+    )
 
 
 def drop_todo(
@@ -669,21 +669,15 @@ def convert_todo_to_flex(
     now: datetime | None = None,
     opener: Callable[[Request], object] = _default_opener,
 ) -> dict:
-    document = load_session(repo_root, output_dir=output_dir, now=now)
-
-    def mutate(current: dict) -> None:
-        todo = _drop_keyed(current, "todos", item_id)
-        current["flexes"].append(
-            {
-                "id": uuid.uuid4().hex,
-                "name": todo["name"],
-                "duration_minutes": duration_minutes,
-                "start": None,
-                "checklist": None,
-            }
-        )
-
-    return _commit(repo_root, document, mutate, output_dir=output_dir, now=now, opener=opener)
+    return edit_activity(
+        repo_root,
+        item_id=item_id,
+        kind="flex",
+        duration_minutes=duration_minutes,
+        output_dir=output_dir,
+        now=now,
+        opener=opener,
+    )
 
 
 def convert_todo_to_anchor(
@@ -696,21 +690,16 @@ def convert_todo_to_anchor(
     now: datetime | None = None,
     opener: Callable[[Request], object] = _default_opener,
 ) -> dict:
-    document = load_session(repo_root, output_dir=output_dir, now=now)
-
-    def mutate(current: dict) -> None:
-        todo = _drop_keyed(current, "todos", item_id)
-        current["anchors"].append(
-            {
-                "id": uuid.uuid4().hex,
-                "name": todo["name"],
-                "start": start,
-                "duration_minutes": duration_minutes,
-                "checklist": None,
-            }
-        )
-
-    return _commit(repo_root, document, mutate, output_dir=output_dir, now=now, opener=opener)
+    return edit_activity(
+        repo_root,
+        item_id=item_id,
+        kind="anchor",
+        start=start,
+        duration_minutes=duration_minutes,
+        output_dir=output_dir,
+        now=now,
+        opener=opener,
+    )
 
 
 def convert_flex_to_todo(
@@ -721,13 +710,14 @@ def convert_flex_to_todo(
     now: datetime | None = None,
     opener: Callable[[Request], object] = _default_opener,
 ) -> dict:
-    document = load_session(repo_root, output_dir=output_dir, now=now)
-
-    def mutate(current: dict) -> None:
-        flex = _drop_keyed(current, "flexes", item_id)
-        current["todos"].append(_new_todo(flex["name"]))
-
-    return _commit(repo_root, document, mutate, output_dir=output_dir, now=now, opener=opener)
+    return edit_activity(
+        repo_root,
+        item_id=item_id,
+        kind="todo",
+        output_dir=output_dir,
+        now=now,
+        opener=opener,
+    )
 
 
 def _require_flex(current: dict, item_id: str) -> dict:
@@ -1241,6 +1231,201 @@ def _apply_item_checklist(
     item["checklist_items"] = list(checklist_items_value)
 
 
+def edit_activity(
+    repo_root: Path,
+    *,
+    item_id: str,
+    kind: str,
+    name: str | None = None,
+    start: str | None = None,
+    duration_minutes: int | None = None,
+    checklist: str | None | object = _UNSET,
+    checklist_items: object = _UNSET,
+    note: str | None = None,
+    remove: bool = False,
+    output_dir: Path,
+    now: datetime | None = None,
+    opener: Callable[[Request], object] = _default_opener,
+) -> dict:
+    document = load_session(repo_root, output_dir=output_dir, now=now)
+
+    def mutate(current: dict) -> None:
+        source_kind = None
+        source_index = -1
+        source_list = None
+        item = None
+
+        for i, a in enumerate(current.get("anchors", [])):
+            if a.get("id") == item_id:
+                source_kind = "anchor"
+                source_index = i
+                source_list = current["anchors"]
+                item = a
+                break
+
+        if item is None:
+            for i, f in enumerate(current.get("flexes", [])):
+                if f.get("id") == item_id:
+                    source_kind = "flex"
+                    source_index = i
+                    source_list = current["flexes"]
+                    item = f
+                    break
+
+        if item is None:
+            for i, t in enumerate(current.get("todos", [])):
+                if t.get("id") == item_id:
+                    source_kind = "todo"
+                    source_index = i
+                    source_list = current["todos"]
+                    item = t
+                    break
+
+        if item is None or source_list is None:
+            raise KeyError(item_id)
+
+        if remove:
+            source_list.pop(source_index)
+            return
+
+        if kind not in ("anchor", "flex", "todo"):
+            raise ValueError(f"Unknown activity kind: {kind}")
+
+        new_name = name if name is not None and name.strip() != "" else item["name"]
+
+        if kind == source_kind:
+            if name is not None:
+                item["name"] = name
+            if kind == "anchor":
+                if start is not None:
+                    item["start"] = start
+                if duration_minutes is not None:
+                    item["duration_minutes"] = duration_minutes
+                _apply_item_checklist(
+                    repo_root,
+                    item,
+                    name=item["name"],
+                    checklist=checklist,
+                    checklist_items=checklist_items,
+                )
+            elif kind == "flex":
+                if duration_minutes is not None:
+                    item["duration_minutes"] = duration_minutes
+                if start is not None:
+                    item["start"] = start
+                _apply_item_checklist(
+                    repo_root,
+                    item,
+                    name=item["name"],
+                    checklist=checklist,
+                    checklist_items=checklist_items,
+                )
+            elif kind == "todo":
+                if note is not None:
+                    item["note"] = note
+            return
+
+        # Type conversion
+        source_list.pop(source_index)
+        source = item.get("source")
+        if source == "daily":
+            source = None
+
+        activity_template_id = item.get("activity_template_id")
+
+        if kind == "anchor":
+            if start is not None and str(start).strip() != "":
+                final_start = start
+            elif source_kind == "flex":
+                final_start = item.get("start")
+                if not final_start:
+                    raise ValueError("Start time is required for Anchor")
+            elif source_kind == "todo":
+                final_start = "09:00"
+            else:
+                final_start = item.get("start") or "09:00"
+
+            if duration_minutes is not None:
+                final_duration = duration_minutes
+            elif "duration_minutes" in item:
+                final_duration = item["duration_minutes"]
+            else:
+                final_duration = 30
+
+            new_anchor = {
+                "id": item_id,
+                "name": new_name,
+                "start": final_start,
+                "duration_minutes": final_duration,
+                "checklist": item.get("checklist"),
+                "checklist_items": list(item.get("checklist_items") or []),
+            }
+            if source:
+                new_anchor["source"] = source
+            if activity_template_id:
+                new_anchor["activity_template_id"] = activity_template_id
+
+            _apply_item_checklist(
+                repo_root,
+                new_anchor,
+                name=new_name,
+                checklist=checklist,
+                checklist_items=checklist_items,
+            )
+            current.setdefault("anchors", []).append(new_anchor)
+
+        elif kind == "flex":
+            if duration_minutes is not None:
+                final_duration = duration_minutes
+            elif "duration_minutes" in item:
+                final_duration = item["duration_minutes"]
+            else:
+                final_duration = 30
+
+            if start is not None and str(start).strip() != "":
+                final_start = start
+            elif source_kind == "anchor":
+                final_start = item.get("start")
+            elif source_kind == "todo":
+                final_start = None
+            else:
+                final_start = item.get("start")
+
+            new_flex = {
+                "id": item_id,
+                "name": new_name,
+                "duration_minutes": final_duration,
+                "start": final_start,
+                "checklist": item.get("checklist"),
+                "checklist_items": list(item.get("checklist_items") or []),
+            }
+            if source:
+                new_flex["source"] = source
+            if activity_template_id:
+                new_flex["activity_template_id"] = activity_template_id
+
+            _apply_item_checklist(
+                repo_root,
+                new_flex,
+                name=new_name,
+                checklist=checklist,
+                checklist_items=checklist_items,
+            )
+            current.setdefault("flexes", []).append(new_flex)
+
+        elif kind == "todo":
+            new_todo = {
+                "id": item_id,
+                "name": new_name,
+                "note": note if note is not None else "",
+            }
+            if source:
+                new_todo["source"] = source
+            current.setdefault("todos", []).append(new_todo)
+
+    return _commit(repo_root, document, mutate, output_dir=output_dir, now=now, opener=opener)
+
+
 def edit_flex(
     repo_root: Path,
     *,
@@ -1253,23 +1438,18 @@ def edit_flex(
     now: datetime | None = None,
     opener: Callable[[Request], object] = _default_opener,
 ) -> dict:
-    document = load_session(repo_root, output_dir=output_dir, now=now)
-
-    def mutate(current: dict) -> None:
-        flex = _require_flex(current, item_id)
-        if name is not None:
-            flex["name"] = name
-        if duration_minutes is not None:
-            flex["duration_minutes"] = duration_minutes
-        _apply_item_checklist(
-            repo_root,
-            flex,
-            name=flex["name"],
-            checklist=checklist,
-            checklist_items=checklist_items,
-        )
-
-    return _commit(repo_root, document, mutate, output_dir=output_dir, now=now, opener=opener)
+    return edit_activity(
+        repo_root,
+        item_id=item_id,
+        kind="flex",
+        name=name,
+        duration_minutes=duration_minutes,
+        checklist=checklist,
+        checklist_items=checklist_items,
+        output_dir=output_dir,
+        now=now,
+        opener=opener,
+    )
 
 
 def edit_anchor(
@@ -1286,36 +1466,20 @@ def edit_anchor(
     now: datetime | None = None,
     opener: Callable[[Request], object] = _default_opener,
 ) -> dict:
-    document = load_session(repo_root, output_dir=output_dir, now=now)
-
-    def mutate(current: dict) -> None:
-        if remove:
-            remaining = [
-                anchor for anchor in current["anchors"] if anchor["id"] != item_id
-            ]
-            if len(remaining) == len(current["anchors"]):
-                raise KeyError(item_id)
-            current["anchors"] = remaining
-            return
-        for anchor in current["anchors"]:
-            if anchor["id"] == item_id:
-                if name is not None:
-                    anchor["name"] = name
-                if start is not None:
-                    anchor["start"] = start
-                if duration_minutes is not None:
-                    anchor["duration_minutes"] = duration_minutes
-                _apply_item_checklist(
-                    repo_root,
-                    anchor,
-                    name=anchor["name"],
-                    checklist=checklist,
-                    checklist_items=checklist_items,
-                )
-                return
-        raise KeyError(item_id)
-
-    return _commit(repo_root, document, mutate, output_dir=output_dir, now=now, opener=opener)
+    return edit_activity(
+        repo_root,
+        item_id=item_id,
+        kind="anchor",
+        name=name,
+        start=start,
+        duration_minutes=duration_minutes,
+        checklist=checklist,
+        checklist_items=checklist_items,
+        remove=remove,
+        output_dir=output_dir,
+        now=now,
+        opener=opener,
+    )
 
 
 def edit_bounds(
@@ -1839,11 +2003,15 @@ def bind_session_server(
     output_dir: Path,
     now: datetime | None = None,
     opener: Callable[[Request], object] = _default_opener,
+    host: str = SESSION_HOST,
+    port: int = SESSION_PORT,
 ):
     """Create the browser-facing server for the current Session."""
     from tomorrow.session_http import bind_session_server as bind_http_server
 
-    return bind_http_server(repo_root, output_dir=output_dir, now=now, opener=opener)
+    return bind_http_server(
+        repo_root, output_dir=output_dir, now=now, opener=opener, host=host, port=port
+    )
 
 
 def run_session(

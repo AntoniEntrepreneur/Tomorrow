@@ -35,6 +35,7 @@ from tomorrow.session import (
     convert_todo_to_flex,
     decline_template,
     drop_todo,
+    edit_activity,
     edit_anchor,
     edit_bounds,
     edit_todo,
@@ -4038,6 +4039,269 @@ def test_flex_to_todo_with_no_checklist_converts_without_incident(tmp_path: Path
     assert view["flexes"] == []
     assert view["todos"][0]["name"] == "Errand"
     assert view["todos"][0]["note"] == ""
+
+
+def test_edit_activity_anchor_to_flex_preserves_placement_and_checklist(tmp_path: Path) -> None:
+    _write_defaults(tmp_path)
+    view = add_anchor(
+        tmp_path,
+        output_dir=tmp_path / "Desktop",
+        name="Deep Work",
+        start="09:00",
+        duration_minutes=90,
+        checklist_items=["Focus music", "Water"],
+        now=_now(),
+    )
+    anchor_id = view["anchors"][0]["id"]
+
+    view = edit_activity(
+        tmp_path,
+        output_dir=tmp_path / "Desktop",
+        item_id=anchor_id,
+        kind="flex",
+        now=_now(),
+    )
+    assert view["anchors"] == []
+    assert len(view["flexes"]) == 1
+    flex = view["flexes"][0]
+    assert flex["id"] == anchor_id
+    assert flex["name"] == "Deep Work"
+    assert flex["start"] == "09:00"
+    assert flex["duration_minutes"] == 90
+    assert flex["checklist_items"] == ["Focus music", "Water"]
+
+
+def test_edit_activity_flex_to_anchor_placed_and_unplaced(tmp_path: Path) -> None:
+    _write_defaults(tmp_path)
+    view = add_flex(
+        tmp_path,
+        output_dir=tmp_path / "Desktop",
+        name="Placed Flex",
+        duration_minutes=45,
+        now=_now(),
+    )
+    placed_id = view["flexes"][0]["id"]
+    place_flex(tmp_path, output_dir=tmp_path / "Desktop", item_id=placed_id, start="13:00", now=_now())
+
+    # Placed flex converts to anchor preserving its placed start time
+    view = edit_activity(
+        tmp_path,
+        output_dir=tmp_path / "Desktop",
+        item_id=placed_id,
+        kind="anchor",
+        now=_now(),
+    )
+    assert view["flexes"] == []
+    assert len(view["anchors"]) == 1
+    anchor = view["anchors"][0]
+    assert anchor["id"] == placed_id
+    assert anchor["start"] == "13:00"
+    assert anchor["duration_minutes"] == 45
+
+    # Unplaced flex requires a start time
+    view = add_flex(
+        tmp_path,
+        output_dir=tmp_path / "Desktop",
+        name="Unplaced Flex",
+        duration_minutes=30,
+        now=_now(),
+    )
+    unplaced_id = next(f["id"] for f in view["flexes"] if f["name"] == "Unplaced Flex")
+    with pytest.raises(ValueError, match="Start time"):
+        edit_activity(
+            tmp_path,
+            output_dir=tmp_path / "Desktop",
+            item_id=unplaced_id,
+            kind="anchor",
+            now=_now(),
+        )
+
+    # Providing start time succeeds
+    view = edit_activity(
+        tmp_path,
+        output_dir=tmp_path / "Desktop",
+        item_id=unplaced_id,
+        kind="anchor",
+        start="15:00",
+        now=_now(),
+    )
+    unplaced_anchor = next(a for a in view["anchors"] if a["id"] == unplaced_id)
+    assert unplaced_anchor["start"] == "15:00"
+    assert unplaced_anchor["duration_minutes"] == 30
+
+
+def test_edit_activity_to_todo_drops_timings_and_checklists(tmp_path: Path) -> None:
+    _write_defaults(tmp_path)
+    view = add_anchor(
+        tmp_path,
+        output_dir=tmp_path / "Desktop",
+        name="Meeting",
+        start="11:00",
+        duration_minutes=30,
+        checklist_items=["Slides"],
+        now=_now(),
+    )
+    anchor_id = view["anchors"][0]["id"]
+
+    view = edit_activity(
+        tmp_path,
+        output_dir=tmp_path / "Desktop",
+        item_id=anchor_id,
+        kind="todo",
+        note="Bring presentation",
+        now=_now(),
+    )
+    assert view["anchors"] == []
+    assert len(view["todos"]) == 1
+    todo = view["todos"][0]
+    assert todo["id"] == anchor_id
+    assert todo["name"] == "Meeting"
+    assert todo["note"] == "Bring presentation"
+    assert "start" not in todo
+    assert "duration_minutes" not in todo
+    assert "checklist" not in todo
+
+
+def test_edit_activity_todo_conversions(tmp_path: Path) -> None:
+    _write_defaults(tmp_path)
+    view = add_todo(
+        tmp_path,
+        output_dir=tmp_path / "Desktop",
+        name="Tidy desk",
+        note="Clean screen and wipe desk",
+        now=_now(),
+    )
+    todo_id = view["todos"][0]["id"]
+
+    # Convert to Flex -> start is None, duration defaults to 30, note dropped
+    view = edit_activity(
+        tmp_path,
+        output_dir=tmp_path / "Desktop",
+        item_id=todo_id,
+        kind="flex",
+        now=_now(),
+    )
+    assert view["todos"] == []
+    assert len(view["flexes"]) == 1
+    flex = view["flexes"][0]
+    assert flex["id"] == todo_id
+    assert flex["start"] is None
+    assert flex["duration_minutes"] == 30
+    assert "note" not in flex
+
+    # Convert another Todo to Anchor -> start defaults to 09:00, duration defaults to 30
+    view = add_todo(
+        tmp_path,
+        output_dir=tmp_path / "Desktop",
+        name="Call plumber",
+        note="Leaking faucet",
+        now=_now(),
+    )
+    todo2_id = view["todos"][0]["id"]
+    view = edit_activity(
+        tmp_path,
+        output_dir=tmp_path / "Desktop",
+        item_id=todo2_id,
+        kind="anchor",
+        now=_now(),
+    )
+    assert view["todos"] == []
+    anchor = next(a for a in view["anchors"] if a["id"] == todo2_id)
+    assert anchor["name"] == "Call plumber"
+    assert anchor["start"] == "09:00"
+    assert anchor["duration_minutes"] == 30
+    assert "note" not in anchor
+
+
+def test_edit_activity_daily_conversion_clears_daily_source(tmp_path: Path) -> None:
+    _write_defaults(tmp_path)
+    save_activity_template(
+        tmp_path, name="Yoga", duration_minutes=30, daily=True
+    )
+    view = session_view(tmp_path, output_dir=tmp_path / "Desktop", now=_now())
+    daily_flex = next(f for f in view["flexes"] if f["name"] == "Yoga")
+    assert daily_flex["source"] == "daily"
+    item_id = daily_flex["id"]
+
+    # Convert Daily Flex to Anchor -> daily source cleared
+    view = edit_activity(
+        tmp_path,
+        output_dir=tmp_path / "Desktop",
+        item_id=item_id,
+        kind="anchor",
+        start="08:00",
+        now=_now(),
+    )
+    anchor = next(a for a in view["anchors"] if a["id"] == item_id)
+    assert anchor.get("source") != "daily"
+
+    # Convert Anchor to To-do -> daily source cleared
+    view = edit_activity(
+        tmp_path,
+        output_dir=tmp_path / "Desktop",
+        item_id=item_id,
+        kind="todo",
+        now=_now(),
+    )
+    todo = next(t for t in view["todos"] if t["id"] == item_id)
+    assert todo.get("source") != "daily"
+
+
+def test_edit_activity_undo_redo_round_trip(tmp_path: Path) -> None:
+    _write_defaults(tmp_path)
+    view = add_anchor(
+        tmp_path,
+        output_dir=tmp_path / "Desktop",
+        name="Sprint Review",
+        start="14:00",
+        duration_minutes=45,
+        now=_now(),
+    )
+    item_id = view["anchors"][0]["id"]
+
+    # Anchor -> Flex
+    view = edit_activity(
+        tmp_path,
+        output_dir=tmp_path / "Desktop",
+        item_id=item_id,
+        kind="flex",
+        now=_now(),
+    )
+    assert len(view["flexes"]) == 1
+    assert len(view["anchors"]) == 0
+
+    # Flex -> To-do
+    view = edit_activity(
+        tmp_path,
+        output_dir=tmp_path / "Desktop",
+        item_id=item_id,
+        kind="todo",
+        now=_now(),
+    )
+    assert len(view["todos"]) == 1
+    assert len(view["flexes"]) == 0
+
+    # Undo -> back to Flex
+    view = undo_session(tmp_path, output_dir=tmp_path / "Desktop", now=_now())
+    assert len(view["flexes"]) == 1
+    assert len(view["todos"]) == 0
+    assert view["flexes"][0]["start"] == "14:00"
+
+    # Undo -> back to Anchor
+    view = undo_session(tmp_path, output_dir=tmp_path / "Desktop", now=_now())
+    assert len(view["anchors"]) == 1
+    assert len(view["flexes"]) == 0
+    assert view["anchors"][0]["start"] == "14:00"
+
+    # Redo -> back to Flex
+    view = redo_session(tmp_path, output_dir=tmp_path / "Desktop", now=_now())
+    assert len(view["flexes"]) == 1
+    assert len(view["anchors"]) == 0
+
+    # Redo -> back to To-do
+    view = redo_session(tmp_path, output_dir=tmp_path / "Desktop", now=_now())
+    assert len(view["todos"]) == 1
+    assert len(view["flexes"]) == 0
 
 
 def test_reset_clears_todos_and_todos_only_session_is_not_blank(tmp_path: Path) -> None:
