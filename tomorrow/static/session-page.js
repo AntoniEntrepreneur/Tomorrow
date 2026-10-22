@@ -848,20 +848,30 @@ import { autofill, checklistItemsPayload, checklistPayload, clockLabel, clockVal
       );
     }
 
+    let mutating = false;
     async function mutate(path, payload) {
-      const response = await request(path, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload)
-      });
-      const data = await response.json();
-      if (!response.ok) {
-        showSheetError(data.error || "Something went wrong.");
-        return null;
+      if (mutating) return null;
+      mutating = true;
+      const submitButton = document.querySelector("#sheet button[type='submit']");
+      if (submitButton) submitButton.disabled = true;
+      try {
+        const response = await request(path, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload)
+        });
+        const data = await response.json();
+        if (!response.ok) {
+          showSheetError(data.error || "Something went wrong.");
+          return null;
+        }
+        closeSheet();
+        render(data);
+        return data;
+      } finally {
+        mutating = false;
+        if (submitButton) submitButton.disabled = false;
       }
-      closeSheet();
-      render(data);
-      return data;
     }
 
     function showSheetError(message) {

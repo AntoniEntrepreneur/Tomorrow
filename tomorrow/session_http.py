@@ -282,6 +282,9 @@ class SessionHandler(BaseHTTPRequestHandler):
                         name=payload["name"],
                         **self._view_args(),
                     )
+                except KeyError as exc:
+                    self._send_json(400, {"error": f"Item not found: {exc.args[0] if exc.args else ''}"})
+                    return
                 except ValueError as exc:
                     self._send_json(400, {"error": str(exc)})
                     return
@@ -302,91 +305,130 @@ class SessionHandler(BaseHTTPRequestHandler):
                 return
             if kind == "flex":
                 duration = payload.get("duration_minutes")
-                view = edit_flex(
-                    self.server.repo_root,
-                    item_id=payload["id"],
-                    name=payload.get("name"),
-                    duration_minutes=int(duration) if duration is not None else None,
-                    checklist=_optional_checklist(payload),
-                    checklist_items=_optional_checklist_items(payload),
-                    **self._view_args(),
-                )
+                try:
+                    view = edit_flex(
+                        self.server.repo_root,
+                        item_id=payload["id"],
+                        name=payload.get("name"),
+                        duration_minutes=int(duration) if duration is not None else None,
+                        checklist=_optional_checklist(payload),
+                        checklist_items=_optional_checklist_items(payload),
+                        **self._view_args(),
+                    )
+                except KeyError as exc:
+                    self._send_json(400, {"error": f"Item not found: {exc.args[0] if exc.args else ''}"})
+                    return
+                except ValueError as exc:
+                    self._send_json(400, {"error": str(exc)})
+                    return
                 self._send_json(200, view)
                 return
             if kind == "todo":
-                view = edit_todo(
-                    self.server.repo_root,
-                    item_id=payload["id"],
-                    name=payload.get("name"),
-                    note=payload.get("note"),
-                    **self._view_args(),
-                )
+                try:
+                    view = edit_todo(
+                        self.server.repo_root,
+                        item_id=payload["id"],
+                        name=payload.get("name"),
+                        note=payload.get("note"),
+                        **self._view_args(),
+                    )
+                except KeyError as exc:
+                    self._send_json(400, {"error": f"Item not found: {exc.args[0] if exc.args else ''}"})
+                    return
+                except ValueError as exc:
+                    self._send_json(400, {"error": str(exc)})
+                    return
                 self._send_json(200, view)
                 return
             if kind != "anchor":
                 self.send_error(404)
                 return
             duration = payload.get("duration_minutes")
-            view = edit_anchor(
-                self.server.repo_root,
-                item_id=payload["id"],
-                name=payload.get("name"),
-                start=payload.get("start"),
-                duration_minutes=int(duration) if duration is not None else None,
-                checklist=_optional_checklist(payload),
-                checklist_items=_optional_checklist_items(payload),
-                remove=bool(payload.get("remove")),
-                **self._view_args(),
-            )
+            try:
+                view = edit_anchor(
+                    self.server.repo_root,
+                    item_id=payload["id"],
+                    name=payload.get("name"),
+                    start=payload.get("start"),
+                    duration_minutes=int(duration) if duration is not None else None,
+                    checklist=_optional_checklist(payload),
+                    checklist_items=_optional_checklist_items(payload),
+                    remove=bool(payload.get("remove")),
+                    **self._view_args(),
+                )
+            except KeyError as exc:
+                self._send_json(400, {"error": f"Item not found: {exc.args[0] if exc.args else ''}"})
+                return
+            except ValueError as exc:
+                self._send_json(400, {"error": str(exc)})
+                return
             self._send_json(200, view)
             return
         if path == "/api/place":
             payload = self._read_json()
-            view = place_flex(
-                self.server.repo_root,
-                item_id=payload["id"],
-                start=payload["start"],
-                **self._view_args(),
-            )
+            try:
+                view = place_flex(
+                    self.server.repo_root,
+                    item_id=payload["id"],
+                    start=payload["start"],
+                    **self._view_args(),
+                )
+            except KeyError as exc:
+                self._send_json(400, {"error": f"Item not found: {exc.args[0] if exc.args else ''}"})
+                return
+            except ValueError as exc:
+                self._send_json(400, {"error": str(exc)})
+                return
             self._send_json(200, view)
             return
         if path == "/api/change-duration":
             payload = self._read_json()
-            view = change_flex_duration(
-                self.server.repo_root,
-                item_id=payload["id"],
-                duration_minutes=int(payload["duration_minutes"]),
-                **self._view_args(),
-            )
+            try:
+                view = change_flex_duration(
+                    self.server.repo_root,
+                    item_id=payload["id"],
+                    duration_minutes=int(payload["duration_minutes"]),
+                    **self._view_args(),
+                )
+            except KeyError as exc:
+                self._send_json(400, {"error": f"Item not found: {exc.args[0] if exc.args else ''}"})
+                return
+            except ValueError as exc:
+                self._send_json(400, {"error": str(exc)})
+                return
             self._send_json(200, view)
             return
         if path == "/api/drop":
             payload = self._read_json()
             kind = payload.get("kind")
-            if kind == "draft":
-                view = drop_draft(
-                    self.server.repo_root,
-                    item_id=payload["id"],
-                    **self._view_args(),
-                )
-                self._send_json(200, view)
+            try:
+                if kind == "draft":
+                    view = drop_draft(
+                        self.server.repo_root,
+                        item_id=payload["id"],
+                        **self._view_args(),
+                    )
+                elif kind == "todo":
+                    view = drop_todo(
+                        self.server.repo_root,
+                        item_id=payload["id"],
+                        **self._view_args(),
+                    )
+                elif kind == "flex":
+                    view = drop_flex(
+                        self.server.repo_root,
+                        item_id=payload["id"],
+                        **self._view_args(),
+                    )
+                else:
+                    self.send_error(404)
+                    return
+            except KeyError as exc:
+                self._send_json(400, {"error": f"Item not found: {exc.args[0] if exc.args else ''}"})
                 return
-            if kind == "todo":
-                view = drop_todo(
-                    self.server.repo_root,
-                    item_id=payload["id"],
-                    **self._view_args(),
-                )
-                self._send_json(200, view)
+            except ValueError as exc:
+                self._send_json(400, {"error": str(exc)})
                 return
-            if kind != "flex":
-                self.send_error(404)
-                return
-            view = drop_flex(
-                self.server.repo_root,
-                item_id=payload["id"],
-                **self._view_args(),
-            )
             self._send_json(200, view)
             return
         if path == "/api/promote":
@@ -403,6 +445,9 @@ class SessionHandler(BaseHTTPRequestHandler):
                     checklist=_optional_checklist(payload),
                     **self._view_args(),
                 )
+            except KeyError as exc:
+                self._send_json(400, {"error": f"Item not found: {exc.args[0] if exc.args else ''}"})
+                return
             except ValueError as exc:
                 self._send_json(400, {"error": str(exc)})
                 return
@@ -418,7 +463,10 @@ class SessionHandler(BaseHTTPRequestHandler):
                     name=payload.get("name") or "",
                     **self._view_args(),
                 )
-            except (ValueError, KeyError) as exc:
+            except KeyError as exc:
+                self._send_json(400, {"error": f"Item not found: {exc.args[0] if exc.args else ''}"})
+                return
+            except ValueError as exc:
                 self._send_json(400, {"error": str(exc)})
                 return
             self._send_json(200, view)
@@ -426,33 +474,37 @@ class SessionHandler(BaseHTTPRequestHandler):
         if path == "/api/convert":
             payload = self._read_json()
             kind = payload.get("kind")
-            if kind == "todo-to-flex":
-                view = convert_todo_to_flex(
-                    self.server.repo_root,
-                    item_id=payload["id"],
-                    duration_minutes=int(payload["duration_minutes"]),
-                    **self._view_args(),
-                )
-                self._send_json(200, view)
+            try:
+                if kind == "todo-to-flex":
+                    view = convert_todo_to_flex(
+                        self.server.repo_root,
+                        item_id=payload["id"],
+                        duration_minutes=int(payload["duration_minutes"]),
+                        **self._view_args(),
+                    )
+                elif kind == "todo-to-anchor":
+                    view = convert_todo_to_anchor(
+                        self.server.repo_root,
+                        item_id=payload["id"],
+                        start=payload["start"],
+                        duration_minutes=int(payload["duration_minutes"]),
+                        **self._view_args(),
+                    )
+                elif kind == "flex-to-todo":
+                    view = convert_flex_to_todo(
+                        self.server.repo_root,
+                        item_id=payload["id"],
+                        **self._view_args(),
+                    )
+                else:
+                    self.send_error(404)
+                    return
+            except KeyError as exc:
+                self._send_json(400, {"error": f"Item not found: {exc.args[0] if exc.args else ''}"})
                 return
-            if kind == "todo-to-anchor":
-                view = convert_todo_to_anchor(
-                    self.server.repo_root,
-                    item_id=payload["id"],
-                    start=payload["start"],
-                    duration_minutes=int(payload["duration_minutes"]),
-                    **self._view_args(),
-                )
-                self._send_json(200, view)
+            except ValueError as exc:
+                self._send_json(400, {"error": str(exc)})
                 return
-            if kind != "flex-to-todo":
-                self.send_error(404)
-                return
-            view = convert_flex_to_todo(
-                self.server.repo_root,
-                item_id=payload["id"],
-                **self._view_args(),
-            )
             self._send_json(200, view)
             return
         if path == "/api/template":
