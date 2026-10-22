@@ -281,6 +281,12 @@
       cursor: pointer;
     }
     .gap.armed { outline: 2px solid var(--wick); }
+    .gap.hover-start {
+      background: linear-gradient(to bottom, rgba(224,168,74,0.22) 0%, rgba(224,168,74,0.22) 50%, rgba(224,168,74,0.06) 50%, rgba(224,168,74,0.06) 100%);
+    }
+    .gap.hover-end {
+      background: linear-gradient(to bottom, rgba(224,168,74,0.06) 0%, rgba(224,168,74,0.06) 50%, rgba(224,168,74,0.22) 50%, rgba(224,168,74,0.22) 100%);
+    }
     .gap .cta { font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; font-size: 0.65rem; }
 
     .trays {
@@ -387,6 +393,10 @@
     .sheet .choice-row button {
       background: transparent; border: 1px solid rgba(224,168,74,0.35); color: var(--ink);
     }
+    .gap-place-list { display: flex; flex-direction: column; gap: 0.5rem; margin: 0.4rem 0 0.8rem; }
+    .gap-place-row { display: flex; flex-direction: column; gap: 0.25rem; padding: 0.45rem 0; border-bottom: 1px solid rgba(224,168,74,0.18); }
+    .gap-place-row:last-child { border-bottom: none; }
+    .gap-place-label { font-size: 0.85rem; }
     .sheet .hint { font-size: 0.8rem; color: var(--muted); margin-bottom: 0.6rem; }
     .sheet .danger { background: var(--danger); color: #fff; margin-left: auto; }
     .sheet .timing-field { transition: opacity 120ms ease; }
@@ -490,6 +500,42 @@
       padding: 0.15rem 0.35rem;
       border-radius: 4px;
     }
+
+    .toast {
+      position: fixed;
+      top: 1.25rem;
+      left: 50%;
+      transform: translateX(-50%);
+      max-width: min(90vw, 26rem);
+      width: max-content;
+      background: var(--paper);
+      color: var(--ink);
+      border: 1px solid var(--wick);
+      border-left: 4px solid var(--wick);
+      border-radius: 8px;
+      padding: 0.75rem 1rem;
+      font-size: 0.85rem;
+      font-weight: 500;
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+      z-index: 1000;
+      cursor: pointer;
+      animation: toastSlideIn 0.25s ease-out;
+    }
+
+    .toast[hidden] {
+      display: none !important;
+    }
+
+    @keyframes toastSlideIn {
+      from {
+        transform: translateX(-50%) translateY(-100%);
+        opacity: 0;
+      }
+      to {
+        transform: translateX(-50%) translateY(0);
+        opacity: 1;
+      }
+    }
   </style>
 </head>
 <body>
@@ -566,6 +612,8 @@
   <div class="sheet-backdrop" id="sheet-backdrop" hidden>
     <div class="sheet" id="sheet"></div>
   </div>
+
+  <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
 
   <script type="module" src="/static/session-page.js"></script>
 </body>
