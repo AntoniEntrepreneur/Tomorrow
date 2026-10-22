@@ -265,13 +265,30 @@ def _validate_flex_entry(
         raise ValueError("A Day Template Flex duration must be a positive number.") from exc
 
 
-def _ordered_anchor_entries(anchors: list[dict[str, object]]) -> list[dict[str, object]]:
-    """Put timed literal anchors in display order without moving references."""
+def _ordered_anchor_entries(
+    anchors: list[dict[str, object]],
+    activity_library: dict[str, ActivityTemplate] | None = None,
+    wake: str | None = None,
+) -> list[dict[str, object]]:
+    """Put all anchors in chronological order by wake-relative offset."""
 
-    literal = [entry for entry in anchors if "activity" not in entry]
-    references = [entry for entry in anchors if "activity" in entry]
-    literal.sort(key=lambda entry: parse_clock(str(entry["start"])))
-    return literal + references
+    library = activity_library or {}
+    wake_time = parse_clock(wake) if wake is not None else None
+
+    def anchor_start_offset(entry: dict[str, object]) -> tuple[int, int]:
+        start_val = entry.get("start")
+        if start_val is None and "activity" in entry:
+            act = library.get(str(entry["activity"]))
+            if act is not None and act.start is not None:
+                start_val = act.start.strftime("%H:%M")
+        if start_val is None:
+            return (1, 0)
+        start_clock = parse_clock(str(start_val))
+        if wake_time is not None:
+            return (0, minutes_from_bound(wake_time, start_clock))
+        return (0, start_clock.hour * 60 + start_clock.minute)
+
+    return sorted(anchors, key=anchor_start_offset)
 
 
 def save_day_template(
@@ -305,7 +322,7 @@ def save_day_template(
         _validate_anchor_entry(anchor, activity_library)
     for flex in flex_entries:
         _validate_flex_entry(flex, activity_library)
-    anchor_entries = _ordered_anchor_entries(anchor_entries)
+    anchor_entries = _ordered_anchor_entries(anchor_entries, activity_library, wake=wake)
 
     if (wake is None) != (sleep is None):
         raise ValueError("Give both wake and sleep bounds, or neither.")

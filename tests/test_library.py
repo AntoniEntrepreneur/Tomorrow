@@ -326,6 +326,33 @@ def test_save_day_template_serializes_anchors_in_chronological_order_and_keeps_f
     assert [flex.name for flex in seed.flexes] == ["First", "Second"]
 
 
+def test_save_day_template_orders_anchors_wake_relative_including_activity_references(
+    tmp_path: Path,
+) -> None:
+    save_activity_template(tmp_path, name="Morning Meditation", duration_minutes=30, start="08:00")
+    save_day_template(
+        tmp_path,
+        name="Night Owl",
+        wake="07:00",
+        sleep="02:00",
+        anchors=[
+            {"name": "Late Night Reading", "start": "01:00", "duration": 45},
+            {"name": "Dinner", "start": "19:00", "duration": 60},
+            {"activity": "morning-meditation"},
+        ],
+    )
+
+    activity_library = load_activity_template_library(tmp_path / "data")
+    seed = load_day_template(tmp_path / "data" / "templates" / "night-owl.toml", activity_library)
+    assert seed is not None
+    # 08:00 is +1h from wake, 19:00 is +12h, 01:00 is +18h (after midnight)
+    assert [anchor.name for anchor in seed.anchors] == [
+        "Morning Meditation",
+        "Dinner",
+        "Late Night Reading",
+    ]
+
+
 @pytest.mark.parametrize(
     ("anchors", "flexes", "message"),
     [
