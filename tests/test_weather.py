@@ -235,3 +235,36 @@ def test_fetch_weather_forecast_builds_structured_payload() -> None:
     assert forecast["summary"] == "Warsaw · 12° / 22° · 🌧️ rain"
     assert len(forecast["hourly"]) == 16  # 07:00 to 22:00
 
+
+def test_reverse_geocode_resolves_city_name() -> None:
+    from tomorrow.weather import reverse_geocode
+
+    payload = {"address": {"city": "Warsaw"}}
+
+    def fake_opener(_request):
+        return BytesIO(json.dumps(payload).encode("utf-8"))
+
+    name = reverse_geocode(52.23, 21.01, opener=fake_opener)
+    assert name == "Warsaw"
+
+
+def test_reverse_geocode_returns_none_on_error() -> None:
+    from tomorrow.weather import reverse_geocode
+
+    def failing_opener(_request):
+        raise URLError("offline")
+
+    assert reverse_geocode(52.23, 21.01, opener=failing_opener) is None
+
+
+def test_save_weather_location_persists_toml(tmp_path: Path) -> None:
+    from tomorrow.weather import save_weather_location
+
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
+    save_weather_location(data_dir, latitude=52.23, longitude=21.01, name="Warsaw")
+
+    assert load_weather_location(data_dir) == WeatherLocation(latitude=52.23, longitude=21.01)
+    assert load_weather_name(data_dir) == "Warsaw"
+
+

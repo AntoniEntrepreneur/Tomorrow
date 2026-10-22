@@ -60,6 +60,7 @@ from tomorrow.session import (
 )
 from tomorrow.domain import PlanBlockedError
 from tomorrow.plan import ForeignPlanFileError
+from tomorrow.weather import reverse_geocode, save_weather_location
 
 _PAGE_PATH = Path(__file__).parent / "static" / "session.html"
 _LIBRARY_PAGE_PATH = Path(__file__).parent / "static" / "library.html"
@@ -222,6 +223,23 @@ class SessionHandler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:
         path = urlparse(self.path).path
+        if path == "/api/location":
+            payload = self._read_json()
+            try:
+                lat = float(payload["latitude"])
+                lon = float(payload["longitude"])
+            except (KeyError, ValueError, TypeError):
+                self._send_json(400, {"error": "Invalid coordinates"})
+                return
+            if not (-90.0 <= lat <= 90.0 and -180.0 <= lon <= 180.0):
+                self._send_json(400, {"error": "Coordinates out of bounds"})
+                return
+            data_dir = self.server.repo_root / "data"
+            name = reverse_geocode(lat, lon, opener=self.server.opener)
+            save_weather_location(data_dir, latitude=lat, longitude=lon, name=name)
+            view = session_view(self.server.repo_root, **self._view_args())
+            self._send_json(200, view)
+            return
         if path == "/api/reset":
             view = reset_session(self.server.repo_root, **self._view_args())
             self._send_json(200, view)
