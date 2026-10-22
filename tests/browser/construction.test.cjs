@@ -386,3 +386,86 @@ test("Promoting or changing activity shape only displays fields relevant to that
   assert.deepEqual(pageErrors, []);
   await page.close();
 });
+
+test("Gap split-half placement dispatches place request at start or wake-relative end with midnight wrap and exact fit", async () => {
+  const page = await browser.newPage();
+  const pageErrors = [];
+  page.on("pageerror", error => pageErrors.push(error.message));
+  const requests = [];
+  let current = {
+    ...sessionView(),
+    bounds: { wake: "07:00", sleep: "02:00", sleep_is_next_day: true },
+    anchors: [
+      { id: "anchor-1", name: "Morning Standup", start: "09:00", duration_minutes: 60, checklist: null },
+      { id: "anchor-2", name: "Late Walk", start: "00:30", duration_minutes: 30, checklist: null }
+    ],
+    flexes: [
+      { id: "flex-1", name: "Deep Work", duration_minutes: 60, start: null },
+      { id: "flex-fit", name: "Exact Two Hours", duration_minutes: 120, start: null }
+    ]
+  };
+
+  await page.route("**/api/**", async route => {
+    const request = route.request();
+    const url = new URL(request.url());
+    const body = request.postDataJSON() || {};
+    if (request.method() === "GET" && url.pathname === "/api/session") {
+      await route.fulfill({ json: current });
+      return;
+    }
+    if (request.method() === "POST" && url.pathname === "/api/place") {
+      requests.push({ path: url.pathname, body });
+      await route.fulfill({ json: current });
+      return;
+    }
+    await route.fulfill({ json: current });
+  });
+
+  await page.goto(baseUrl);
+  await page.getByText("Morning Standup", { exact: true }).waitFor();
+
+  // Gap 1 is 07:00 to 09:00 (120 min)
+  // Gap 2 is 10:00 to 00:30 (crosses midnight, ends at 00:30, duration 870 min)
+  const morningGap = page.locator('[data-kind="gap"][data-start="07:00"]');
+  const midnightGap = page.locator('[data-kind="gap"][data-start="10:00"]');
+  await morningGap.waitFor();
+  await midnightGap.waitFor();
+
+  // 1. Click upper half (< 50% height) with armed flex -> start equals gap.start ("07:00")
+  await page.locator('[data-arm="flex-1"] .name').click();
+  assert.equal(await page.locator('[data-arm="flex-1"]').evaluate(el => el.classList.contains("armed")), true);
+  const morningBox = await morningGap.boundingBox();
+  const placeReq1 = page.waitForRequest(req => req.url().endsWith("/api/place"));
+  await morningGap.click({ position: { x: morningBox.width / 2, y: morningBox.height * 0.25 } });
+  const req1 = await placeReq1;
+  assert.deepEqual(req1.postDataJSON(), { id: "flex-1", start: "07:00" });
+
+  // 2. Click lower half (>= 50% height) with armed flex across midnight -> flush against gap.end (00:30 - 60 min = 23:30)
+  await page.locator('[data-arm="flex-1"] .name').click();
+  assert.equal(await page.locator('[data-arm="flex-1"]').evaluate(el => el.classList.contains("armed")), true);
+  const midnightBox = await midnightGap.boundingBox();
+  const placeReq2 = page.waitForRequest(req => req.url().endsWith("/api/place"));
+  await midnightGap.click({ position: { x: midnightBox.width / 2, y: midnightBox.height * 0.75 } });
+  const req2 = await placeReq2;
+  assert.deepEqual(req2.postDataJSON(), { id: "flex-1", start: "23:30" });
+
+  // 3. Exact fit (flex.duration == gap.duration, 120 min) places identically at gap.start
+  // Test lower half on morningGap (07:00 to 09:00, 120 min, flex-fit is 120 min -> 09:00 - 120 min = 07:00)
+  await page.locator('[data-arm="flex-fit"] .name').click();
+  assert.equal(await page.locator('[data-arm="flex-fit"]').evaluate(el => el.classList.contains("armed")), true);
+  const placeReq3 = page.waitForRequest(req => req.url().endsWith("/api/place"));
+  await morningGap.click({ position: { x: morningBox.width / 2, y: morningBox.height * 0.75 } });
+  const req3 = await placeReq3;
+  assert.deepEqual(req3.postDataJSON(), { id: "flex-fit", start: "07:00" });
+
+  // Test upper half on morningGap with flex-fit
+  await page.locator('[data-arm="flex-fit"] .name').click();
+  assert.equal(await page.locator('[data-arm="flex-fit"]').evaluate(el => el.classList.contains("armed")), true);
+  const placeReq4 = page.waitForRequest(req => req.url().endsWith("/api/place"));
+  await morningGap.click({ position: { x: morningBox.width / 2, y: morningBox.height * 0.25 } });
+  const req4 = await placeReq4;
+  assert.deepEqual(req4.postDataJSON(), { id: "flex-fit", start: "07:00" });
+
+  assert.deepEqual(pageErrors, []);
+  await page.close();
+});

@@ -1169,7 +1169,17 @@ import { autofill, checklistItemsPayload, checklistPayload, clockLabel, clockVal
       const gap = event.target.closest("[data-kind='gap']");
       if (gap) {
         if (state.armedFlexId) {
-          placeFlexAt(state.armedFlexId, gap.dataset.start);
+          const rect = gap.getBoundingClientRect();
+          const isBottom = rect.height > 0 && (event.clientY - rect.top) >= (rect.height / 2);
+          if (isBottom) {
+            const armedFlex = (state.current.flexes || []).find(item => item.id === state.armedFlexId);
+            const duration = Number(armedFlex ? (armedFlex.duration_minutes != null ? armedFlex.duration_minutes : armedFlex.duration) : 0);
+            const targetMin = toMin(gap.dataset.end) - duration;
+            const computedStart = toClock(targetMin);
+            placeFlexAt(state.armedFlexId, computedStart);
+          } else {
+            placeFlexAt(state.armedFlexId, gap.dataset.start);
+          }
           return;
         }
         sheetGapPlace(gap.dataset.start, gap.dataset.end);
@@ -1480,7 +1490,24 @@ import { autofill, checklistItemsPayload, checklistPayload, clockLabel, clockVal
         const gap = event.target.closest("[data-template-gap]");
         if (gap) {
           if (state.templateArmedFlex) {
-            placeTemplateArmedFlex(gap.dataset.start);
+            const rect = gap.getBoundingClientRect();
+            const isBottom = rect.height > 0 && (event.clientY - rect.top) >= (rect.height / 2);
+            if (isBottom) {
+              const { source, index } = state.templateArmedFlex;
+              let duration = 0;
+              if (source === "flex") {
+                const entry = state.templateDraft.flexes[index];
+                duration = Number(entry ? (entry.duration != null ? entry.duration : entry.duration_minutes) : 0);
+              } else if (source === "daily") {
+                const entry = state.templateDraft.dailyActivities[index];
+                duration = Number(entry ? (entry.duration_minutes != null ? entry.duration_minutes : entry.duration) : 60);
+              }
+              const targetMin = toMin(gap.dataset.end) - duration;
+              const computedStart = toClock(targetMin);
+              placeTemplateArmedFlex(computedStart);
+            } else {
+              placeTemplateArmedFlex(gap.dataset.start);
+            }
           }
           return;
         }
