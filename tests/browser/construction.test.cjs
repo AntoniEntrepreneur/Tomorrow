@@ -469,3 +469,85 @@ test("Gap split-half placement dispatches place request at start or wake-relativ
   assert.deepEqual(pageErrors, []);
   await page.close();
 });
+
+test("Fit validation displays in-app toast for oversized Flex and keeps Flex armed without placing", async () => {
+  const page = await browser.newPage();
+  const pageErrors = [];
+  page.on("pageerror", error => pageErrors.push(error.message));
+  const requests = [];
+  const flexName = "Gym Session";
+  const flexDuration = 180; // 3h
+  const gapDuration = 60; // 1h
+  const current = {
+    ...sessionView(),
+    bounds: { wake: "07:00", sleep: "23:00", sleep_is_next_day: false },
+    anchors: [
+      { id: "anchor-1", name: "Morning Meeting", start: "08:00", duration_minutes: 60, checklist: null }
+    ],
+    flexes: [
+      { id: "flex-oversized", name: flexName, duration_minutes: flexDuration, start: null }
+    ]
+  };
+
+  await page.route("**/api/**", async route => {
+    const request = route.request();
+    const url = new URL(request.url());
+    const body = request.postDataJSON() || {};
+    if (request.method() === "GET" && url.pathname === "/api/session") {
+      await route.fulfill({ json: current });
+      return;
+    }
+    if (request.method() === "POST" && url.pathname === "/api/place") {
+      requests.push({ path: url.pathname, body });
+      await route.fulfill({ json: current });
+      return;
+    }
+    await route.fulfill({ json: current });
+  });
+
+  await page.goto(baseUrl);
+  await page.getByText("Morning Meeting", { exact: true }).waitFor();
+
+  // Gap is 07:00 to 08:00 (60m)
+  const smallGap = page.locator('[data-kind="gap"][data-start="07:00"]');
+  await smallGap.waitFor();
+
+  // Arm the oversized Flex (180m)
+  const flexChip = page.locator('[data-arm="flex-oversized"]');
+  await flexChip.locator(".name").click();
+  assert.equal(await flexChip.evaluate(el => el.classList.contains("armed")), true);
+
+  const toast = page.locator("#toast");
+
+  // 1. Click upper half of gap: should NOT dispatch POST /api/place, should show toast, and Flex remains armed
+  const gapBox = await smallGap.boundingBox();
+  await smallGap.click({ position: { x: gapBox.width / 2, y: gapBox.height * 0.25 } });
+
+  assert.equal(requests.filter(r => r.path === "/api/place").length, 0);
+  assert.equal(await flexChip.evaluate(el => el.classList.contains("armed")), true);
+  await toast.waitFor({ state: "visible" });
+  assert.equal(await toast.textContent(), "Gym Session (3h) does not fit in this gap (1h)");
+
+  // 2. Test toast dismiss on click
+  await toast.click();
+  await toast.waitFor({ state: "hidden" });
+  assert.equal(await toast.isVisible(), false);
+  // Flex remains armed after dismiss
+  assert.equal(await flexChip.evaluate(el => el.classList.contains("armed")), true);
+
+  // 3. Click lower half of gap: should also NOT dispatch POST /api/place, should show toast, and Flex remains armed
+  await smallGap.click({ position: { x: gapBox.width / 2, y: gapBox.height * 0.75 } });
+  assert.equal(requests.filter(r => r.path === "/api/place").length, 0);
+  assert.equal(await flexChip.evaluate(el => el.classList.contains("armed")), true);
+  await toast.waitFor({ state: "visible" });
+  assert.equal(await toast.textContent(), "Gym Session (3h) does not fit in this gap (1h)");
+
+  // 4. Test toast auto-dismiss after timeout (~3s)
+  await toast.waitFor({ state: "hidden", timeout: 4500 });
+  assert.equal(await toast.isVisible(), false);
+  assert.equal(await flexChip.evaluate(el => el.classList.contains("armed")), true);
+  assert.equal(requests.filter(r => r.path === "/api/place").length, 0);
+
+  assert.deepEqual(pageErrors, []);
+  await page.close();
+});

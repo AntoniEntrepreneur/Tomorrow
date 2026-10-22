@@ -204,6 +204,44 @@ import { autofill, checklistItemsPayload, checklistPayload, clockLabel, clockVal
       if (!el.hidden && el.textContent !== blockers.join(" ")) hideBlockers();
     }
 
+    const TOAST_TIMEOUT_MS = 3000;
+    let toastTimer = null;
+
+    function hideToast() {
+      if (toastTimer) {
+        clearTimeout(toastTimer);
+        toastTimer = null;
+      }
+      const el = document.getElementById("toast");
+      if (el) {
+        el.hidden = true;
+        el.textContent = "";
+      }
+    }
+
+    function getToastEl() {
+      let el = document.getElementById("toast");
+      if (!el) {
+        el = document.createElement("div");
+        el.id = "toast";
+        el.className = "toast";
+        el.setAttribute("role", "status");
+        el.setAttribute("aria-live", "polite");
+        el.hidden = true;
+        el.addEventListener("click", hideToast);
+        document.body.appendChild(el);
+      }
+      return el;
+    }
+
+    function showToast(message) {
+      hideToast();
+      const el = getToastEl();
+      el.textContent = message;
+      el.hidden = false;
+      toastTimer = setTimeout(hideToast, TOAST_TIMEOUT_MS);
+    }
+
     function setChromeEnabled() {
       if (!state.current) return;
       const blocked = sessionUndoBlocked();
@@ -221,7 +259,7 @@ import { autofill, checklistItemsPayload, checklistPayload, clockLabel, clockVal
           const armed = state.armedFlexId ? " armed" : "";
           const cta = state.armedFlexId ? "Place here" : "Place Flex";
           return '<button type="button" class="gap' + armed + '" data-kind="gap" data-start="' +
-            esc(row.start) + '" data-end="' + esc(row.end) + '" style="min-height:' +
+            esc(row.start) + '" data-end="' + esc(row.end) + '" data-duration="' + row.durationMin + '" style="min-height:' +
             heightPx(row.durationMin, total, 40) + 'px">' +
             '<span class="time-tag">' + esc(startLabel) + "</span>" +
             "<span>Gap · " + esc(fmtDur(row.durationMin)) + "</span>" +
@@ -878,7 +916,7 @@ import { autofill, checklistItemsPayload, checklistPayload, clockLabel, clockVal
           const armed = state.templateArmedFlex ? " armed" : "";
           const cta = state.templateArmedFlex ? "Place here" : "Place Flex";
           return '<button type="button" class="gap' + armed + '" data-template-gap="true" data-start="' +
-            esc(row.start) + '" data-end="' + esc(row.end) + '" style="min-height:' +
+            esc(row.start) + '" data-end="' + esc(row.end) + '" data-duration="' + row.durationMin + '" style="min-height:' +
             heightPx(row.durationMin, total, 40) + 'px">' +
             '<span class="time-tag">' + esc(startLabel) + "</span>" +
             "<span>Gap · " + esc(fmtDur(row.durationMin)) + "</span>" +
@@ -1169,11 +1207,20 @@ import { autofill, checklistItemsPayload, checklistPayload, clockLabel, clockVal
       const gap = event.target.closest("[data-kind='gap']");
       if (gap) {
         if (state.armedFlexId) {
+          const armedFlex = (state.current.flexes || []).find(item => item.id === state.armedFlexId);
+          const duration = Number(armedFlex ? (armedFlex.duration_minutes != null ? armedFlex.duration_minutes : armedFlex.duration) : 0);
+          const wakeClock = state.current.bounds.wake;
+          const gapDuration = gap.dataset.duration != null
+            ? Number(gap.dataset.duration)
+            : (toWakeMin(gap.dataset.end, wakeClock) - toWakeMin(gap.dataset.start, wakeClock));
+          if (duration > gapDuration) {
+            const flexName = armedFlex ? armedFlex.name : "Flex";
+            showToast(`${flexName} (${fmtDur(duration)}) does not fit in this gap (${fmtDur(gapDuration)})`);
+            return;
+          }
           const rect = gap.getBoundingClientRect();
           const isBottom = rect.height > 0 && (event.clientY - rect.top) >= (rect.height / 2);
           if (isBottom) {
-            const armedFlex = (state.current.flexes || []).find(item => item.id === state.armedFlexId);
-            const duration = Number(armedFlex ? (armedFlex.duration_minutes != null ? armedFlex.duration_minutes : armedFlex.duration) : 0);
             const targetMin = toMin(gap.dataset.end) - duration;
             const computedStart = toClock(targetMin);
             placeFlexAt(state.armedFlexId, computedStart);
@@ -1490,18 +1537,29 @@ import { autofill, checklistItemsPayload, checklistPayload, clockLabel, clockVal
         const gap = event.target.closest("[data-template-gap]");
         if (gap) {
           if (state.templateArmedFlex) {
+            const { source, index } = state.templateArmedFlex;
+            let duration = 0;
+            let flexName = "Flex";
+            if (source === "flex") {
+              const entry = state.templateDraft.flexes[index];
+              duration = Number(entry ? (entry.duration != null ? entry.duration : entry.duration_minutes) : 0);
+              flexName = entry ? (entry.name || (entry.activity ? ("Activity: " + entry.activity) : ("Flex " + (index + 1)))) : "Flex";
+            } else if (source === "daily") {
+              const entry = state.templateDraft.dailyActivities[index];
+              duration = Number(entry ? (entry.duration_minutes != null ? entry.duration_minutes : entry.duration) : 60);
+              flexName = entry ? entry.name : "Activity";
+            }
+            const wakeClock = state.templateDraft.bounds.wake;
+            const gapDuration = gap.dataset.duration != null
+              ? Number(gap.dataset.duration)
+              : (toWakeMin(gap.dataset.end, wakeClock) - toWakeMin(gap.dataset.start, wakeClock));
+            if (duration > gapDuration) {
+              showToast(`${flexName} (${fmtDur(duration)}) does not fit in this gap (${fmtDur(gapDuration)})`);
+              return;
+            }
             const rect = gap.getBoundingClientRect();
             const isBottom = rect.height > 0 && (event.clientY - rect.top) >= (rect.height / 2);
             if (isBottom) {
-              const { source, index } = state.templateArmedFlex;
-              let duration = 0;
-              if (source === "flex") {
-                const entry = state.templateDraft.flexes[index];
-                duration = Number(entry ? (entry.duration != null ? entry.duration : entry.duration_minutes) : 0);
-              } else if (source === "daily") {
-                const entry = state.templateDraft.dailyActivities[index];
-                duration = Number(entry ? (entry.duration_minutes != null ? entry.duration_minutes : entry.duration) : 60);
-              }
               const targetMin = toMin(gap.dataset.end) - duration;
               const computedStart = toClock(targetMin);
               placeTemplateArmedFlex(computedStart);
@@ -1866,5 +1924,10 @@ import { autofill, checklistItemsPayload, checklistPayload, clockLabel, clockVal
     document.getElementById("template-no").addEventListener("click", () => {
       mutate("/api/template", { action: "decline" });
     });
+
+    const toastEl = document.getElementById("toast");
+    if (toastEl) {
+      toastEl.addEventListener("click", hideToast);
+    }
 
     loadSession();
