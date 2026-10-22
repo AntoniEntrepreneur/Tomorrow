@@ -240,6 +240,43 @@ def test_construction_page_is_blank_canvas_with_domain_jargon(tmp_path: Path) ->
     assert '<script type="module" src="/static/session-page.js"></script>' in html
 
 
+def test_location_ingestion_updates_config_and_refreshes_weather(tmp_path: Path) -> None:
+    _write_defaults(tmp_path)
+    server, thread = _start_server(tmp_path)
+    try:
+        status, body = _http(
+            "POST",
+            "/api/location",
+            payload={"latitude": 52.23, "longitude": 21.01},
+        )
+    finally:
+        _stop_server(server, thread)
+
+    assert status == 200
+    payload = json.loads(body)
+    assert "weather" in payload
+    weather_file = tmp_path / "data" / "weather.toml"
+    assert weather_file.exists()
+    assert "52.23" in weather_file.read_text(encoding="utf-8")
+    assert "21.01" in weather_file.read_text(encoding="utf-8")
+
+
+def test_location_ingestion_rejects_invalid_coordinates(tmp_path: Path) -> None:
+    _write_defaults(tmp_path)
+    server, thread = _start_server(tmp_path)
+    try:
+        status, _ = _http(
+            "POST",
+            "/api/location",
+            payload={"latitude": "invalid"},
+        )
+    finally:
+        _stop_server(server, thread)
+
+    assert status == 400
+
+
+
 def test_session_json_omits_undo_stacks(tmp_path: Path) -> None:
     _write_defaults(tmp_path)
     server, thread = _start_server(tmp_path)
