@@ -57,6 +57,7 @@ test("Session interactions render wake-relative time, preserve checklist edits, 
   const page = await browser.newPage();
   const pageErrors = [];
   page.on("pageerror", error => pageErrors.push(error.message));
+  page.on("console", msg => console.log("PAGE LOG:", msg.text()));
   let current = sessionView();
   const requests = [];
   await page.route("**/api/**", async route => {
@@ -125,6 +126,7 @@ test("Day Template mode loads and saves through its HTTP endpoint", async () => 
   const page = await browser.newPage();
   const pageErrors = [];
   page.on("pageerror", error => pageErrors.push(error.message));
+  page.on("console", msg => console.log("PAGE LOG:", msg.text()));
   const requests = [];
   await page.route("**/api/template*", async route => {
     const request = route.request();
@@ -152,6 +154,7 @@ test("Day Template mode follows daily plan timeline conventions, displays daily 
   const page = await browser.newPage();
   const pageErrors = [];
   page.on("pageerror", error => pageErrors.push(error.message));
+  page.on("console", msg => console.log("PAGE LOG:", msg.text()));
   const requests = [];
   await page.route("**/api/template*", async route => {
     const request = route.request();
@@ -288,6 +291,7 @@ test("Promoting or changing activity shape only displays fields relevant to that
   const page = await browser.newPage();
   const pageErrors = [];
   page.on("pageerror", error => pageErrors.push(error.message));
+  page.on("console", msg => console.log("PAGE LOG:", msg.text()));
   const current = sessionView();
 
   await page.route("**/api/**", async route => {
@@ -391,6 +395,7 @@ test("Gap split-half placement dispatches place request at start or wake-relativ
   const page = await browser.newPage();
   const pageErrors = [];
   page.on("pageerror", error => pageErrors.push(error.message));
+  page.on("console", msg => console.log("PAGE LOG:", msg.text()));
   const requests = [];
   let current = {
     ...sessionView(),
@@ -465,6 +470,81 @@ test("Gap split-half placement dispatches place request at start or wake-relativ
   await morningGap.click({ position: { x: morningBox.width / 2, y: morningBox.height * 0.25 } });
   const req4 = await placeReq4;
   assert.deepEqual(req4.postDataJSON(), { id: "flex-fit", start: "07:00" });
+
+  assert.deepEqual(pageErrors, []);
+  await page.close();
+});
+
+test("Armed Gap hover indicators and dynamic CTA text toggle between start, end, and reset on mouseleave", async () => {
+  const page = await browser.newPage();
+  const pageErrors = [];
+  page.on("pageerror", error => pageErrors.push(error.message));
+  page.on("console", msg => console.log("PAGE LOG:", msg.text()));
+  let current = {
+    ...sessionView(),
+    bounds: { wake: "07:00", sleep: "02:00", sleep_is_next_day: true },
+    anchors: [
+      { id: "anchor-1", name: "Morning Standup", start: "09:00", duration_minutes: 60, checklist: null }
+    ],
+    flexes: [
+      { id: "flex-1", name: "Deep Work", duration_minutes: 60, start: null }
+    ]
+  };
+
+  await page.route("**/api/**", async route => {
+    const request = route.request();
+    const url = new URL(request.url());
+    if (request.method() === "GET" && url.pathname === "/api/session") {
+      await route.fulfill({ json: current });
+      return;
+    }
+    await route.fulfill({ json: current });
+  });
+
+  await page.goto(baseUrl);
+  await page.getByText("Morning Standup", { exact: true }).waitFor();
+
+  const morningGap = page.locator('[data-kind="gap"][data-start="07:00"]');
+  const morningCta = morningGap.locator(".cta");
+  await morningGap.waitFor();
+  const morningBox = await morningGap.boundingBox();
+
+  // 1. Unarmed state: hovering over upper or lower half does NOT apply hover-start/hover-end and retains "Place Flex"
+  assert.equal(await morningCta.textContent(), "Place Flex");
+  await morningGap.hover({ position: { x: morningBox.width / 2, y: morningBox.height * 0.25 } });
+  assert.equal(await morningGap.evaluate(el => el.classList.contains("hover-start")), false);
+  assert.equal(await morningGap.evaluate(el => el.classList.contains("hover-end")), false);
+  assert.equal(await morningCta.textContent(), "Place Flex");
+
+  await morningGap.hover({ position: { x: morningBox.width / 2, y: morningBox.height * 0.75 } });
+  assert.equal(await morningGap.evaluate(el => el.classList.contains("hover-start")), false);
+  assert.equal(await morningGap.evaluate(el => el.classList.contains("hover-end")), false);
+  assert.equal(await morningCta.textContent(), "Place Flex");
+
+  await page.mouse.move(0, 0);
+
+  // 2. Arm flex-1
+  await page.locator('[data-arm="flex-1"] .name').click();
+  assert.equal(await page.locator('[data-arm="flex-1"]').evaluate(el => el.classList.contains("armed")), true);
+  assert.equal(await morningCta.textContent(), "Place here");
+
+  // 3. Hover upper half (< 50% height) with armed flex -> hover-start class and "Place at start" CTA
+  await morningGap.hover({ position: { x: morningBox.width / 2, y: morningBox.height * 0.25 } });
+  assert.equal(await morningGap.evaluate(el => el.classList.contains("hover-start")), true);
+  assert.equal(await morningGap.evaluate(el => el.classList.contains("hover-end")), false);
+  assert.equal(await morningCta.textContent(), "Place at start");
+
+  // 4. Hover lower half (>= 50% height) with armed flex -> hover-end class and "Place at end" CTA
+  await morningGap.hover({ position: { x: morningBox.width / 2, y: morningBox.height * 0.75 } });
+  assert.equal(await morningGap.evaluate(el => el.classList.contains("hover-start")), false);
+  assert.equal(await morningGap.evaluate(el => el.classList.contains("hover-end")), true);
+  assert.equal(await morningCta.textContent(), "Place at end");
+
+  // 5. Mouseleave removes hover styling and reverts CTA to "Place here"
+  await page.mouse.move(0, 0);
+  assert.equal(await morningGap.evaluate(el => el.classList.contains("hover-start")), false);
+  assert.equal(await morningGap.evaluate(el => el.classList.contains("hover-end")), false);
+  assert.equal(await morningCta.textContent(), "Place here");
 
   assert.deepEqual(pageErrors, []);
   await page.close();
