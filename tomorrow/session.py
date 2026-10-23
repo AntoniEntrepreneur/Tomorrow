@@ -63,6 +63,7 @@ from tomorrow.plan import (
 )
 from tomorrow.weather import (
     format_weather_one_liner,
+    get_ssl_context,
     load_weather_name,
     try_fetch_weather,
     try_fetch_weather_forecast,
@@ -77,6 +78,9 @@ _UNSET = object()
 
 
 def _default_opener(request: Request) -> object:
+    ctx = get_ssl_context()
+    if ctx is not None:
+        return urlopen(request, timeout=_WEATHER_TIMEOUT_SECONDS, context=ctx)
     return urlopen(request, timeout=_WEATHER_TIMEOUT_SECONDS)
 
 

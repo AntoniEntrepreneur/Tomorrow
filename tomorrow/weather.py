@@ -7,6 +7,7 @@ from typing import Callable, TYPE_CHECKING
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 import json
+import ssl
 import tomllib
 
 if TYPE_CHECKING:
@@ -22,6 +23,53 @@ class WeatherLocation:
 _OPEN_METEO_FORECAST = "https://api.open-meteo.com/v1/forecast"
 WEATHER_CONFIG_FILENAME = "weather.toml"
 LOCAL_WEATHER_CONFIG_FILENAME = "weather.local.toml"
+
+
+def get_ssl_context() -> ssl.SSLContext | None:
+    try:
+        import certifi
+
+        return ssl.create_default_context(cafile=certifi.where())
+    except Exception:
+        pass
+    for cafile in (
+        "/etc/ssl/cert.pem",
+        "/etc/pki/tls/certs/ca-bundle.crt",
+        "/etc/ssl/certs/ca-certificates.crt",
+    ):
+        if Path(cafile).is_file():
+            try:
+                return ssl.create_default_context(cafile=cafile)
+            except Exception:
+                pass
+    try:
+        return ssl.create_default_context()
+    except Exception:
+        return None
+
+
+def default_weather_opener(request: Request) -> object:
+    ctx = get_ssl_context()
+    if ctx is not None:
+        return urlopen(request, timeout=5, context=ctx)
+    return urlopen(request, timeout=5)
+
+
+def _open_request(
+    request: Request,
+    opener: Callable[[Request], object] = urlopen,
+    *,
+    timeout: float | None = None,
+) -> object:
+    if opener is urlopen or opener is default_weather_opener:
+        ctx = get_ssl_context()
+        kwargs: dict[str, object] = {}
+        if timeout is not None:
+            kwargs["timeout"] = timeout
+        if ctx is not None:
+            kwargs["context"] = ctx
+        return urlopen(request, **kwargs)
+    return opener(request)
 
 
 def _load_weather_toml(data_dir: Path) -> dict | None:
@@ -92,7 +140,7 @@ def reverse_geocode(
     url = f"https://nominatim.openstreetmap.org/reverse?lat={latitude}&lon={longitude}&format=json"
     try:
         request = Request(url, headers={"User-Agent": "Tomorrow/0.1"})
-        with opener(request) as response:
+        with _open_request(request, opener) as response:
             data = json.load(response)
         if not isinstance(data, dict):
             return None
@@ -260,7 +308,7 @@ def fetch_weather_forecast(
     try:
         url = _forecast_url(location, plan_date, end_date)
         request = Request(url, headers={"User-Agent": "Tomorrow/0.1"})
-        with opener(request) as response:
+        with _open_request(request, opener) as response:
             payload = json.load(response)
         daily = payload["daily"]
         low_c = round(float(daily["temperature_2m_min"][0]))
