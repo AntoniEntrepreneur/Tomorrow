@@ -1,13 +1,15 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
+import errno
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Callable
 from urllib.parse import parse_qs, urlparse
-from urllib.request import Request
+from urllib.request import Request, urlopen
 import json
 import threading
+import webbrowser
 
 from tomorrow.library import (
     delete_activity_template,
@@ -23,10 +25,6 @@ from tomorrow.library import (
     suggest_activity,
 )
 from tomorrow.session import (
-    SESSION_HOST,
-    SESSION_PORT,
-    _default_opener,
-    _UNSET,
     add_anchor,
     add_draft,
     add_flex,
@@ -39,17 +37,15 @@ from tomorrow.session import (
     drop_flex,
     drop_todo,
     edit_activity,
-    edit_anchor,
     edit_bounds,
     edit_draft,
-    edit_flex,
-    edit_todo,
     insert_activity_template,
     place_flex,
     unplace_flex,
     promote_checklist,
     promote_draft,
     redo_session,
+    refresh_icloud_items,
     reset_session,
     save_template_mode,
     session_view,
@@ -58,22 +54,36 @@ from tomorrow.session import (
     undo_session,
 )
 from tomorrow.domain import PlanBlockedError
-from tomorrow.plan import ForeignPlanFileError
-from tomorrow.weather import reverse_geocode, save_weather_location
+from tomorrow.plan import ForeignPlanFileError, format_plan_date
+from tomorrow.weather import get_ssl_context, reverse_geocode, save_weather_location
+
+SESSION_HOST = "127.0.0.1"
+SESSION_PORT = 8765
+SESSION_URL = f"http://{SESSION_HOST}:{SESSION_PORT}"
+LIBRARY_URL = f"{SESSION_URL}/library"
+_WEATHER_TIMEOUT_SECONDS = 5
+
+
+def default_opener(request: Request) -> object:
+    ctx = get_ssl_context()
+    if ctx is not None:
+        return urlopen(request, timeout=_WEATHER_TIMEOUT_SECONDS, context=ctx)
+    return urlopen(request, timeout=_WEATHER_TIMEOUT_SECONDS)
+
+
+_default_opener = default_opener
 
 _PAGE_PATH = Path(__file__).parent / "static" / "session.html"
 _LIBRARY_PAGE_PATH = Path(__file__).parent / "static" / "library.html"
 
-def _optional_checklist(payload: dict) -> str | None | object:
-    if "checklist" not in payload:
-        return _UNSET
-    return payload.get("checklist")
 
-
-def _optional_checklist_items(payload: dict) -> object:
-    if "checklist_items" not in payload:
-        return _UNSET
-    return payload.get("checklist_items")
+def _checklist_kwargs(payload: dict) -> dict[str, object]:
+    kwargs: dict[str, object] = {}
+    if "checklist" in payload:
+        kwargs["checklist"] = payload.get("checklist")
+    if "checklist_items" in payload:
+        kwargs["checklist_items"] = payload.get("checklist_items")
+    return kwargs
 
 
 _LIBRARY_VIEW_SECTIONS: dict[str, Callable[[Path], list[dict]]] = {
@@ -259,8 +269,7 @@ class SessionHandler(BaseHTTPRequestHandler):
                     self.server.repo_root,
                     name=payload["name"],
                     duration_minutes=int(payload["duration_minutes"]),
-                    checklist=_optional_checklist(payload),
-                    checklist_items=_optional_checklist_items(payload),
+                    **_checklist_kwargs(payload),
                     **self._view_args(),
                 )
                 self._send_json(200, view)
@@ -282,8 +291,7 @@ class SessionHandler(BaseHTTPRequestHandler):
                 name=payload["name"],
                 start=payload["start"],
                 duration_minutes=int(payload["duration_minutes"]),
-                checklist=_optional_checklist(payload),
-                checklist_items=_optional_checklist_items(payload),
+                **_checklist_kwargs(payload),
                 **self._view_args(),
             )
             self._send_json(200, view)
@@ -334,10 +342,9 @@ class SessionHandler(BaseHTTPRequestHandler):
                         name=payload.get("name"),
                         start=payload.get("start"),
                         duration_minutes=int(duration) if duration is not None and str(duration).strip() != "" else None,
-                        checklist=_optional_checklist(payload),
-                        checklist_items=_optional_checklist_items(payload),
                         note=payload.get("note"),
                         remove=bool(payload.get("remove")),
+                        **_checklist_kwargs(payload),
                         **self._view_args(),
                     )
                 except KeyError as exc:
@@ -436,6 +443,9 @@ class SessionHandler(BaseHTTPRequestHandler):
         if path == "/api/promote":
             payload = self._read_json()
             duration = payload.get("duration_minutes")
+            extra = {}
+            if "checklist" in payload:
+                extra["checklist"] = payload.get("checklist")
             try:
                 view = promote_draft(
                     self.server.repo_root,
@@ -444,7 +454,7 @@ class SessionHandler(BaseHTTPRequestHandler):
                     duration_minutes=int(duration) if duration is not None else None,
                     start=payload.get("start") or None,
                     name=payload.get("name"),
-                    checklist=_optional_checklist(payload),
+                    **extra,
                     **self._view_args(),
                 )
             except KeyError as exc:
@@ -598,7 +608,7 @@ def bind_session_server(
     *,
     output_dir: Path,
     now: datetime | None = None,
-    opener: Callable[[Request], object] = _default_opener,
+    opener: Callable[[Request], object] = default_opener,
     host: str = SESSION_HOST,
     port: int = SESSION_PORT,
 ) -> SessionHTTPServer:
@@ -609,3 +619,67 @@ def bind_session_server(
     server.opener = opener
     server.submitted_path = None
     return server
+
+
+def run_session(
+    repo_root: Path,
+    *,
+    output_dir: Path,
+    now: datetime | None = None,
+    opener: Callable[[Request], object] = default_opener,
+) -> None:
+    try:
+        server = bind_session_server(repo_root, output_dir=output_dir, now=now, opener=opener)
+    except OSError as exc:
+        if exc.errno != errno.EADDRINUSE:
+            raise
+        print(f"Port {SESSION_PORT} is already in use.")
+        return
+    document = refresh_icloud_items(repo_root, output_dir=output_dir, now=now)
+    plan_date = date.fromisoformat(document["plan_date"])
+    print(f"Plan date: {format_plan_date(plan_date)}")
+    print(SESSION_URL)
+    print("Submit in the browser, or Ctrl+C to leave.")
+    webbrowser.open(SESSION_URL)
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        return
+    finally:
+        server.server_close()
+    if server.submitted_path is not None:
+        webbrowser.open(server.submitted_path.as_uri())
+        print(server.submitted_path)
+
+
+def run_library(
+    repo_root: Path,
+    *,
+    output_dir: Path,
+    now: datetime | None = None,
+    opener: Callable[[Request], object] = default_opener,
+) -> None:
+    """Open the library page without touching the Session (no refresh, no import).
+
+    If a Session server is already running on the usual port, its library
+    page is opened instead — this deliberately differs from `run_session`'s
+    "Port in use" message, since browsing the library never needs a fresh
+    server.
+    """
+
+    try:
+        server = bind_session_server(repo_root, output_dir=output_dir, now=now, opener=opener)
+    except OSError as exc:
+        if exc.errno != errno.EADDRINUSE:
+            raise
+        webbrowser.open(LIBRARY_URL)
+        return
+    print(LIBRARY_URL)
+    print("Ctrl+C to leave.")
+    webbrowser.open(LIBRARY_URL)
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        return
+    finally:
+        server.server_close()

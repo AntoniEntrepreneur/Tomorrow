@@ -14,12 +14,14 @@ from tomorrow.defaults import (
 )
 from tomorrow.eventkit_adapter import list_available_calendars
 from tomorrow.plan import default_plan_date, find_plan_to_open
-from tomorrow.session import (
-    _default_opener,
+from tomorrow.session import session_exists_for_plan_date
+from tomorrow.session_http import (
+    default_opener,
     run_library,
     run_session,
-    session_exists_for_plan_date,
 )
+
+_default_opener = default_opener
 
 
 def discover_repo_root(*starts: Path) -> Path:
@@ -153,7 +155,7 @@ def main(
     argv: Sequence[str] | None = None,
     *,
     now: datetime | None = None,
-    opener: Callable[[Request], object] = _default_opener,
+    opener: Callable[[Request], object] = default_opener,
 ) -> None:
     parser, commands = _build_parser()
     args = parser.parse_args(argv)
