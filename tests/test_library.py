@@ -3,18 +3,16 @@ from pathlib import Path
 
 import pytest
 
-from tomorrow.activity_templates import load_activity_template_library
-from tomorrow.checklists import load_checklist_library
-from tomorrow.day_templates import (
-    default_day_template_path,
-    load_day_template,
-    load_day_template_entries,
-    named_day_template_path,
-)
 from tomorrow.library import (
+    default_day_template_path,
     delete_activity_template,
     delete_checklist,
     delete_day_template,
+    load_activity_template_library,
+    load_checklist_library,
+    load_day_template,
+    load_day_template_entries,
+    named_day_template_path,
     save_activity_template,
     save_checklist,
     save_day_template,
@@ -518,7 +516,7 @@ def test_save_day_template_rename_keeps_the_id(tmp_path: Path) -> None:
     save_day_template(tmp_path, id=template_id, name="Tuesday (travel)")
 
     path = named_day_template_path(tmp_path / "data", "tuesday")
-    from tomorrow.day_templates import load_day_template_name
+    from tomorrow.library import load_day_template_name
 
     assert load_day_template_name(path) == "Tuesday (travel)"
 
@@ -618,3 +616,76 @@ def test_save_day_template_rejects_end_equal_to_start_on_an_anchor(tmp_path: Pat
             name="Late night",
             anchors=[{"name": "Wind down", "start": "23:00", "end": "23:00"}],
         )
+
+
+def test_library_seeding_and_listing_public_interface(tmp_path: Path) -> None:
+    from tomorrow.library import (
+        default_day_template_name,
+        list_activity_templates,
+        list_checklists,
+        list_day_templates,
+        seed_day_template,
+        seed_default_day_template,
+        suggest_activity,
+    )
+
+    save_checklist(tmp_path, name="Gym Bag", items=["Towel", "Water bottle"])
+    save_activity_template(
+        tmp_path,
+        name="Gym Routine",
+        duration_minutes=60,
+        checklist="gym-bag",
+    )
+    save_day_template(
+        tmp_path,
+        name="Tuesday Routine",
+        weekday="tuesday",
+        wake="07:00",
+        sleep="23:00",
+        flexes=[{"activity": "gym-routine"}],
+    )
+
+    # Test listing methods
+    checklists = list_checklists(tmp_path)
+    assert len(checklists) == 1
+    assert checklists[0]["id"] == "gym-bag"
+    assert checklists[0]["items"] == ["Towel", "Water bottle"]
+
+    activities = list_activity_templates(tmp_path)
+    assert len(activities) == 1
+    assert activities[0]["id"] == "gym-routine"
+    assert activities[0]["duration_minutes"] == 60
+    assert activities[0]["checklist"] == "gym-bag"
+
+    day_templates = list_day_templates(tmp_path)
+    assert len(day_templates) == 1
+    assert day_templates[0]["id"] == "tuesday-routine"
+    assert day_templates[0]["name"] == "Tuesday Routine"
+    assert day_templates[0]["weekday"] == "tuesday"
+
+    # Test seeding methods
+    target_date = date(2026, 10, 27)  # Tuesday
+    assert default_day_template_name(tmp_path, target_date) == "Tuesday Routine"
+
+    seed_def = seed_default_day_template(tmp_path, target_date)
+    assert seed_def is not None
+    assert seed_def.wake == "07:00"
+    assert seed_def.sleep == "23:00"
+    assert len(seed_def.flexes) == 1
+    assert seed_def.flexes[0].name == "Gym Routine"
+    assert seed_def.flexes[0].checklist == "gym-bag"
+
+    seed_named = seed_day_template(tmp_path, "tuesday-routine")
+    assert seed_named == seed_def
+
+    # Test suggestion
+    suggestion = suggest_activity(tmp_path, "Gym Routine")
+    assert suggestion is not None
+    assert suggestion["kind"] == "activity"
+    assert suggestion["activity_id"] == "gym-routine"
+
+    suggestion_cl = suggest_activity(tmp_path, "Gym Bag")
+    assert suggestion_cl is not None
+    assert suggestion_cl["kind"] == "checklist"
+    assert suggestion_cl["checklist_id"] == "gym-bag"
+

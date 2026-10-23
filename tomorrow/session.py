@@ -10,11 +10,6 @@ import json
 import uuid
 import webbrowser
 
-from tomorrow.activity_templates import (
-    load_activity_template_library,
-    suggest_activity_template,
-)
-from tomorrow.checklists import load_checklist_library, suggest_checklist
 from tomorrow.defaults import DayBounds, load_defaults
 from tomorrow.domain import (
     Anchor,
@@ -33,23 +28,38 @@ from tomorrow.domain import (
     minutes_since_wake,
     parse_clock,
 )
-from tomorrow.day_templates import (
+from tomorrow.library import (
+    ActivityTemplate,
+    Checklist,
+    TemplateSeed,
+    _slugify,
+    activity_templates_dir,
+    checklists_dir,
+    day_template_order,
+    day_template_path,
+    default_day_template_name,
     default_day_template_path,
+    delete_activity_template,
+    delete_checklist,
+    delete_day_template,
+    list_activity_templates,
+    list_checklists,
+    list_day_templates,
+    load_activity_template_library,
+    load_checklist_library,
     load_day_template,
     load_day_template_entries,
     load_day_template_name,
     named_day_template_path,
-)
-from tomorrow.library import (
-    _slugify,
-    day_template_order,
-    delete_activity_template,
-    delete_checklist,
-    delete_day_template,
+    reorder_day_templates,
     save_activity_template,
     save_checklist,
     save_day_template,
-    reorder_day_templates,
+    seed_day_template,
+    seed_default_day_template,
+    suggest_activity as _library_suggest_activity,
+    suggest_activity_template,
+    suggest_checklist,
 )
 from tomorrow.icloud import try_import_icloud_items
 from tomorrow.name_times import NameTimeResult, parse_name_time
@@ -553,32 +563,8 @@ def insert_activity_template(
 def suggest_activity(
     repo_root: Path, item_name: str
 ) -> dict | None:
-    """Suggest a bundle (start-or-duration plus Checklist) for a typed name.
-
-    Checks the Activity Template library first; an Activity Template match
-    takes precedence over the older bare-Checklist-name-match suggestion.
-    Falls back to `suggest_checklist` when no Activity Template matches, so
-    Checklist-only matching keeps working.
-    """
-
-    data_dir = repo_root / "data"
-    activity_library = load_activity_template_library(data_dir)
-    activity_id = suggest_activity_template(item_name, activity_library)
-    if activity_id is not None:
-        activity = activity_library[activity_id]
-        return {
-            "kind": "activity",
-            "activity_id": activity_id,
-            "name": activity.name,
-            "start": activity.start.strftime("%H:%M") if activity.start else None,
-            "duration_minutes": int(activity.duration.total_seconds() // 60),
-            "checklist": activity.checklist,
-        }
-
-    checklist_id = suggest_checklist(item_name, load_checklist_library(data_dir))
-    if checklist_id is not None:
-        return {"kind": "checklist", "checklist_id": checklist_id}
-    return None
+    """Suggest a bundle (start-or-duration plus Checklist) for a typed name."""
+    return _library_suggest_activity(repo_root, item_name)
 
 
 def _item_by_id(items: list, item_id: str) -> dict:
@@ -2083,45 +2069,9 @@ def submit_session(
     )
 
 
-def _list_checklists(data_dir: Path) -> list[dict]:
-    return [
-        {"id": checklist_id, "name": checklist.name, "items": list(checklist.items)}
-        for checklist_id, checklist in load_checklist_library(data_dir).items()
-    ]
-
-
-def _list_activity_templates(data_dir: Path) -> list[dict]:
-    return [
-        {
-            "id": activity_id,
-            "name": activity.name,
-            "is_anchor_shaped": activity.start is not None,
-            "daily": activity.daily,
-            "start": activity.start.strftime("%H:%M") if activity.start is not None else None,
-            "end": activity.end,
-            "duration_minutes": (
-                None if activity.end is not None else int(activity.duration.total_seconds() // 60)
-            ),
-            "checklist": activity.checklist,
-        }
-        for activity_id, activity in load_activity_template_library(data_dir).items()
-    ]
-
-
-def _list_day_templates(data_dir: Path) -> list[dict]:
-    templates_dir = data_dir / "templates"
-    paths = [
-        templates_dir / f"{template_id}.toml"
-        for template_id in day_template_order(templates_dir)
-    ]
-    return [
-        {
-            "id": path.stem,
-            "name": load_day_template_name(path),
-            **load_day_template_entries(path),
-        }
-        for path in paths
-    ]
+_list_checklists = list_checklists
+_list_activity_templates = list_activity_templates
+_list_day_templates = list_day_templates
 
 
 

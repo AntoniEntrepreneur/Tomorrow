@@ -13,19 +13,20 @@ from tomorrow.library import (
     delete_activity_template,
     delete_checklist,
     delete_day_template,
+    list_activity_templates,
+    list_checklists,
+    list_day_templates,
     reorder_day_templates,
     save_activity_template,
     save_checklist,
     save_day_template,
+    suggest_activity,
 )
 from tomorrow.session import (
     SESSION_HOST,
     SESSION_PORT,
     _default_opener,
     _UNSET,
-    _list_activity_templates,
-    _list_checklists,
-    _list_day_templates,
     add_anchor,
     add_draft,
     add_flex,
@@ -53,7 +54,6 @@ from tomorrow.session import (
     save_template_mode,
     session_view,
     submit_session,
-    suggest_activity,
     template_mode_view,
     undo_session,
 )
@@ -77,9 +77,9 @@ def _optional_checklist_items(payload: dict) -> object:
 
 
 _LIBRARY_VIEW_SECTIONS: dict[str, Callable[[Path], list[dict]]] = {
-    "checklists": _list_checklists,
-    "activity_templates": _list_activity_templates,
-    "day_templates": _list_day_templates,
+    "checklists": list_checklists,
+    "activity_templates": list_activity_templates,
+    "day_templates": list_day_templates,
 }
 
 
