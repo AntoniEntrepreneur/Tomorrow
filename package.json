@@ -9,6 +9,7 @@
     "test": "tests"
   },
   "scripts": {
+    "test": "npm run test:browser",
     "test:browser": "node --test tests/browser/*.test.cjs"
   },
   "keywords": [],

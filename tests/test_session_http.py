@@ -438,3 +438,28 @@ def test_unplace_route_and_undo_redo_over_http(tmp_path: Path) -> None:
     finally:
         _stop_server(server, thread)
 
+
+def test_location_endpoint_persists_to_untracked_local_weather(tmp_path: Path) -> None:
+    _write_defaults(tmp_path)
+    server, thread = _start_server(tmp_path)
+    try:
+        status, body = _http(
+            server,
+            "POST",
+            "/api/location",
+            payload={"latitude": 52.23, "longitude": 21.01},
+        )
+        assert status == 200
+        assert isinstance(body, dict)
+        assert "weather" in body
+
+        local_file = tmp_path / "data" / "weather.local.toml"
+        default_file = tmp_path / "data" / "weather.toml"
+        assert local_file.exists()
+        assert not default_file.exists()
+        content = local_file.read_text(encoding="utf-8")
+        assert "52.23" in content
+        assert "21.01" in content
+    finally:
+        _stop_server(server, thread)
+

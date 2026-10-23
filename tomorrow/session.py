@@ -1523,143 +1523,209 @@ def edit_bounds(
         final_sleep = parse_clock(sleep or current["bounds"]["sleep"])
         day_length = minutes_since_wake(final_sleep, wake=final_wake)
 
-        # Work on a copy until every scheduled item has a valid repair.  This
-        # keeps an edit atomic when an item is longer than the final day.
-        repaired_anchors = copy.deepcopy(current["anchors"])
-        repaired_flexes = copy.deepcopy(current["flexes"])
-        current_wake = parse_clock(current["bounds"]["wake"])
-        final_wraps_midnight = (
-            minutes_since_midnight(final_sleep)
-            <= minutes_since_midnight(final_wake)
-        )
-        scheduled = [
-            {"kind": "Anchor", "item": item} for item in repaired_anchors
-        ] + [
-            {"kind": "Flex", "item": item}
-            for item in repaired_flexes
-            if item.get("start")
-        ]
-
         if day_length == 0:
             # Keep the existing live zero-length-day blocker behavior.
             current["bounds"]["wake"] = wake or current["bounds"]["wake"]
             current["bounds"]["sleep"] = sleep or current["bounds"]["sleep"]
             return
 
-        def clock_at(offset: int) -> str:
-            value = datetime.combine(date(2000, 1, 1), final_wake) + timedelta(
-                minutes=offset
-            )
-            return value.strftime("%H:%M")
-
-        for entry in scheduled:
-            item = entry["item"]
-            start = parse_clock(item["start"])
-            # Keep every activity in the same wake-relative coordinate system,
-            # including activities that were already outside the old bounds.
-            # A pre-wake clock value is negative only for a non-wrapping day;
-            # on an overnight day it is the following morning.
-            if final_wraps_midnight:
-                entry["offset"] = minutes_since_wake(start, wake=final_wake)
-            else:
-                entry["offset"] = (
-                    minutes_since_midnight(start)
-                    - minutes_since_midnight(final_wake)
-                )
-                if (
-                    final_wake > current_wake
-                    and current_wake < start < final_wake
-                ):
-                    entry["offset"] = (
-                        minutes_since_midnight(start)
-                        - minutes_since_midnight(current_wake)
-                    )
-            entry["duration"] = int(item["duration_minutes"])
-
-            if (
-                entry["offset"] < 0
-                and entry["offset"] + entry["duration"] > day_length
-            ):
+        for anchor in current["anchors"]:
+            if anchor["duration_minutes"] > day_length:
                 raise ValueError(
-                    f"{entry['kind']} '{item['name']}' crosses both final day bounds "
+                    f"Anchor '{anchor['name']}' crosses both final day bounds "
+                    "and cannot be repaired without changing its duration."
+                )
+        for flex in current["flexes"]:
+            if flex.get("start") and flex["duration_minutes"] > day_length:
+                raise ValueError(
+                    f"Flex '{flex['name']}' crosses both final day bounds "
                     "and cannot be repaired without changing its duration."
                 )
 
-        def overlaps(
-            first: dict, first_shift: int, second: dict, second_shift: int
-        ) -> bool:
-            first_start = first["offset"] + first_shift
-            second_start = second["offset"] + second_shift
-            return (
-                first_start < second_start + second["duration"]
-                and second_start < first_start + first["duration"]
-            )
+        repaired_anchors = copy.deepcopy(current["anchors"])
+        repaired_flexes = copy.deepcopy(current["flexes"])
+        old_wake = parse_clock(current["bounds"]["wake"])
+        old_sleep = parse_clock(current["bounds"]["sleep"])
 
-        def repair_groups(
-            seed_indices: list[int], *, side: str
-        ) -> list[tuple[set[int], int]]:
-            groups: list[tuple[set[int], int]] = []
-            remaining = set(seed_indices)
-            while remaining:
-                group = {remaining.pop()}
-                while True:
-                    shift = (
-                        -min(scheduled[index]["offset"] for index in group)
-                        if side == "wake"
-                        else day_length
-                        - max(
-                            scheduled[index]["offset"] + scheduled[index]["duration"]
-                            for index in group
-                        )
-                    )
-                    connected = {
-                        index
-                        for index in range(len(scheduled))
-                        if index not in group
-                        and any(
-                            overlaps(scheduled[group_index], shift, scheduled[index], 0)
-                            for group_index in group
-                        )
-                    }
-                    if not connected:
-                        break
-                    group.update(connected)
-                    remaining.difference_update(connected)
-                groups.append((group, shift))
-            return groups
+        def to_mins(clock_str: str) -> int:
+            return minutes_since_midnight(parse_clock(clock_str))
 
-        wake_seeds = [
-            index
-            for index, entry in enumerate(scheduled)
-            if entry["offset"] < 0
-        ]
-        sleep_seeds = [
-            index
-            for index, entry in enumerate(scheduled)
-            if entry["offset"] + entry["duration"] > day_length
-        ]
-        if set(wake_seeds) & set(sleep_seeds):
-            entry = scheduled[next(iter(set(wake_seeds) & set(sleep_seeds)))]
-            raise ValueError(
-                f"{entry['kind']} '{entry['item']['name']}' crosses both final day bounds "
-                "and cannot be repaired without changing its duration."
-            )
+        def fmt_clock(mins: int) -> str:
+            mins = mins % 1440
+            h = mins // 60
+            m = mins % 60
+            return f"{h:02d}:{m:02d}"
 
-        groups = repair_groups(wake_seeds, side="wake") + repair_groups(
-            sleep_seeds, side="sleep"
-        )
-        shifts = {index: 0 for index in range(len(scheduled))}
-        for group, shift in groups:
-            for index in group:
-                shifts[index] = shift
-        for index, entry in enumerate(scheduled):
-            final_offset = entry["offset"] + shifts[index]
-            if final_offset < 0 or final_offset + entry["duration"] > day_length:
-                raise ValueError(
-                    f"{entry['kind']} '{entry['item']['name']}' cannot fit within "
-                    "the final day bounds without changing its duration."
-                )
-            entry["item"]["start"] = clock_at(final_offset)
+        def anchor_collides_with_another(idx: int) -> bool:
+            a = repaired_anchors[idx]
+            a_start = to_mins(a["start"])
+            a_end = a_start + a["duration_minutes"]
+            for o_idx, o in enumerate(repaired_anchors):
+                if o_idx == idx:
+                    continue
+                o_start = to_mins(o["start"])
+                o_end = o_start + o["duration_minutes"]
+                if a_start < o_end and o_start < a_end:
+                    return True
+            return False
+
+        def demote_anchor_to_flex(idx: int) -> dict:
+            anchor = repaired_anchors.pop(idx)
+            flex = {
+                "id": anchor.get("id") or uuid.uuid4().hex,
+                "name": anchor["name"],
+                "duration_minutes": anchor["duration_minutes"],
+                "start": None,
+                "checklist": anchor.get("checklist"),
+                "source": anchor.get("source"),
+                "activity_template_id": anchor.get("activity_template_id"),
+            }
+            repaired_flexes.append(flex)
+            return flex
+
+        if len(repaired_anchors) > 1:
+            earliest_idx = min(range(len(repaired_anchors)), key=lambda i: to_mins(repaired_anchors[i]["start"]))
+            latest_idx = min(range(len(repaired_anchors)), key=lambda i: -(to_mins(repaired_anchors[i]["start"]) + repaired_anchors[i]["duration_minutes"]))
+        elif len(repaired_anchors) == 1:
+            a = repaired_anchors[0]
+            a_start = to_mins(a["start"])
+            a_end = a_start + a["duration_minutes"]
+            final_w = parse_clock(wake or current["bounds"]["wake"])
+            w_diff = minutes_since_wake(final_w, wake=old_wake)
+            a_wake_offset = minutes_since_wake(parse_clock(a["start"]), wake=old_wake)
+            is_wake_anchored = (wake is not None and (a_wake_offset == 0 or (w_diff > 0 and a_wake_offset < w_diff)))
+            is_sleep_anchored = (sleep is not None and a_end == minutes_since_midnight(old_sleep))
+            if is_wake_anchored:
+                earliest_idx = 0
+                latest_idx = None
+            elif is_sleep_anchored:
+                earliest_idx = None
+                latest_idx = 0
+            else:
+                earliest_idx = None
+                latest_idx = None
+        else:
+            earliest_idx = None
+            latest_idx = None
+
+        wake_shifted_anchor = None
+        wake_delta_applied = 0
+        if wake is not None and earliest_idx is not None:
+            anchor = repaired_anchors[earliest_idx]
+            orig_start = to_mins(anchor["start"])
+            new_wake = parse_clock(wake)
+            delta = to_mins(wake) - minutes_since_midnight(old_wake)
+            if delta != 0:
+                target_start = orig_start + delta
+                final_wake_m = minutes_since_midnight(new_wake)
+                if target_start < final_wake_m:
+                    target_start = final_wake_m
+                total_delta = target_start - orig_start
+                anchor["start"] = fmt_clock(target_start)
+                if anchor_collides_with_another(earliest_idx):
+                    demote_anchor_to_flex(earliest_idx)
+                    if latest_idx is not None and latest_idx > earliest_idx:
+                        latest_idx -= 1
+                    earliest_idx = None
+                else:
+                    wake_shifted_anchor = anchor
+                    wake_delta_applied = total_delta
+
+        sleep_shifted_anchor = None
+        sleep_delta_applied = 0
+        if sleep is not None and latest_idx is not None:
+            anchor = repaired_anchors[latest_idx]
+            orig_start = to_mins(anchor["start"])
+            orig_end = orig_start + anchor["duration_minutes"]
+            new_sleep = parse_clock(sleep)
+            delta = to_mins(sleep) - minutes_since_midnight(old_sleep)
+            if delta != 0:
+                target_start = orig_start + delta
+                target_end = target_start + anchor["duration_minutes"]
+                final_sleep_m = minutes_since_midnight(new_sleep)
+                if target_end > final_sleep_m:
+                    target_start = final_sleep_m - anchor["duration_minutes"]
+                total_delta = target_start - orig_start
+                anchor["start"] = fmt_clock(target_start)
+                if anchor_collides_with_another(latest_idx):
+                    demote_anchor_to_flex(latest_idx)
+                    latest_idx = None
+                else:
+                    sleep_shifted_anchor = anchor
+                    sleep_delta_applied = total_delta
+
+        if wake_shifted_anchor is not None and wake_delta_applied != 0:
+            anchor_start = to_mins(wake_shifted_anchor["start"])
+            anchor_end = anchor_start + wake_shifted_anchor["duration_minutes"]
+            placed_flexes = [f for f in repaired_flexes if f.get("start") is not None]
+            group = set()
+            for f in placed_flexes:
+                f_start = to_mins(f["start"])
+                f_end = f_start + f["duration_minutes"]
+                if (f_start < anchor_end and anchor_start < f_end) or (f_end == anchor_start - wake_delta_applied and f_start < minutes_since_midnight(final_wake)):
+                    group.add(f["id"])
+            while True:
+                added = False
+                for f in placed_flexes:
+                    if f["id"] in group:
+                        continue
+                    f_start = to_mins(f["start"])
+                    f_end = f_start + f["duration_minutes"]
+                    for g_id in list(group):
+                        g = next(item for item in placed_flexes if item["id"] == g_id)
+                        g_start = to_mins(g["start"])
+                        g_end = g_start + g["duration_minutes"]
+                        if f_start < g_end and g_start < f_end:
+                            group.add(f["id"])
+                            added = True
+                            break
+                if not added:
+                    break
+            for f_id in group:
+                f = next(item for item in placed_flexes if item["id"] == f_id)
+                f_orig = to_mins(f["start"])
+                f_target = f_orig + wake_delta_applied
+                final_wake_m = minutes_since_midnight(final_wake)
+                if f_target < final_wake_m:
+                    f_target = final_wake_m
+                f["start"] = fmt_clock(f_target)
+
+        if sleep_shifted_anchor is not None and sleep_delta_applied != 0:
+            anchor_start = to_mins(sleep_shifted_anchor["start"])
+            anchor_end = anchor_start + sleep_shifted_anchor["duration_minutes"]
+            placed_flexes = [f for f in repaired_flexes if f.get("start") is not None]
+            group = set()
+            for f in placed_flexes:
+                f_start = to_mins(f["start"])
+                f_end = f_start + f["duration_minutes"]
+                if (f_start < anchor_end and anchor_start < f_end) or (f_start == anchor_start - sleep_delta_applied and f_end > minutes_since_midnight(final_sleep)):
+                    group.add(f["id"])
+            while True:
+                added = False
+                for f in placed_flexes:
+                    if f["id"] in group:
+                        continue
+                    f_start = to_mins(f["start"])
+                    f_end = f_start + f["duration_minutes"]
+                    for g_id in list(group):
+                        g = next(item for item in placed_flexes if item["id"] == g_id)
+                        g_start = to_mins(g["start"])
+                        g_end = g_start + g["duration_minutes"]
+                        if f_start < g_end and g_start < f_end:
+                            group.add(f["id"])
+                            added = True
+                            break
+                if not added:
+                    break
+            for f_id in group:
+                f = next(item for item in placed_flexes if item["id"] == f_id)
+                f_orig = to_mins(f["start"])
+                f_target = f_orig + sleep_delta_applied
+                final_sleep_m = minutes_since_midnight(final_sleep)
+                if f_target + f["duration_minutes"] > final_sleep_m:
+                    f_target = final_sleep_m - f["duration_minutes"]
+                f["start"] = fmt_clock(f_target)
+
         current["bounds"]["wake"] = wake or current["bounds"]["wake"]
         current["bounds"]["sleep"] = sleep or current["bounds"]["sleep"]
         current["anchors"] = repaired_anchors
