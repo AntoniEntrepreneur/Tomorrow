@@ -1074,3 +1074,75 @@ test("Unified activity edit modal displays Type selector, toggles fields dynamic
   assert.deepEqual(pageErrors, []);
   await page.close();
 });
+
+test("Overdue draft chip renders .overdue-tag badge with warm amber color alongside iCloud tag", async () => {
+  const page = await browser.newPage();
+  const pageErrors = [];
+  page.on("pageerror", error => pageErrors.push(error.message));
+
+  let current = {
+    ...sessionView(),
+    drafts: [
+      {
+        id: "draft-overdue",
+        name: "Tax return",
+        source: "icloud",
+        overdue: true,
+        note: "Send W2",
+      },
+      {
+        id: "draft-today",
+        name: "Doctor appointment",
+        source: "icloud",
+        overdue: false,
+      },
+      {
+        id: "draft-manual",
+        name: "Quick idea",
+        overdue: false,
+      },
+    ],
+  };
+
+  await page.route("**/api/**", async route => {
+    const request = route.request();
+    const url = new URL(request.url());
+    if (request.method() === "GET" && url.pathname === "/api/session") {
+      await route.fulfill({ json: current });
+      return;
+    }
+    await route.fulfill({ json: current });
+  });
+
+  await page.goto(baseUrl);
+  await page.locator("#drafts").waitFor();
+
+  // Find the overdue draft chip
+  const overdueChip = page.locator(".draft-chip", { hasText: "Tax return" });
+  await overdueChip.waitFor();
+
+  const overdueTag = overdueChip.locator(".overdue-tag");
+  assert.equal(await overdueTag.textContent(), "Overdue");
+
+  const icloudTag = overdueChip.locator(".icloud-tag");
+  assert.equal(await icloudTag.textContent(), "📅 iCloud");
+
+  // Verify computed color is amber rgb(224, 168, 74) (from var(--wick))
+  const overdueColor = await overdueTag.evaluate(el => window.getComputedStyle(el).color);
+  assert.equal(overdueColor, "rgb(224, 168, 74)");
+
+  // Today iCloud draft should have .icloud-tag but NOT .overdue-tag
+  const todayChip = page.locator(".draft-chip", { hasText: "Doctor appointment" });
+  await todayChip.waitFor();
+  assert.equal(await todayChip.locator(".icloud-tag").textContent(), "📅 iCloud");
+  assert.equal(await todayChip.locator(".overdue-tag").count(), 0);
+
+  // Manual draft should have neither
+  const manualChip = page.locator(".draft-chip", { hasText: "Quick idea" });
+  await manualChip.waitFor();
+  assert.equal(await manualChip.locator(".icloud-tag").count(), 0);
+  assert.equal(await manualChip.locator(".overdue-tag").count(), 0);
+
+  assert.deepEqual(pageErrors, []);
+  await page.close();
+});

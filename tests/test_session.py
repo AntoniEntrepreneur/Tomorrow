@@ -3941,6 +3941,72 @@ def test_refresh_icloud_items_does_not_resurrect_a_deleted_item(
     assert refreshed["drafts"] == []
 
 
+def test_seed_icloud_items_seeds_overdue_draft_with_overdue_flag(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from tomorrow.icloud import ClassifiedIcloudItems, ImportedItem
+    from tomorrow.session import add_draft, load_session, session_view
+
+    _write_defaults(tmp_path)
+
+    def fake_import(data_dir, plan_date, *, existing_anchors):
+        return ClassifiedIcloudItems(
+            drafts=[
+                ImportedItem(name="Overdue invoice", overdue=True),
+                ImportedItem(name="Today errand", overdue=False),
+            ]
+        )
+
+    monkeypatch.setattr("tomorrow.session.try_import_icloud_items", fake_import)
+
+    now = datetime(2026, 8, 10, 22, 0)
+    document = load_session(tmp_path, output_dir=tmp_path / "Desktop", now=now)
+    assert len(document["drafts"]) == 2
+    assert document["drafts"][0]["name"] == "Overdue invoice"
+    assert document["drafts"][0]["overdue"] is True
+    assert document["drafts"][1]["name"] == "Today errand"
+    assert document["drafts"][1]["overdue"] is False
+
+    # Also test manual draft added via add_draft has overdue=False
+    view = add_draft(tmp_path, output_dir=tmp_path / "Desktop", name="Manual draft", now=now)
+    assert len(view["drafts"]) == 3
+    assert view["drafts"][0]["name"] == "Overdue invoice"
+    assert view["drafts"][0]["overdue"] is True
+    assert view["drafts"][1]["name"] == "Today errand"
+    assert view["drafts"][1]["overdue"] is False
+    assert view["drafts"][2]["name"] == "Manual draft"
+    assert view["drafts"][2]["overdue"] is False
+
+
+def test_dropped_overdue_draft_persists_across_session_refresh(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from tomorrow.icloud import ClassifiedIcloudItems, ImportedItem
+    from tomorrow.session import drop_draft, load_session, refresh_icloud_items
+
+    _write_defaults(tmp_path)
+
+    def fake_import(data_dir, plan_date, *, existing_anchors):
+        return ClassifiedIcloudItems(
+            drafts=[
+                ImportedItem(name="Overdue task", overdue=True),
+            ]
+        )
+
+    monkeypatch.setattr("tomorrow.session.try_import_icloud_items", fake_import)
+
+    now = datetime(2026, 8, 10, 22, 0)
+    document = load_session(tmp_path, output_dir=tmp_path / "Desktop", now=now)
+    assert len(document["drafts"]) == 1
+    draft_id = document["drafts"][0]["id"]
+
+    drop_draft(tmp_path, output_dir=tmp_path / "Desktop", item_id=draft_id, now=now)
+
+    refreshed = refresh_icloud_items(tmp_path, output_dir=tmp_path / "Desktop", now=now)
+    assert refreshed["drafts"] == []
+
+
+
 def _now() -> datetime:
     return datetime(2026, 8, 10, 22, 0)
 

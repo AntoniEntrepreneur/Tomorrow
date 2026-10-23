@@ -53,6 +53,7 @@ class ImportedItem:
     duration_minutes: int | None = None
     source: str = ICLOUD_SOURCE
     note: str | None = None
+    overdue: bool = False
 
 
 @dataclass(frozen=True)
@@ -106,7 +107,8 @@ def classify_icloud_items(
     # fetch wrapper's date-bounded predicate, so a recurring event's other
     # occurrences never reach this function.
     anchors: list[ImportedItem] = []
-    drafts: list[ImportedItem] = []
+    day_of_drafts: list[ImportedItem] = []
+    overdue_draft_entries: list[tuple[tuple[date, time], ImportedItem]] = []
     placed_anchors = list(existing_anchors)
 
     for event in events:
@@ -121,7 +123,7 @@ def classify_icloud_items(
         # A calendar-derived Draft never carries a note: invite noise and
         # meeting links must not reach the Plan.
         if _overlaps_any(start_time, end_time, placed_anchors):
-            drafts.append(ImportedItem(name=event.title))
+            day_of_drafts.append(ImportedItem(name=event.title))
             continue
         item = ImportedItem(
             name=event.title, start=start_time, duration_minutes=event.duration_minutes
@@ -142,18 +144,27 @@ def classify_icloud_items(
             continue
         if reminder.due_date is None:
             continue
-        if reminder.due_date != plan_date:
+        if reminder.due_date > plan_date:
+            continue
+        if reminder.due_date < plan_date:
+            item = ImportedItem(
+                name=reminder.title,
+                note=reminder.note,
+                overdue=True,
+            )
+            sort_key = (reminder.due_date, reminder.due_time or time.min)
+            overdue_draft_entries.append((sort_key, item))
             continue
         # A reminder scheduled at a time of day is an Anchor, the same as a
         # timed event; a date-only reminder has no place to sit, so it is a
         # Draft. A timed reminder that collides with something already placed
         # falls back to a Draft, again matching how events are handled.
         if reminder.due_time is None:
-            drafts.append(ImportedItem(name=reminder.title, note=reminder.note))
+            day_of_drafts.append(ImportedItem(name=reminder.title, note=reminder.note))
             continue
         end_time = _anchor_end(reminder.due_time, REMINDER_ANCHOR_MINUTES)
         if _overlaps_any(reminder.due_time, end_time, placed_anchors):
-            drafts.append(ImportedItem(name=reminder.title, note=reminder.note))
+            day_of_drafts.append(ImportedItem(name=reminder.title, note=reminder.note))
             continue
         anchors.append(
             ImportedItem(
@@ -170,6 +181,8 @@ def classify_icloud_items(
             )
         )
 
+    overdue_draft_entries.sort(key=lambda entry: entry[0])
+    drafts = [item for _, item in overdue_draft_entries] + day_of_drafts
     return ClassifiedIcloudItems(anchors=anchors, drafts=drafts)
 
 

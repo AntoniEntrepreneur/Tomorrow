@@ -325,6 +325,7 @@ import { autofill, checklistItemsPayload, checklistPayload, clockLabel, clockVal
           '<div class="draft-chip">' +
           '<div class="row"><span>' + esc(item.name) +
           (item.source === "icloud" ? ' <span class="icloud-tag">📅 iCloud</span>' : "") +
+          (item.overdue ? ' <span class="overdue-tag">Overdue</span>' : "") +
           "</span>" +
           '<button type="button" data-promote="' + esc(item.id) + '">Edit</button>' +
           '<button type="button" data-drop-draft="' + esc(item.id) + '">Drop</button>' +
