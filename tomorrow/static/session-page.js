@@ -658,6 +658,7 @@ import { autofill, checklistItemsPayload, checklistPayload, clockLabel, clockVal
       const start = item.start || (isAnchor ? "09:00" : "");
       const durationMin = item.duration_minutes || (isTodo ? "" : 30);
       const note = item.note || "";
+      const canUnplace = isFlex && Boolean(item.start);
 
       openSheet(
         '<h2>Edit ' + (isAnchor ? "Anchor" : isFlex ? "Flex" : "To-do") + ' · ' + esc(item.name) + '</h2>' +
@@ -673,6 +674,7 @@ import { autofill, checklistItemsPayload, checklistPayload, clockLabel, clockVal
         checklistField(item.checklist, item.checklist_items) +
         '<div class="actions"><button class="primary" type="submit">Update</button>' +
         saveToLibraryButton(item, kind) +
+        (canUnplace ? '<button type="button" class="ghost" data-unplace-activity="' + esc(item.id) + '">Unplace</button>' : '') +
         '<button type="button" class="ghost" data-close>Cancel</button>' +
         '<button type="button" class="danger" data-drop-activity="' + esc(item.id) + '" data-remove="' + esc(item.id) + '">Drop</button></div></form>'
       );
@@ -762,6 +764,9 @@ import { autofill, checklistItemsPayload, checklistPayload, clockLabel, clockVal
         saveBtn.hidden = asTodo;
         if (!asTodo) saveBtn.dataset.promoteChecklistKind = kind;
       }
+
+      const unplaceBtn = form.querySelector('[data-unplace-activity]');
+      if (unplaceBtn) unplaceBtn.hidden = form.kind.value !== "flex";
 
       ensureTemplatePrefill(form);
     }
@@ -1608,6 +1613,14 @@ import { autofill, checklistItemsPayload, checklistPayload, clockLabel, clockVal
           closeSheet();
           renderTemplateEntries();
         }
+        return;
+      }
+      const unplaceActivityBtn = event.target.closest ? event.target.closest("[data-unplace-activity]") : null;
+      const unplaceId = unplaceActivityBtn ? unplaceActivityBtn.dataset.unplaceActivity : event.target.dataset?.unplaceActivity;
+      if (unplaceId) {
+        event.preventDefault();
+        closeSheet();
+        await mutate("/api/unplace", { id: unplaceId });
         return;
       }
       const dropActivityId = event.target.dataset.dropActivity;
