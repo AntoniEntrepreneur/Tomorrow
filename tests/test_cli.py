@@ -10,7 +10,7 @@ import pytest
 
 from tomorrow.cli import main
 from tomorrow.plan import PLAN_FILENAME
-from tomorrow.session import SESSION_HOST, SESSION_PORT, bind_session_server, run_session
+from tomorrow.session_http import SESSION_HOST, SESSION_PORT, bind_session_server, run_session
 
 
 def _write_defaults(tmp_path: Path) -> None:
@@ -128,7 +128,7 @@ def test_run_session_prints_plan_date_url_and_instruction(
     _write_defaults(tmp_path)
     opened: list[str] = []
     monkeypatch.setattr(
-        "tomorrow.session.webbrowser.open", lambda url: opened.append(url)
+        "tomorrow.session_http.webbrowser.open", lambda url: opened.append(url)
     )
 
     class FakeServer:
@@ -141,7 +141,7 @@ def test_run_session_prints_plan_date_url_and_instruction(
             return
 
     monkeypatch.setattr(
-        "tomorrow.session.bind_session_server", lambda *_args, **_kwargs: FakeServer()
+        "tomorrow.session_http.bind_session_server", lambda *_args, **_kwargs: FakeServer()
     )
 
     run_session(tmp_path, output_dir=_desktop_dir(tmp_path), now=datetime(2026, 8, 10, 22, 0))
@@ -159,7 +159,7 @@ def test_busy_port_prints_and_exits_without_hunting(
     _write_defaults(tmp_path)
     opened: list[str] = []
     monkeypatch.setattr(
-        "tomorrow.session.webbrowser.open", lambda url: opened.append(url)
+        "tomorrow.session_http.webbrowser.open", lambda url: opened.append(url)
     )
     occupant = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     occupant.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -314,7 +314,7 @@ def test_submit_writes_plan_opens_file_and_exits(
     _write_defaults(tmp_path)
     opened: list[str] = []
     monkeypatch.setattr(
-        "tomorrow.session.webbrowser.open", lambda url: opened.append(url)
+        "tomorrow.session_http.webbrowser.open", lambda url: opened.append(url)
     )
 
     def bind_then_submit(repo_root: Path, **kwargs):
@@ -334,7 +334,7 @@ def test_submit_writes_plan_opens_file_and_exits(
         threading.Thread(target=post_submit, daemon=True).start()
         return server
 
-    monkeypatch.setattr("tomorrow.session.bind_session_server", bind_then_submit)
+    monkeypatch.setattr("tomorrow.session_http.bind_session_server", bind_then_submit)
     run_session(tmp_path, output_dir=_desktop_dir(tmp_path), now=datetime(2026, 8, 10, 22, 0))
 
     plan_path = _plan_path(tmp_path)
@@ -355,7 +355,7 @@ def test_second_submit_overwrites_rather_than_adding_another(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     _write_defaults(tmp_path)
-    monkeypatch.setattr("tomorrow.session.webbrowser.open", lambda _url: None)
+    monkeypatch.setattr("tomorrow.session_http.webbrowser.open", lambda _url: None)
     server, thread = _start_server(tmp_path)
     try:
         status, _body = _http("POST", "/api/submit")
@@ -489,7 +489,7 @@ def test_ctrl_c_stops_without_writing_a_plan(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     _write_defaults(tmp_path)
-    monkeypatch.setattr("tomorrow.session.webbrowser.open", lambda _url: None)
+    monkeypatch.setattr("tomorrow.session_http.webbrowser.open", lambda _url: None)
 
     class FakeServer:
         submitted_path = None
@@ -501,7 +501,7 @@ def test_ctrl_c_stops_without_writing_a_plan(
             return
 
     monkeypatch.setattr(
-        "tomorrow.session.bind_session_server", lambda *_args, **_kwargs: FakeServer()
+        "tomorrow.session_http.bind_session_server", lambda *_args, **_kwargs: FakeServer()
     )
     run_session(tmp_path, output_dir=_desktop_dir(tmp_path), now=datetime(2026, 8, 10, 22, 0))
 
@@ -1061,7 +1061,7 @@ def test_library_command_opens_and_prints_url_without_touching_session(
     monkeypatch.setattr("tomorrow.cli.discover_repo_root", lambda: tmp_path)
     opened: list[str] = []
     monkeypatch.setattr(
-        "tomorrow.session.webbrowser.open", lambda url: opened.append(url)
+        "tomorrow.session_http.webbrowser.open", lambda url: opened.append(url)
     )
 
     class FakeServer:
@@ -1072,7 +1072,7 @@ def test_library_command_opens_and_prints_url_without_touching_session(
             return
 
     monkeypatch.setattr(
-        "tomorrow.session.bind_session_server", lambda *_args, **_kwargs: FakeServer()
+        "tomorrow.session_http.bind_session_server", lambda *_args, **_kwargs: FakeServer()
     )
 
     main(argv=["library"])
@@ -1091,7 +1091,7 @@ def test_library_command_with_busy_port_opens_running_servers_library(
     monkeypatch.setattr("tomorrow.cli.discover_repo_root", lambda: tmp_path)
     opened: list[str] = []
     monkeypatch.setattr(
-        "tomorrow.session.webbrowser.open", lambda url: opened.append(url)
+        "tomorrow.session_http.webbrowser.open", lambda url: opened.append(url)
     )
     occupant = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     occupant.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)

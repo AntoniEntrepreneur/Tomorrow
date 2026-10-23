@@ -5,7 +5,7 @@ from typing import Mapping, Sequence
 
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 
-from tomorrow.checklists import Checklist, load_checklist_library
+from tomorrow.library import Checklist, load_checklist_library
 from tomorrow.defaults import DayBounds
 from tomorrow.domain import (
     Anchor,

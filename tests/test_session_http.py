@@ -463,3 +463,151 @@ def test_location_endpoint_persists_to_untracked_local_weather(tmp_path: Path) -
     finally:
         _stop_server(server, thread)
 
+
+def test_static_clock_module_served_and_construction_shared_removed(tmp_path: Path) -> None:
+    _write_defaults(tmp_path)
+    server, thread = _start_server(tmp_path)
+    try:
+        status, body = _http(server, "GET", "/static/clock.js")
+        assert status == 200
+        assert b"toWakeMin" in body
+
+        status_old, _ = _http(server, "GET", "/static/construction-shared.js")
+        assert status_old == 404
+    finally:
+        _stop_server(server, thread)
+
+
+def test_session_module_has_no_server_lifecycle_methods_or_http_adapter_imports() -> None:
+    import tomorrow.session as session_mod
+
+    assert not hasattr(session_mod, "run_session")
+    assert not hasattr(session_mod, "bind_session_server")
+    assert not hasattr(session_mod, "run_library")
+    assert not hasattr(session_mod, "SESSION_HOST")
+    assert not hasattr(session_mod, "SESSION_PORT")
+    assert not hasattr(session_mod, "SESSION_URL")
+    assert not hasattr(session_mod, "LIBRARY_URL")
+    assert not hasattr(session_mod, "_default_opener")
+    assert not hasattr(session_mod, "_list_checklists")
+    assert not hasattr(session_mod, "_list_activity_templates")
+    assert not hasattr(session_mod, "_list_day_templates")
+    assert "session_http" not in session_mod.__dict__
+
+
+def test_session_http_server_lifecycle_run_session_opens_browser_and_shuts_down(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from tomorrow.session_http import run_session
+
+    _write_defaults(tmp_path)
+    opened: list[str] = []
+    monkeypatch.setattr("tomorrow.session_http.webbrowser.open", lambda url: opened.append(url))
+
+    closed = []
+
+    class FakeServer:
+        submitted_path = None
+
+        def serve_forever(self) -> None:
+            return
+
+        def server_close(self) -> None:
+            closed.append(True)
+
+    monkeypatch.setattr("tomorrow.session_http.bind_session_server", lambda *_a, **_kw: FakeServer())
+
+    run_session(tmp_path, output_dir=_desktop_dir(tmp_path), now=datetime(2026, 8, 10, 22, 0))
+    output = capsys.readouterr().out
+
+    assert "Tuesday, 11 August 2026" in output
+    assert "http://127.0.0.1:8765" in output
+    assert opened == ["http://127.0.0.1:8765"]
+    assert closed == [True]
+
+
+def test_session_http_run_session_port_conflict_handling(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    import socket
+    from tomorrow.session_http import SESSION_HOST, SESSION_PORT, run_session
+
+    _write_defaults(tmp_path)
+    occupant = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    occupant.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    occupant.bind((SESSION_HOST, SESSION_PORT))
+    occupant.listen(1)
+    try:
+        run_session(tmp_path, output_dir=_desktop_dir(tmp_path), now=datetime(2026, 8, 10, 22, 0))
+    finally:
+        occupant.close()
+
+    output = capsys.readouterr().out
+    assert "8765" in output
+    assert "already in use" in output.lower()
+
+
+def test_session_http_run_library_lifecycle_and_port_conflict(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    import socket
+    from tomorrow.session_http import SESSION_HOST, SESSION_PORT, run_library
+
+    _write_defaults(tmp_path)
+    opened: list[str] = []
+    monkeypatch.setattr("tomorrow.session_http.webbrowser.open", lambda url: opened.append(url))
+
+    class FakeServer:
+        def serve_forever(self) -> None:
+            return
+
+        def server_close(self) -> None:
+            return
+
+    monkeypatch.setattr("tomorrow.session_http.bind_session_server", lambda *_a, **_kw: FakeServer())
+    run_library(tmp_path, output_dir=_desktop_dir(tmp_path), now=datetime(2026, 8, 10, 22, 0))
+    output = capsys.readouterr().out
+    assert "http://127.0.0.1:8765/library" in output
+    assert opened == ["http://127.0.0.1:8765/library"]
+
+    opened.clear()
+    monkeypatch.undo()
+    monkeypatch.setattr("tomorrow.session_http.webbrowser.open", lambda url: opened.append(url))
+    occupant = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    occupant.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    occupant.bind((SESSION_HOST, SESSION_PORT))
+    occupant.listen(1)
+    try:
+        run_library(tmp_path, output_dir=_desktop_dir(tmp_path), now=datetime(2026, 8, 10, 22, 0))
+    finally:
+        occupant.close()
+
+    assert opened == ["http://127.0.0.1:8765/library"]
+
+
+def test_session_http_library_and_suggest_endpoints_consume_public_library(
+    tmp_path: Path,
+) -> None:
+    from tomorrow.library import save_activity_template, save_checklist
+
+    _write_defaults(tmp_path)
+    save_checklist(tmp_path, name="Packing", items=["Passport", "Charger"])
+    save_activity_template(tmp_path, name="Gym Workout", duration_minutes=60)
+
+    server, thread = _start_server(tmp_path)
+    try:
+        status, body = _http(server, "GET", "/api/library")
+        assert status == 200
+        assert any(c["name"] == "Packing" for c in body["checklists"])
+        assert any(a["name"] == "Gym Workout" for a in body["activity_templates"])
+
+        status, body = _http(server, "POST", "/api/suggest-activity", payload={"name": "Gym Workout"})
+        assert status == 200
+        assert body["suggestion"] is not None
+        assert body["suggestion"]["name"] == "Gym Workout"
+        assert body["suggestion"]["duration_minutes"] == 60
+    finally:
+        _stop_server(server, thread)
+
+
+

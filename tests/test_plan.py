@@ -1,6 +1,6 @@
 from datetime import date, datetime, time, timedelta
 
-from tomorrow.checklists import Checklist
+from tomorrow.library import Checklist
 from tomorrow.defaults import DayBounds
 from tomorrow.domain import Anchor, Flex
 from tomorrow.plan import (

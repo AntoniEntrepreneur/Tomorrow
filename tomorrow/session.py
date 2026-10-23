@@ -3,18 +3,11 @@ from __future__ import annotations
 from datetime import date, datetime, time, timedelta
 from pathlib import Path
 from typing import Callable, Sequence
-from urllib.request import Request, urlopen
+from urllib.request import Request
 import copy
-import errno
 import json
 import uuid
-import webbrowser
 
-from tomorrow.activity_templates import (
-    load_activity_template_library,
-    suggest_activity_template,
-)
-from tomorrow.checklists import load_checklist_library, suggest_checklist
 from tomorrow.defaults import DayBounds, load_defaults
 from tomorrow.domain import (
     Anchor,
@@ -33,23 +26,38 @@ from tomorrow.domain import (
     minutes_since_wake,
     parse_clock,
 )
-from tomorrow.day_templates import (
+from tomorrow.library import (
+    ActivityTemplate,
+    Checklist,
+    TemplateSeed,
+    _slugify,
+    activity_templates_dir,
+    checklists_dir,
+    day_template_order,
+    day_template_path,
+    default_day_template_name,
     default_day_template_path,
+    delete_activity_template,
+    delete_checklist,
+    delete_day_template,
+    list_activity_templates,
+    list_checklists,
+    list_day_templates,
+    load_activity_template_library,
+    load_checklist_library,
     load_day_template,
     load_day_template_entries,
     load_day_template_name,
     named_day_template_path,
-)
-from tomorrow.library import (
-    _slugify,
-    day_template_order,
-    delete_activity_template,
-    delete_checklist,
-    delete_day_template,
+    reorder_day_templates,
     save_activity_template,
     save_checklist,
     save_day_template,
-    reorder_day_templates,
+    seed_day_template,
+    seed_default_day_template,
+    suggest_activity as _library_suggest_activity,
+    suggest_activity_template,
+    suggest_checklist,
 )
 from tomorrow.icloud import try_import_icloud_items
 from tomorrow.name_times import NameTimeResult, parse_name_time
@@ -62,26 +70,14 @@ from tomorrow.plan import (
     write_finalized_plan,
 )
 from tomorrow.weather import (
+    default_weather_opener,
     format_weather_one_liner,
-    get_ssl_context,
     load_weather_name,
     try_fetch_weather,
     try_fetch_weather_forecast,
 )
 
-SESSION_HOST = "127.0.0.1"
-SESSION_PORT = 8765
-SESSION_URL = f"http://{SESSION_HOST}:{SESSION_PORT}"
-LIBRARY_URL = f"{SESSION_URL}/library"
-_WEATHER_TIMEOUT_SECONDS = 5
 _UNSET = object()
-
-
-def _default_opener(request: Request) -> object:
-    ctx = get_ssl_context()
-    if ctx is not None:
-        return urlopen(request, timeout=_WEATHER_TIMEOUT_SECONDS, context=ctx)
-    return urlopen(request, timeout=_WEATHER_TIMEOUT_SECONDS)
 
 
 def _session_path(repo_root: Path) -> Path:
@@ -452,7 +448,7 @@ def add_anchor(
     checklist_items: object = _UNSET,
     output_dir: Path,
     now: datetime | None = None,
-    opener: Callable[[Request], object] = _default_opener,
+    opener: Callable[[Request], object] = default_weather_opener,
 ) -> dict:
     document = load_session(repo_root, output_dir=output_dir, now=now)
     attached, items = _resolve_checklist(
@@ -483,7 +479,7 @@ def add_flex(
     checklist_items: object = _UNSET,
     output_dir: Path,
     now: datetime | None = None,
-    opener: Callable[[Request], object] = _default_opener,
+    opener: Callable[[Request], object] = default_weather_opener,
 ) -> dict:
     document = load_session(repo_root, output_dir=output_dir, now=now)
     attached, items = _resolve_checklist(
@@ -511,7 +507,7 @@ def insert_activity_template(
     activity_id: str,
     output_dir: Path,
     now: datetime | None = None,
-    opener: Callable[[Request], object] = _default_opener,
+    opener: Callable[[Request], object] = default_weather_opener,
 ) -> dict:
     """Insert a single Activity Template into the Session as a new Anchor or Flex.
 
@@ -553,32 +549,8 @@ def insert_activity_template(
 def suggest_activity(
     repo_root: Path, item_name: str
 ) -> dict | None:
-    """Suggest a bundle (start-or-duration plus Checklist) for a typed name.
-
-    Checks the Activity Template library first; an Activity Template match
-    takes precedence over the older bare-Checklist-name-match suggestion.
-    Falls back to `suggest_checklist` when no Activity Template matches, so
-    Checklist-only matching keeps working.
-    """
-
-    data_dir = repo_root / "data"
-    activity_library = load_activity_template_library(data_dir)
-    activity_id = suggest_activity_template(item_name, activity_library)
-    if activity_id is not None:
-        activity = activity_library[activity_id]
-        return {
-            "kind": "activity",
-            "activity_id": activity_id,
-            "name": activity.name,
-            "start": activity.start.strftime("%H:%M") if activity.start else None,
-            "duration_minutes": int(activity.duration.total_seconds() // 60),
-            "checklist": activity.checklist,
-        }
-
-    checklist_id = suggest_checklist(item_name, load_checklist_library(data_dir))
-    if checklist_id is not None:
-        return {"kind": "checklist", "checklist_id": checklist_id}
-    return None
+    """Suggest a bundle (start-or-duration plus Checklist) for a typed name."""
+    return _library_suggest_activity(repo_root, item_name)
 
 
 def _item_by_id(items: list, item_id: str) -> dict:
@@ -600,7 +572,7 @@ def add_draft(
     name: str,
     output_dir: Path,
     now: datetime | None = None,
-    opener: Callable[[Request], object] = _default_opener,
+    opener: Callable[[Request], object] = default_weather_opener,
 ) -> dict:
     document = load_session(repo_root, output_dir=output_dir, now=now)
 
@@ -621,7 +593,7 @@ def add_todo(
     note: str = "",
     output_dir: Path,
     now: datetime | None = None,
-    opener: Callable[[Request], object] = _default_opener,
+    opener: Callable[[Request], object] = default_weather_opener,
 ) -> dict:
     document = load_session(repo_root, output_dir=output_dir, now=now)
 
@@ -639,7 +611,7 @@ def edit_todo(
     note: str | None = None,
     output_dir: Path,
     now: datetime | None = None,
-    opener: Callable[[Request], object] = _default_opener,
+    opener: Callable[[Request], object] = default_weather_opener,
 ) -> dict:
     return edit_activity(
         repo_root,
@@ -659,7 +631,7 @@ def drop_todo(
     item_id: str,
     output_dir: Path,
     now: datetime | None = None,
-    opener: Callable[[Request], object] = _default_opener,
+    opener: Callable[[Request], object] = default_weather_opener,
 ) -> dict:
     document = load_session(repo_root, output_dir=output_dir, now=now)
 
@@ -676,7 +648,7 @@ def convert_todo_to_flex(
     duration_minutes: int,
     output_dir: Path,
     now: datetime | None = None,
-    opener: Callable[[Request], object] = _default_opener,
+    opener: Callable[[Request], object] = default_weather_opener,
 ) -> dict:
     return edit_activity(
         repo_root,
@@ -697,7 +669,7 @@ def convert_todo_to_anchor(
     duration_minutes: int,
     output_dir: Path,
     now: datetime | None = None,
-    opener: Callable[[Request], object] = _default_opener,
+    opener: Callable[[Request], object] = default_weather_opener,
 ) -> dict:
     return edit_activity(
         repo_root,
@@ -717,7 +689,7 @@ def convert_flex_to_todo(
     item_id: str,
     output_dir: Path,
     now: datetime | None = None,
-    opener: Callable[[Request], object] = _default_opener,
+    opener: Callable[[Request], object] = default_weather_opener,
 ) -> dict:
     return edit_activity(
         repo_root,
@@ -740,7 +712,7 @@ def place_flex(
     start: str,
     output_dir: Path,
     now: datetime | None = None,
-    opener: Callable[[Request], object] = _default_opener,
+    opener: Callable[[Request], object] = default_weather_opener,
 ) -> dict:
     document = load_session(repo_root, output_dir=output_dir, now=now)
 
@@ -756,7 +728,7 @@ def unplace_flex(
     item_id: str,
     output_dir: Path,
     now: datetime | None = None,
-    opener: Callable[[Request], object] = _default_opener,
+    opener: Callable[[Request], object] = default_weather_opener,
 ) -> dict:
     document = load_session(repo_root, output_dir=output_dir, now=now)
 
@@ -773,7 +745,7 @@ def change_flex_duration(
     duration_minutes: int,
     output_dir: Path,
     now: datetime | None = None,
-    opener: Callable[[Request], object] = _default_opener,
+    opener: Callable[[Request], object] = default_weather_opener,
 ) -> dict:
     document = load_session(repo_root, output_dir=output_dir, now=now)
 
@@ -789,7 +761,7 @@ def drop_flex(
     item_id: str,
     output_dir: Path,
     now: datetime | None = None,
-    opener: Callable[[Request], object] = _default_opener,
+    opener: Callable[[Request], object] = default_weather_opener,
 ) -> dict:
     document = load_session(repo_root, output_dir=output_dir, now=now)
 
@@ -805,7 +777,7 @@ def drop_draft(
     item_id: str,
     output_dir: Path,
     now: datetime | None = None,
-    opener: Callable[[Request], object] = _default_opener,
+    opener: Callable[[Request], object] = default_weather_opener,
 ) -> dict:
     document = load_session(repo_root, output_dir=output_dir, now=now)
 
@@ -822,7 +794,7 @@ def edit_draft(
     name: str,
     output_dir: Path,
     now: datetime | None = None,
-    opener: Callable[[Request], object] = _default_opener,
+    opener: Callable[[Request], object] = default_weather_opener,
 ) -> dict:
     document = load_session(repo_root, output_dir=output_dir, now=now)
     _item_by_id(document["drafts"], item_id)
@@ -848,7 +820,7 @@ def promote_draft(
     checklist: str | None | object = _UNSET,
     output_dir: Path,
     now: datetime | None = None,
-    opener: Callable[[Request], object] = _default_opener,
+    opener: Callable[[Request], object] = default_weather_opener,
 ) -> dict:
     document = load_session(repo_root, output_dir=output_dir, now=now)
     draft = _item_by_id(document["drafts"], item_id)
@@ -897,7 +869,7 @@ def promote_checklist(
     name: str,
     output_dir: Path,
     now: datetime | None = None,
-    opener: Callable[[Request], object] = _default_opener,
+    opener: Callable[[Request], object] = default_weather_opener,
 ) -> dict:
     """Save an item's one-time checklist rows to the Library under `name`.
 
@@ -984,7 +956,7 @@ def apply_template(
     *,
     output_dir: Path,
     now: datetime | None = None,
-    opener: Callable[[Request], object] = _default_opener,
+    opener: Callable[[Request], object] = default_weather_opener,
 ) -> dict:
     document = load_session(repo_root, output_dir=output_dir, now=now)
     activity_library = load_activity_template_library(repo_root / "data")
@@ -1007,7 +979,7 @@ def apply_named_day_template(
     template_id: str,
     output_dir: Path,
     now: datetime | None = None,
-    opener: Callable[[Request], object] = _default_opener,
+    opener: Callable[[Request], object] = default_weather_opener,
 ) -> dict:
     """Manually seed the Session from a specific Day Template by id.
 
@@ -1130,8 +1102,8 @@ def template_mode_view(repo_root: Path, *, template_id: str | None) -> dict:
         "anchors": present(entries["anchors"], "anchor"),
         "flexes": present(entries["flexes"], "flex"),
         "daily_activities": daily_activities,
-        "activity_templates": _list_activity_templates(repo_root / "data"),
-        "checklists": _list_checklists(repo_root / "data"),
+        "activity_templates": list_activity_templates(repo_root / "data"),
+        "checklists": list_checklists(repo_root / "data"),
         "saved": False,
     }
 
@@ -1224,7 +1196,7 @@ def decline_template(
     *,
     output_dir: Path,
     now: datetime | None = None,
-    opener: Callable[[Request], object] = _default_opener,
+    opener: Callable[[Request], object] = default_weather_opener,
 ) -> dict:
     document = load_session(repo_root, output_dir=output_dir, now=now)
     if document["template_offer"] != "pending":
@@ -1270,7 +1242,7 @@ def edit_activity(
     remove: bool = False,
     output_dir: Path,
     now: datetime | None = None,
-    opener: Callable[[Request], object] = _default_opener,
+    opener: Callable[[Request], object] = default_weather_opener,
 ) -> dict:
     document = load_session(repo_root, output_dir=output_dir, now=now)
 
@@ -1461,7 +1433,7 @@ def edit_flex(
     checklist_items: object = _UNSET,
     output_dir: Path,
     now: datetime | None = None,
-    opener: Callable[[Request], object] = _default_opener,
+    opener: Callable[[Request], object] = default_weather_opener,
 ) -> dict:
     return edit_activity(
         repo_root,
@@ -1489,7 +1461,7 @@ def edit_anchor(
     remove: bool = False,
     output_dir: Path,
     now: datetime | None = None,
-    opener: Callable[[Request], object] = _default_opener,
+    opener: Callable[[Request], object] = default_weather_opener,
 ) -> dict:
     return edit_activity(
         repo_root,
@@ -1514,7 +1486,7 @@ def edit_bounds(
     sleep: str | None = None,
     output_dir: Path,
     now: datetime | None = None,
-    opener: Callable[[Request], object] = _default_opener,
+    opener: Callable[[Request], object] = default_weather_opener,
 ) -> dict:
     document = load_session(repo_root, output_dir=output_dir, now=now)
 
@@ -1896,7 +1868,7 @@ def session_view(
     *,
     output_dir: Path,
     now: datetime | None = None,
-    opener: Callable[[Request], object] = _default_opener,
+    opener: Callable[[Request], object] = default_weather_opener,
 ) -> dict:
     document = load_session(repo_root, output_dir=output_dir, now=now)
     bounds, drafts, anchors, flexes, todos = _unpack(document)
@@ -1985,7 +1957,7 @@ def undo_session(
     *,
     output_dir: Path,
     now: datetime | None = None,
-    opener: Callable[[Request], object] = _default_opener,
+    opener: Callable[[Request], object] = default_weather_opener,
 ) -> dict:
     document = load_session(repo_root, output_dir=output_dir, now=now)
     undo = document.get("undo", {"past": [], "future": []})
@@ -2006,7 +1978,7 @@ def redo_session(
     *,
     output_dir: Path,
     now: datetime | None = None,
-    opener: Callable[[Request], object] = _default_opener,
+    opener: Callable[[Request], object] = default_weather_opener,
 ) -> dict:
     document = load_session(repo_root, output_dir=output_dir, now=now)
     undo = document.get("undo", {"past": [], "future": []})
@@ -2027,7 +1999,7 @@ def reset_session(
     *,
     output_dir: Path,
     now: datetime | None = None,
-    opener: Callable[[Request], object] = _default_opener,
+    opener: Callable[[Request], object] = default_weather_opener,
 ) -> dict:
     document = load_session(repo_root, output_dir=output_dir, now=now)
     blank = _blank_session(repo_root, now=now)
@@ -2052,7 +2024,7 @@ def submit_session(
     *,
     output_dir: Path,
     now: datetime | None = None,
-    opener: Callable[[Request], object] = _default_opener,
+    opener: Callable[[Request], object] = default_weather_opener,
 ) -> Path:
     ensure_plan_file_not_foreign(output_dir=output_dir)
     document = load_session(repo_root, output_dir=output_dir, now=now)
@@ -2083,124 +2055,4 @@ def submit_session(
     )
 
 
-def _list_checklists(data_dir: Path) -> list[dict]:
-    return [
-        {"id": checklist_id, "name": checklist.name, "items": list(checklist.items)}
-        for checklist_id, checklist in load_checklist_library(data_dir).items()
-    ]
 
-
-def _list_activity_templates(data_dir: Path) -> list[dict]:
-    return [
-        {
-            "id": activity_id,
-            "name": activity.name,
-            "is_anchor_shaped": activity.start is not None,
-            "daily": activity.daily,
-            "start": activity.start.strftime("%H:%M") if activity.start is not None else None,
-            "end": activity.end,
-            "duration_minutes": (
-                None if activity.end is not None else int(activity.duration.total_seconds() // 60)
-            ),
-            "checklist": activity.checklist,
-        }
-        for activity_id, activity in load_activity_template_library(data_dir).items()
-    ]
-
-
-def _list_day_templates(data_dir: Path) -> list[dict]:
-    templates_dir = data_dir / "templates"
-    paths = [
-        templates_dir / f"{template_id}.toml"
-        for template_id in day_template_order(templates_dir)
-    ]
-    return [
-        {
-            "id": path.stem,
-            "name": load_day_template_name(path),
-            **load_day_template_entries(path),
-        }
-        for path in paths
-    ]
-
-
-
-def bind_session_server(
-    repo_root: Path,
-    *,
-    output_dir: Path,
-    now: datetime | None = None,
-    opener: Callable[[Request], object] = _default_opener,
-    host: str = SESSION_HOST,
-    port: int = SESSION_PORT,
-):
-    """Create the browser-facing server for the current Session."""
-    from tomorrow.session_http import bind_session_server as bind_http_server
-
-    return bind_http_server(
-        repo_root, output_dir=output_dir, now=now, opener=opener, host=host, port=port
-    )
-
-
-def run_session(
-    repo_root: Path,
-    *,
-    output_dir: Path,
-    now: datetime | None = None,
-    opener: Callable[[Request], object] = _default_opener,
-) -> None:
-    try:
-        server = bind_session_server(repo_root, output_dir=output_dir, now=now, opener=opener)
-    except OSError as exc:
-        if exc.errno != errno.EADDRINUSE:
-            raise
-        print(f"Port {SESSION_PORT} is already in use.")
-        return
-    document = refresh_icloud_items(repo_root, output_dir=output_dir, now=now)
-    plan_date = date.fromisoformat(document["plan_date"])
-    print(f"Plan date: {format_plan_date(plan_date)}")
-    print(SESSION_URL)
-    print("Submit in the browser, or Ctrl+C to leave.")
-    webbrowser.open(SESSION_URL)
-    try:
-        server.serve_forever()
-    except KeyboardInterrupt:
-        return
-    finally:
-        server.server_close()
-    if server.submitted_path is not None:
-        webbrowser.open(server.submitted_path.as_uri())
-        print(server.submitted_path)
-
-
-def run_library(
-    repo_root: Path,
-    *,
-    output_dir: Path,
-    now: datetime | None = None,
-    opener: Callable[[Request], object] = _default_opener,
-) -> None:
-    """Open the library page without touching the Session (no refresh, no import).
-
-    If a Session server is already running on the usual port, its library
-    page is opened instead — this deliberately differs from `run_session`'s
-    "Port in use" message, since browsing the library never needs a fresh
-    server.
-    """
-
-    try:
-        server = bind_session_server(repo_root, output_dir=output_dir, now=now, opener=opener)
-    except OSError as exc:
-        if exc.errno != errno.EADDRINUSE:
-            raise
-        webbrowser.open(LIBRARY_URL)
-        return
-    print(LIBRARY_URL)
-    print("Ctrl+C to leave.")
-    webbrowser.open(LIBRARY_URL)
-    try:
-        server.serve_forever()
-    except KeyboardInterrupt:
-        return
-    finally:
-        server.server_close()

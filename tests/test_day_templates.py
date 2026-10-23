@@ -1,9 +1,9 @@
 from datetime import date, time, timedelta
 from pathlib import Path
 
-from tomorrow.activity_templates import ActivityTemplate
 from tomorrow.domain import Anchor, Flex
-from tomorrow.day_templates import (
+from tomorrow.library import (
+    ActivityTemplate,
     TemplateSeed,
     day_template_path,
     default_day_template_path,
