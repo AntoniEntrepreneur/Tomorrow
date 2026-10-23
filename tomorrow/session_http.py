@@ -45,6 +45,7 @@ from tomorrow.session import (
     edit_todo,
     insert_activity_template,
     place_flex,
+    unplace_flex,
     promote_checklist,
     promote_draft,
     redo_session,
@@ -356,6 +357,22 @@ class SessionHandler(BaseHTTPRequestHandler):
                     self.server.repo_root,
                     item_id=payload["id"],
                     start=payload["start"],
+                    **self._view_args(),
+                )
+            except KeyError as exc:
+                self._send_json(400, {"error": f"Item not found: {exc.args[0] if exc.args else ''}"})
+                return
+            except ValueError as exc:
+                self._send_json(400, {"error": str(exc)})
+                return
+            self._send_json(200, view)
+            return
+        if path == "/api/unplace":
+            payload = self._read_json()
+            try:
+                view = unplace_flex(
+                    self.server.repo_root,
+                    item_id=payload["id"],
                     **self._view_args(),
                 )
             except KeyError as exc:
