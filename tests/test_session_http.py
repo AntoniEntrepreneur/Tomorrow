@@ -463,3 +463,18 @@ def test_location_endpoint_persists_to_untracked_local_weather(tmp_path: Path) -
     finally:
         _stop_server(server, thread)
 
+
+def test_static_clock_module_served_and_construction_shared_removed(tmp_path: Path) -> None:
+    _write_defaults(tmp_path)
+    server, thread = _start_server(tmp_path)
+    try:
+        status, body = _http(server, "GET", "/static/clock.js")
+        assert status == 200
+        assert b"toWakeMin" in body
+
+        status_old, _ = _http(server, "GET", "/static/construction-shared.js")
+        assert status_old == 404
+    finally:
+        _stop_server(server, thread)
+
+

@@ -191,7 +191,7 @@ class SessionHandler(BaseHTTPRequestHandler):
         if path in {
             "/static/session-page.js",
             "/static/session-state.js",
-            "/static/construction-shared.js",
+            "/static/clock.js",
         }:
             asset = Path(__file__).parent / "static" / Path(path).name
             self._send(200, "text/javascript; charset=utf-8", asset.read_bytes())
