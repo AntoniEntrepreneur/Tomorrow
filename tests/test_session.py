@@ -912,7 +912,10 @@ def test_submit_session_falls_back_to_cached_weather_on_timeout(tmp_path: Path) 
     content = path.read_text(encoding="utf-8")
 
     assert path.exists()
-    assert '<div class="plan-weather">Warsaw · 18° / 24° · ⛅ partly cloudy</div>' in content
+    assert (
+        '<div class="plan-weather"><span class="weather-summary">Warsaw · 18° / 24° · ⛅ partly cloudy</span></div>'
+        in content
+    )
 
 
 def test_session_view_keeps_weather_name_when_fetch_fails(tmp_path: Path) -> None:
@@ -983,7 +986,10 @@ def test_submit_writes_weather_summary_pill_with_location_name(tmp_path: Path) -
     )
     content = path.read_text(encoding="utf-8")
 
-    assert '<div class="plan-weather">Warsaw · 18° / 24° · ⛅ partly cloudy</div>' in content
+    assert (
+        '<div class="plan-weather"><span class="weather-summary">Warsaw · 18° / 24° · ⛅ partly cloudy</span></div>'
+        in content
+    )
     assert "Warsaw" in content
     assert "52.23" not in content
 
