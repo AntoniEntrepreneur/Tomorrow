@@ -589,3 +589,150 @@ def test_classify_future_reminder_is_excluded() -> None:
     assert result.drafts == []
     assert result.anchors == []
 
+
+def test_classify_two_incoming_events_clashing_second_becomes_draft() -> None:
+    events = [
+        RawEvent(
+            title="Design Review",
+            calendar="Work",
+            start=datetime(2026, 8, 11, 10, 0),
+            duration_minutes=60,
+        ),
+        RawEvent(
+            title="Team Sync",
+            calendar="Work",
+            start=datetime(2026, 8, 11, 10, 30),
+            duration_minutes=30,
+        ),
+    ]
+
+    result = classify_icloud_items(
+        existing_anchors=[],
+        events=events,
+        reminders=[],
+        plan_date=PLAN_DATE,
+        config=CONFIG,
+    )
+
+    assert [a.name for a in result.anchors] == ["Design Review"]
+    assert [d.name for d in result.drafts] == ["Team Sync"]
+    assert result.drafts[0].source == "icloud"
+    assert result.drafts[0].note is None
+
+
+def test_classify_event_and_timed_reminder_clash_preserves_reminder_note_as_draft() -> None:
+    events = [
+        RawEvent(
+            title="Customer Interview",
+            calendar="Work",
+            start=datetime(2026, 8, 11, 14, 0),
+            duration_minutes=60,
+        )
+    ]
+    reminders = [
+        RawReminder(
+            title="Check prototype metrics",
+            list_name="Errands",
+            due_date=PLAN_DATE,
+            due_time=time(14, 30),
+            note="Look at activation rate",
+        )
+    ]
+
+    result = classify_icloud_items(
+        existing_anchors=[],
+        events=events,
+        reminders=reminders,
+        plan_date=PLAN_DATE,
+        config=CONFIG,
+    )
+
+    assert [a.name for a in result.anchors] == ["Customer Interview"]
+    assert [d.name for d in result.drafts] == ["Check prototype metrics"]
+    assert result.drafts[0].note == "Look at activation rate"
+    assert result.drafts[0].overdue is False
+
+
+def test_classify_comprehensive_synthetic_plain_data_across_clean_seam() -> None:
+    existing = [
+        Anchor(name="Morning Routine", start=time(8, 0), duration=timedelta(minutes=60))
+    ]
+    events = [
+        # Clashes with existing Morning Routine
+        RawEvent(
+            title="Early Sync",
+            calendar="Work",
+            start=datetime(2026, 8, 11, 8, 30),
+            duration_minutes=30,
+        ),
+        # Clean event -> becomes anchor
+        RawEvent(
+            title="Architecture Deep Dive",
+            calendar="Work",
+            start=datetime(2026, 8, 11, 10, 0),
+            duration_minutes=90,
+        ),
+    ]
+    reminders = [
+        # Overdue reminder (yesterday, timed) -> draft, overdue=True
+        RawReminder(
+            title="Followup with Bob",
+            list_name="Errands",
+            due_date=date(2026, 8, 10),
+            due_time=time(17, 0),
+            note="Urgent",
+        ),
+        # Overdue reminder (2 days ago, date-only) -> draft, overdue=True (comes first)
+        RawReminder(
+            title="Renew passport",
+            list_name="Errands",
+            due_date=date(2026, 8, 9),
+            note="Bring photo",
+        ),
+        # Day-of timed reminder -> becomes anchor
+        RawReminder(
+            title="Take medication",
+            list_name="Errands",
+            due_date=PLAN_DATE,
+            due_time=time(12, 0),
+        ),
+        # Day-of date-only reminder -> draft, overdue=False
+        RawReminder(
+            title="Order books",
+            list_name="Errands",
+            due_date=PLAN_DATE,
+            note="Check wishlist",
+        ),
+    ]
+
+    result = classify_icloud_items(
+        existing_anchors=existing,
+        events=events,
+        reminders=reminders,
+        plan_date=PLAN_DATE,
+        config=CONFIG,
+    )
+
+    # Anchors: Architecture Deep Dive (10:00-11:30) and Take medication (12:00-12:30)
+    assert [(a.name, a.start, a.duration_minutes) for a in result.anchors] == [
+        ("Architecture Deep Dive", time(10, 0), 90),
+        ("Take medication", time(12, 0), 30),
+    ]
+
+    # Drafts: Overdue oldest to newest first, followed by day-of drafts
+    assert [d.name for d in result.drafts] == [
+        "Renew passport",
+        "Followup with Bob",
+        "Early Sync",
+        "Order books",
+    ]
+    assert result.drafts[0].overdue is True
+    assert result.drafts[0].note == "Bring photo"
+    assert result.drafts[1].overdue is True
+    assert result.drafts[1].note == "Urgent"
+    assert result.drafts[2].overdue is False
+    assert result.drafts[2].note is None
+    assert result.drafts[3].overdue is False
+    assert result.drafts[3].note == "Check wishlist"
+
+
