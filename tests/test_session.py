@@ -3965,7 +3965,7 @@ def test_seed_icloud_items_seeds_overdue_draft_with_overdue_flag(
     assert document["drafts"][0]["name"] == "Overdue invoice"
     assert document["drafts"][0]["overdue"] is True
     assert document["drafts"][1]["name"] == "Today errand"
-    assert document["drafts"][1]["overdue"] is False
+    assert document["drafts"][1].get("overdue", False) is False
 
     # Also test manual draft added via add_draft has overdue=False
     view = add_draft(tmp_path, output_dir=tmp_path / "Desktop", name="Manual draft", now=now)
@@ -3973,9 +3973,9 @@ def test_seed_icloud_items_seeds_overdue_draft_with_overdue_flag(
     assert view["drafts"][0]["name"] == "Overdue invoice"
     assert view["drafts"][0]["overdue"] is True
     assert view["drafts"][1]["name"] == "Today errand"
-    assert view["drafts"][1]["overdue"] is False
+    assert view["drafts"][1].get("overdue", False) is False
     assert view["drafts"][2]["name"] == "Manual draft"
-    assert view["drafts"][2]["overdue"] is False
+    assert view["drafts"][2].get("overdue", False) is False
 
 
 def test_dropping_overdue_draft_persists_across_session_reload_and_refresh(
@@ -4057,7 +4057,7 @@ def test_resetting_session_restores_dropped_overdue_drafts(
     assert reset["drafts"][0]["overdue"] is True
     assert reset["drafts"][0]["note"] == "Invoice #42"
     assert reset["drafts"][1]["name"] == "Buy milk"
-    assert reset["drafts"][1]["overdue"] is False
+    assert reset["drafts"][1].get("overdue", False) is False
     assert len(reset["anchors"]) == 1
     assert reset["anchors"][0]["name"] == "Morning sync"
 

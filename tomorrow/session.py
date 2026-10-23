@@ -233,7 +233,6 @@ def _new_session_document(repo_root: Path, *, now: datetime | None = None) -> di
 def save_session(repo_root: Path, document: dict) -> None:
     for draft in document.get("drafts", []):
         draft.pop("checklist", None)
-        draft.setdefault("overdue", False)
     path = _session_path(repo_root)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(document, indent=2) + "\n", encoding="utf-8")
@@ -262,7 +261,6 @@ def load_session(
     document.setdefault("todos", [])
     for draft in document.get("drafts", []):
         draft.pop("checklist", None)
-        draft.setdefault("overdue", False)
     return document
 
 
@@ -603,7 +601,7 @@ def add_draft(
     document = load_session(repo_root, output_dir=output_dir, now=now)
 
     def mutate(current: dict) -> None:
-        current["drafts"].append({"id": uuid.uuid4().hex, "name": name, "overdue": False})
+        current["drafts"].append({"id": uuid.uuid4().hex, "name": name})
 
     return _commit(repo_root, document, mutate, output_dir=output_dir, now=now, opener=opener)
 
@@ -1768,7 +1766,6 @@ def _draft_view(item: dict, *, anchors: Sequence[Anchor], wake: time) -> dict:
     """
 
     view = {key: value for key, value in item.items() if key != "checklist"}
-    view.setdefault("overdue", False)
     parsed = parse_name_time(item["name"])
     view["stripped_name"] = parsed.stripped_name
     view["suggested_end"] = parsed.end
