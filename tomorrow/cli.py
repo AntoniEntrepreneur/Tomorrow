@@ -12,7 +12,7 @@ from tomorrow.defaults import (
     parse_time_of_day,
     save_defaults,
 )
-from tomorrow.icloud import list_available_calendars
+from tomorrow.eventkit_adapter import list_available_calendars
 from tomorrow.plan import default_plan_date, find_plan_to_open
 from tomorrow.session import (
     _default_opener,

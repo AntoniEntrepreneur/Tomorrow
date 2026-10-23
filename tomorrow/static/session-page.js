@@ -1,7 +1,54 @@
 
 import { request, state } from "./session-state.js";
 import { fetchActivitySuggestion } from "./session-state.js";
-import { autofill, checklistItemsPayload, checklistPayload, clockLabel, clockValue, endClock, fmtDur, isNextDay, isTouched, markTouched, restoreAutofilled, SUGGESTIBLE_FIELDS, TIMING_FIELDS, toClock, toMin, toWakeMin, untouchedField } from "./construction-shared.js";
+import { clockLabel, endClock, fmtDur, isNextDay, toClock, toMin, toWakeMin } from "./clock.js";
+
+const TIMING_FIELDS = ["start", "duration_minutes", "end"];
+const SUGGESTIBLE_FIELDS = ["checklist", "checklist_items", ...TIMING_FIELDS];
+
+function clockValue(input) {
+  return String(input.value || "").slice(0, 5);
+}
+
+function checklistPayload(form) {
+  const value = form.checklist ? form.checklist.value : "";
+  return value || null;
+}
+
+function checklistItemsPayload(form) {
+  const raw = form.checklist_items ? form.checklist_items.value : "";
+  return raw.split("\n").map(line => line.trim()).filter(Boolean);
+}
+
+function markTouched(form, fieldNames) {
+  fieldNames.forEach(fieldName => {
+    if (form[fieldName]) form[fieldName].dataset.touched = "1";
+  });
+}
+
+function isTouched(form, fieldName) {
+  return Boolean(form[fieldName] && form[fieldName].dataset.touched === "1");
+}
+
+function untouchedField(form, fieldName) {
+  return form[fieldName] && !isTouched(form, fieldName) ? form[fieldName] : null;
+}
+
+function autofill(form, fieldName, value) {
+  const field = untouchedField(form, fieldName);
+  if (!field) return;
+  if (!("original" in field.dataset)) field.dataset.original = field.value;
+  field.value = value;
+}
+
+function restoreAutofilled(form, fieldNames) {
+  fieldNames.forEach(fieldName => {
+    const field = untouchedField(form, fieldName);
+    if (!field || !("original" in field.dataset)) return;
+    field.value = field.dataset.original;
+    delete field.dataset.original;
+  });
+}
 
 
     function markTemplateDirty() {
