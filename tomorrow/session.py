@@ -188,14 +188,14 @@ def _seed_icloud_items(repo_root: Path, document: dict) -> bool:
         if key in seen:
             continue
         seen.add(key)
-        document["drafts"].append(
-            {
-                "id": uuid.uuid4().hex,
-                "name": item.name,
-                "source": item.source,
-                "note": item.note,
-            }
-        )
+        draft = {
+            "id": uuid.uuid4().hex,
+            "name": item.name,
+            "source": item.source,
+            "note": item.note,
+            "overdue": bool(getattr(item, "overdue", False)),
+        }
+        document["drafts"].append(draft)
         added = True
 
     document["icloud_seen"] = sorted(seen)

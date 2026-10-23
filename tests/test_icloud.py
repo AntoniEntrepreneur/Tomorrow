@@ -427,3 +427,165 @@ def test_timed_reminder_overlapping_an_anchor_falls_back_to_a_draft() -> None:
     )
     assert result.anchors == []
     assert [item.name for item in result.drafts] == ["Fryzjer"]
+
+
+def test_classify_incomplete_reminder_due_before_plan_date_is_imported_as_draft() -> None:
+    reminders = [
+        RawReminder(
+            title="Overdue task",
+            list_name="Errands",
+            due_date=date(2026, 8, 10),
+            completed=False,
+        )
+    ]
+
+    result = classify_icloud_items(
+        existing_anchors=[],
+        events=[],
+        reminders=reminders,
+        plan_date=PLAN_DATE,
+        config=CONFIG,
+    )
+
+    assert result.anchors == []
+    assert len(result.drafts) == 1
+    draft = result.drafts[0]
+    assert draft.name == "Overdue task"
+    assert draft.overdue is True
+    assert draft.start is None
+    assert draft.duration_minutes is None
+    assert draft.source == "icloud"
+
+
+def test_classify_timed_overdue_reminder_is_draft_without_clock_time_preserving_title_and_note() -> None:
+    reminders = [
+        RawReminder(
+            title="Dentist followup",
+            list_name="Errands",
+            due_date=date(2026, 8, 9),
+            due_time=time(14, 30),
+            completed=False,
+            note="Ask about x-rays",
+        )
+    ]
+
+    result = classify_icloud_items(
+        existing_anchors=[],
+        events=[],
+        reminders=reminders,
+        plan_date=PLAN_DATE,
+        config=CONFIG,
+    )
+
+    assert result.anchors == []
+    assert len(result.drafts) == 1
+    draft = result.drafts[0]
+    assert draft.name == "Dentist followup"
+    assert draft.note == "Ask about x-rays"
+    assert draft.overdue is True
+    assert draft.start is None
+    assert draft.duration_minutes is None
+
+
+def test_classify_overdue_drafts_sorted_oldest_to_newest_before_day_of_drafts() -> None:
+    existing = [Anchor(name="Meeting", start=time(11, 0), duration=timedelta(minutes=60))]
+    events = [
+        RawEvent(
+            title="Clashing lunch",
+            calendar="Work",
+            start=datetime(2026, 8, 11, 11, 30),
+            duration_minutes=30,
+        )
+    ]
+    reminders = [
+        RawReminder(
+            title="Due yesterday afternoon",
+            list_name="Errands",
+            due_date=date(2026, 8, 10),
+            due_time=time(15, 0),
+        ),
+        RawReminder(
+            title="Due last week date-only",
+            list_name="Errands",
+            due_date=date(2026, 8, 3),
+            due_time=None,
+        ),
+        RawReminder(
+            title="Due yesterday morning",
+            list_name="Errands",
+            due_date=date(2026, 8, 10),
+            due_time=time(9, 0),
+        ),
+        RawReminder(
+            title="Due today date-only",
+            list_name="Errands",
+            due_date=PLAN_DATE,
+            due_time=None,
+        ),
+    ]
+
+    result = classify_icloud_items(
+        existing_anchors=existing,
+        events=events,
+        reminders=reminders,
+        plan_date=PLAN_DATE,
+        config=CONFIG,
+    )
+
+    assert [d.name for d in result.drafts] == [
+        "Due last week date-only",
+        "Due yesterday morning",
+        "Due yesterday afternoon",
+        "Clashing lunch",
+        "Due today date-only",
+    ]
+    assert result.drafts[0].overdue is True
+    assert result.drafts[1].overdue is True
+    assert result.drafts[2].overdue is True
+    assert result.drafts[3].overdue is False
+    assert result.drafts[4].overdue is False
+
+
+def test_classify_completed_past_reminder_is_excluded() -> None:
+    reminders = [
+        RawReminder(
+            title="Finished yesterday",
+            list_name="Errands",
+            due_date=date(2026, 8, 10),
+            completed=True,
+        )
+    ]
+
+    result = classify_icloud_items(
+        existing_anchors=[],
+        events=[],
+        reminders=reminders,
+        plan_date=PLAN_DATE,
+        config=CONFIG,
+    )
+
+    assert result.drafts == []
+    assert result.anchors == []
+
+
+def test_classify_future_reminder_is_excluded() -> None:
+    reminders = [
+        RawReminder(
+            title="Tomorrow errand",
+            list_name="Errands",
+            due_date=date(2026, 8, 12),
+            completed=False,
+        )
+    ]
+
+    result = classify_icloud_items(
+        existing_anchors=[],
+        events=[],
+        reminders=reminders,
+        plan_date=PLAN_DATE,
+        config=CONFIG,
+    )
+
+    assert result.drafts == []
+    assert result.anchors == []
+
