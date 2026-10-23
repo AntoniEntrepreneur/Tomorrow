@@ -255,8 +255,9 @@ def test_location_ingestion_updates_config_and_refreshes_weather(tmp_path: Path)
     assert status == 200
     payload = json.loads(body)
     assert "weather" in payload
-    weather_file = tmp_path / "data" / "weather.toml"
+    weather_file = tmp_path / "data" / "weather.local.toml"
     assert weather_file.exists()
+    assert not (tmp_path / "data" / "weather.toml").exists()
     assert "52.23" in weather_file.read_text(encoding="utf-8")
     assert "21.01" in weather_file.read_text(encoding="utf-8")
 

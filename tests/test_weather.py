@@ -264,6 +264,36 @@ def test_save_weather_location_persists_toml(tmp_path: Path) -> None:
     data_dir.mkdir()
     save_weather_location(data_dir, latitude=52.23, longitude=21.01, name="Warsaw")
 
+    assert (data_dir / "weather.local.toml").exists()
+    assert not (data_dir / "weather.toml").exists()
+    assert load_weather_location(data_dir) == WeatherLocation(latitude=52.23, longitude=21.01)
+    assert load_weather_name(data_dir) == "Warsaw"
+
+
+def test_load_weather_location_prefers_local_toml_over_default(tmp_path: Path) -> None:
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
+    (data_dir / "weather.toml").write_text(
+        'name = "Warsaw"\nlatitude = 52.23\nlongitude = 21.01\n', encoding="utf-8"
+    )
+    (data_dir / "weather.local.toml").write_text(
+        'name = "Berlin"\nlatitude = 52.52\nlongitude = 13.40\n', encoding="utf-8"
+    )
+
+    assert load_weather_location(data_dir) == WeatherLocation(latitude=52.52, longitude=13.40)
+    assert load_weather_name(data_dir) == "Berlin"
+
+
+def test_load_weather_location_local_invalid_falls_back_to_default(tmp_path: Path) -> None:
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
+    (data_dir / "weather.toml").write_text(
+        'name = "Warsaw"\nlatitude = 52.23\nlongitude = 21.01\n', encoding="utf-8"
+    )
+    (data_dir / "weather.local.toml").write_text(
+        "invalid toml [[[\n", encoding="utf-8"
+    )
+
     assert load_weather_location(data_dir) == WeatherLocation(latitude=52.23, longitude=21.01)
     assert load_weather_name(data_dir) == "Warsaw"
 

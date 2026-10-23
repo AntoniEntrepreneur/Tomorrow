@@ -20,10 +20,18 @@ class WeatherLocation:
 
 
 _OPEN_METEO_FORECAST = "https://api.open-meteo.com/v1/forecast"
+WEATHER_CONFIG_FILENAME = "weather.toml"
+LOCAL_WEATHER_CONFIG_FILENAME = "weather.local.toml"
 
 
 def _load_weather_toml(data_dir: Path) -> dict | None:
-    path = data_dir / "weather.toml"
+    local_path = data_dir / LOCAL_WEATHER_CONFIG_FILENAME
+    if local_path.exists():
+        try:
+            return tomllib.loads(local_path.read_text(encoding="utf-8"))
+        except tomllib.TOMLDecodeError:
+            pass
+    path = data_dir / WEATHER_CONFIG_FILENAME
     if not path.exists():
         return None
     try:
@@ -63,7 +71,7 @@ def save_weather_location(
     name: str | None = None,
 ) -> None:
     data_dir.mkdir(parents=True, exist_ok=True)
-    path = data_dir / "weather.toml"
+    path = data_dir / LOCAL_WEATHER_CONFIG_FILENAME
     lines = [
         f"latitude = {latitude}",
         f"longitude = {longitude}",
