@@ -133,3 +133,138 @@ def test_load_weather_name_reads_optional_display_name(tmp_path: Path) -> None:
     )
 
     assert load_weather_name(data_dir) == "Warsaw"
+
+
+def test_weather_code_emoji_maps_wmo_codes() -> None:
+    from tomorrow.weather import weather_code_emoji
+
+    assert weather_code_emoji(0) == "☀️"
+    assert weather_code_emoji(1) == "☀️"
+    assert weather_code_emoji(2) == "⛅"
+    assert weather_code_emoji(3) == "☁️"
+    assert weather_code_emoji(45) == "🌫️"
+    assert weather_code_emoji(61) == "🌧️"
+    assert weather_code_emoji(71) == "🌨️"
+    assert weather_code_emoji(95) == "⛈️"
+
+
+def test_filter_waking_hourly_same_day() -> None:
+    from tomorrow.defaults import DayBounds
+    from tomorrow.weather import filter_waking_hourly
+
+    bounds = DayBounds(wake="06:30", sleep="23:00")
+    plan_date = date(2026, 8, 11)
+    raw_hourly = {
+        "time": [f"2026-08-11T{h:02d}:00" for h in range(24)],
+        "temperature_2m": [float(h + 10) for h in range(24)],
+        "precipitation_probability": [h * 2 for h in range(24)],
+        "weathercode": [2 if h % 2 == 0 else 61 for h in range(24)],
+    }
+    cards = filter_waking_hourly(raw_hourly, bounds=bounds, plan_date=plan_date)
+
+    assert len(cards) == 18  # 06:00 to 23:00
+    assert cards[0]["hour"] == "06:00"
+    assert cards[0]["temperature_c"] == 16
+    assert cards[0]["emoji"] == "⛅"
+    assert cards[-1]["hour"] == "23:00"
+    assert cards[-1]["temperature_c"] == 33
+
+
+def test_filter_waking_hourly_overnight_midnight_wrap() -> None:
+    from tomorrow.defaults import DayBounds
+    from tomorrow.weather import filter_waking_hourly
+
+    bounds = DayBounds(wake="08:00", sleep="01:30")
+    plan_date = date(2026, 8, 11)
+    raw_hourly = {
+        "time": [f"2026-08-11T{h:02d}:00" for h in range(24)]
+        + [f"2026-08-12T{h:02d}:00" for h in range(24)],
+        "temperature_2m": [20.0] * 48,
+        "precipitation_probability": [0] * 48,
+        "weathercode": [0] * 48,
+    }
+    cards = filter_waking_hourly(raw_hourly, bounds=bounds, plan_date=plan_date)
+
+    # 08:00 through 23:00 on 8-11 (16 hours) + 00:00 and 01:00 on 8-12 (2 hours) = 18 hours
+    assert len(cards) == 18
+    assert cards[0]["hour"] == "08:00"
+    assert cards[-2]["hour"] == "00:00 +1"
+    assert cards[-1]["hour"] == "01:00 +1"
+
+
+def test_fetch_weather_forecast_builds_structured_payload() -> None:
+    from tomorrow.defaults import DayBounds
+    from tomorrow.weather import fetch_weather_forecast
+
+    bounds = DayBounds(wake="07:00", sleep="22:00")
+    plan_date = date(2026, 8, 11)
+    payload = {
+        "daily": {
+            "time": ["2026-08-11"],
+            "temperature_2m_min": [12.4],
+            "temperature_2m_max": [21.8],
+            "weathercode": [61],
+        },
+        "hourly": {
+            "time": [f"2026-08-11T{h:02d}:00" for h in range(24)],
+            "temperature_2m": [15.0] * 24,
+            "precipitation_probability": [40] * 24,
+            "weathercode": [61] * 24,
+        },
+    }
+
+    def fake_opener(_request):
+        return BytesIO(json.dumps(payload).encode("utf-8"))
+
+    location = WeatherLocation(latitude=52.23, longitude=21.01)
+    forecast = fetch_weather_forecast(
+        location,
+        plan_date,
+        bounds=bounds,
+        location_name="Warsaw",
+        opener=fake_opener,
+    )
+
+    assert forecast is not None
+    assert forecast["location_name"] == "Warsaw"
+    assert forecast["low_c"] == 12
+    assert forecast["high_c"] == 22
+    assert forecast["weather_code"] == 61
+    assert forecast["condition"] == "rain"
+    assert forecast["emoji"] == "🌧️"
+    assert forecast["summary"] == "Warsaw · 12° / 22° · 🌧️ rain"
+    assert len(forecast["hourly"]) == 16  # 07:00 to 22:00
+
+
+def test_reverse_geocode_resolves_city_name() -> None:
+    from tomorrow.weather import reverse_geocode
+
+    payload = {"address": {"city": "Warsaw"}}
+
+    def fake_opener(_request):
+        return BytesIO(json.dumps(payload).encode("utf-8"))
+
+    name = reverse_geocode(52.23, 21.01, opener=fake_opener)
+    assert name == "Warsaw"
+
+
+def test_reverse_geocode_returns_none_on_error() -> None:
+    from tomorrow.weather import reverse_geocode
+
+    def failing_opener(_request):
+        raise URLError("offline")
+
+    assert reverse_geocode(52.23, 21.01, opener=failing_opener) is None
+
+
+def test_save_weather_location_persists_toml(tmp_path: Path) -> None:
+    from tomorrow.weather import save_weather_location
+
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
+    save_weather_location(data_dir, latitude=52.23, longitude=21.01, name="Warsaw")
+
+    assert load_weather_location(data_dir) == WeatherLocation(latitude=52.23, longitude=21.01)
+    assert load_weather_name(data_dir) == "Warsaw"
+
+

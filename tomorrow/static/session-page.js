@@ -208,6 +208,44 @@ import { autofill, checklistItemsPayload, checklistPayload, clockLabel, clockVal
       if (!el.hidden && el.textContent !== blockers.join(" ")) hideBlockers();
     }
 
+    const TOAST_TIMEOUT_MS = 3000;
+    let toastTimer = null;
+
+    function hideToast() {
+      if (toastTimer) {
+        clearTimeout(toastTimer);
+        toastTimer = null;
+      }
+      const el = document.getElementById("toast");
+      if (el) {
+        el.hidden = true;
+        el.textContent = "";
+      }
+    }
+
+    function getToastEl() {
+      let el = document.getElementById("toast");
+      if (!el) {
+        el = document.createElement("div");
+        el.id = "toast";
+        el.className = "toast";
+        el.setAttribute("role", "status");
+        el.setAttribute("aria-live", "polite");
+        el.hidden = true;
+        el.addEventListener("click", hideToast);
+        document.body.appendChild(el);
+      }
+      return el;
+    }
+
+    function showToast(message) {
+      hideToast();
+      const el = getToastEl();
+      el.textContent = message;
+      el.hidden = false;
+      toastTimer = setTimeout(hideToast, TOAST_TIMEOUT_MS);
+    }
+
     function setChromeEnabled() {
       if (!state.current) return;
       const blocked = sessionUndoBlocked();
@@ -216,6 +254,7 @@ import { autofill, checklistItemsPayload, checklistPayload, clockLabel, clockVal
     }
 
     function renderRail(session) {
+      clearGapHover();
       const wakeClock = session.bounds.wake;
       const total = Math.max(1, toWakeMin(session.bounds.sleep, wakeClock));
       document.getElementById("rail").innerHTML = railRows(session).map(row => {
@@ -225,7 +264,7 @@ import { autofill, checklistItemsPayload, checklistPayload, clockLabel, clockVal
           const armed = state.armedFlexId ? " armed" : "";
           const cta = state.armedFlexId ? "Place here" : "Place Flex";
           return '<button type="button" class="gap' + armed + '" data-kind="gap" data-start="' +
-            esc(row.start) + '" data-end="' + esc(row.end) + '" style="min-height:' +
+            esc(row.start) + '" data-end="' + esc(row.end) + '" data-duration="' + row.durationMin + '" style="min-height:' +
             heightPx(row.durationMin, total, 40) + 'px">' +
             '<span class="time-tag">' + esc(startLabel) + "</span>" +
             "<span>Gap · " + esc(fmtDur(row.durationMin)) + "</span>" +
@@ -329,12 +368,51 @@ import { autofill, checklistItemsPayload, checklistPayload, clockLabel, clockVal
       }
       document.title = session.plan_date_label;
       document.getElementById("plan-date").textContent = session.plan_date_label;
-      const weatherBits = [];
-      if (session.weather_name) {
-        weatherBits.push('<span class="name">' + esc(session.weather_name) + "</span>");
+      const weatherEl = document.getElementById("weather");
+      const hourlyStrip = document.getElementById("weather-hourly-strip");
+      if (session.weather && session.weather.summary) {
+        const hasHourly = Array.isArray(session.weather.hourly) && session.weather.hourly.length > 0;
+        if (hasHourly) {
+          weatherEl.innerHTML = `<button type="button" class="weather-pill" id="weather-toggle" aria-expanded="false" aria-controls="weather-hourly-strip"><span class="weather-summary">${esc(session.weather.summary)}</span> <span class="weather-indicator" aria-hidden="true">▾</span></button>`;
+          if (hourlyStrip) {
+            hourlyStrip.innerHTML = `<div class="weather-cards-scroll">` +
+              session.weather.hourly.map(card => `
+                <div class="weather-card">
+                  <span class="card-hour">${esc(card.hour)}</span>
+                  <span class="card-emoji">${esc(card.emoji)}</span>
+                  <span class="card-temp">${card.temperature_c}°</span>
+                  ${card.precipitation_probability > 0 ? `<span class="card-precip">💧 ${card.precipitation_probability}%</span>` : ""}
+                </div>
+              `).join("") +
+            `</div>`;
+            const toggle = document.getElementById("weather-toggle");
+            toggle.onclick = () => {
+              const expanded = toggle.getAttribute("aria-expanded") === "true";
+              toggle.setAttribute("aria-expanded", String(!expanded));
+              hourlyStrip.hidden = expanded;
+              const ind = toggle.querySelector(".weather-indicator");
+              if (ind) ind.textContent = expanded ? "▾" : "▴";
+            };
+          }
+        } else {
+          weatherEl.innerHTML = `<span class="weather-summary">${esc(session.weather.summary)}</span>`;
+          if (hourlyStrip) {
+            hourlyStrip.hidden = true;
+            hourlyStrip.innerHTML = "";
+          }
+        }
+      } else {
+        if (hourlyStrip) {
+          hourlyStrip.hidden = true;
+          hourlyStrip.innerHTML = "";
+        }
+        const weatherBits = [];
+        if (session.weather_name) {
+          weatherBits.push('<span class="name">' + esc(session.weather_name) + "</span>");
+        }
+        if (session.weather_one_liner) weatherBits.push(esc(session.weather_one_liner));
+        weatherEl.innerHTML = weatherBits.join(" · ");
       }
-      if (session.weather_one_liner) weatherBits.push(esc(session.weather_one_liner));
-      document.getElementById("weather").innerHTML = weatherBits.join(" · ");
       dropStaleBlockers(session.blockers || []);
       document.getElementById("wake-cap").textContent = "↑ " + session.bounds.wake + " wake";
       document.getElementById("sleep-cap").textContent =
@@ -359,7 +437,8 @@ import { autofill, checklistItemsPayload, checklistPayload, clockLabel, clockVal
       state.sheetOpen = true;
       state.sheetKind = kind || "edit";
       setChromeEnabled();
-      const first = document.getElementById("sheet").querySelector("input, button");
+      const first = document.getElementById("sheet").querySelector("[autofocus]") ||
+        document.getElementById("sheet").querySelector("input, button");
       if (first) first.focus();
     }
 
@@ -707,16 +786,30 @@ import { autofill, checklistItemsPayload, checklistPayload, clockLabel, clockVal
       );
     }
 
-    function sheetGapPlace(start, end) {
+    function sheetGapPlace(gapStart, gapEnd, preferredOrientation = "start") {
       const unplaced = (state.current.flexes || []).filter(item => !item.start);
-      const opts = unplaced.map(item =>
-        '<button type="button" data-place-at="' + esc(item.id) + '" data-start="' + esc(start) + '">' +
-        esc(item.name) + " · " + esc(fmtDur(item.duration_minutes)) + "</button>"
-      ).join("");
+      const isStartPref = preferredOrientation === "start";
+      const isEndPref = preferredOrientation === "end";
+      const opts = unplaced.map((item, index) => {
+        const duration = Number(item.duration_minutes != null ? item.duration_minutes : item.duration);
+        const endStart = toClock(toMin(gapEnd) - duration);
+        const startClass = isStartPref ? "primary" : "ghost";
+        const endClass = isEndPref ? "primary" : "ghost";
+        const startAutofocus = (index === 0 && isStartPref) ? ' autofocus data-prioritized="true"' : (isStartPref ? ' data-prioritized="true"' : "");
+        const endAutofocus = (index === 0 && isEndPref) ? ' autofocus data-prioritized="true"' : (isEndPref ? ' data-prioritized="true"' : "");
+        return (
+          '<div class="gap-place-row" data-flex-id="' + esc(item.id) + '">' +
+          '<div class="gap-place-label"><strong>' + esc(item.name) + '</strong> · ' + esc(fmtDur(duration)) + '</div>' +
+          '<div class="actions" style="margin-top: 0.3rem;">' +
+          '<button type="button" class="' + startClass + '" data-place-at="' + esc(item.id) + '" data-start="' + esc(gapStart) + '" data-placement="start"' + startAutofocus + '>At start</button>' +
+          '<button type="button" class="' + endClass + '" data-place-at="' + esc(item.id) + '" data-start="' + esc(endStart) + '" data-placement="end"' + endAutofocus + '>At end</button>' +
+          '</div></div>'
+        );
+      }).join("");
       openSheet(
         "<h2>Place into this Gap</h2>" +
-        '<p class="hint">Gap ' + esc(start) + "–" + esc(end) + ". Stamp Flex to add to the tray; clicking a Gap Places it.</p>" +
-        '<div class="choice-row">' + (opts || "<span>No unplaced Flex.</span>") + "</div>" +
+        '<p class="hint">Gap ' + esc(gapStart) + "–" + esc(gapEnd) + ". Stamp Flex to add to the tray; clicking a Gap Places it.</p>" +
+        '<div class="gap-place-list">' + (opts || "<span>No unplaced Flex.</span>") + "</div>" +
         '<div class="actions"><button type="button" class="ghost" data-close>Cancel</button></div>'
       );
     }
@@ -907,6 +1000,7 @@ import { autofill, checklistItemsPayload, checklistPayload, clockLabel, clockVal
     }
 
     function renderTemplateEntries() {
+      clearGapHover();
       renderBounds(state.templateDraft.bounds);
       const wakeClock = state.templateDraft.bounds.wake;
       const total = Math.max(1, toWakeMin(state.templateDraft.bounds.sleep, wakeClock));
@@ -920,7 +1014,7 @@ import { autofill, checklistItemsPayload, checklistPayload, clockLabel, clockVal
           const armed = state.templateArmedFlex ? " armed" : "";
           const cta = state.templateArmedFlex ? "Place here" : "Place Flex";
           return '<button type="button" class="gap' + armed + '" data-template-gap="true" data-start="' +
-            esc(row.start) + '" data-end="' + esc(row.end) + '" style="min-height:' +
+            esc(row.start) + '" data-end="' + esc(row.end) + '" data-duration="' + row.durationMin + '" style="min-height:' +
             heightPx(row.durationMin, total, 40) + 'px">' +
             '<span class="time-tag">' + esc(startLabel) + "</span>" +
             "<span>Gap · " + esc(fmtDur(row.durationMin)) + "</span>" +
@@ -992,6 +1086,7 @@ import { autofill, checklistItemsPayload, checklistPayload, clockLabel, clockVal
     }
 
     function placeTemplateArmedFlex(start) {
+      clearGapHover();
       if (!state.templateArmedFlex) return;
       const { source, index } = state.templateArmedFlex;
       state.templateArmedFlex = null;
@@ -1100,6 +1195,8 @@ import { autofill, checklistItemsPayload, checklistPayload, clockLabel, clockVal
         document.querySelector(".kicker").textContent = "Day Template";
         document.getElementById("plan-date").textContent = template.name || "New Template";
         document.getElementById("weather").textContent = "Reusable template · changes stay in template mode";
+        const strip = document.getElementById("weather-hourly-strip");
+        if (strip) { strip.hidden = true; strip.innerHTML = ""; }
         document.getElementById("template-editor").hidden = false;
         document.getElementById("template-editor").elements.name.value = template.name;
         document.getElementById("template-editor").elements.weekday.value = template.weekday || "";
@@ -1158,6 +1255,32 @@ import { autofill, checklistItemsPayload, checklistPayload, clockLabel, clockVal
       }
       const response = await request("/api/session");
       render(await response.json());
+      if (navigator.geolocation && !state.locationRequested) {
+        state.locationRequested = true;
+        navigator.geolocation.getCurrentPosition(
+          async (pos) => {
+            try {
+              const locRes = await request("/api/location", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  latitude: pos.coords.latitude,
+                  longitude: pos.coords.longitude,
+                }),
+              });
+              if (locRes.ok) {
+                render(await locRes.json());
+              }
+            } catch (err) {
+              // Silently ignore geolocation failure
+            }
+          },
+          () => {
+            // Geolocation permission declined or unavailable, silently ignored
+          },
+          { timeout: 10000 }
+        );
+      }
     }
 
     async function dropFlex(itemId) {
@@ -1170,6 +1293,7 @@ import { autofill, checklistItemsPayload, checklistPayload, clockLabel, clockVal
     }
 
     async function placeFlexAt(itemId, start) {
+      clearGapHover();
       state.armedFlexId = null;
       await mutate("/api/place", { id: itemId, start: start });
     }
@@ -1202,15 +1326,86 @@ import { autofill, checklistItemsPayload, checklistPayload, clockLabel, clockVal
     document.getElementById("stamp-todo").addEventListener("click", sheetAddTodo);
     document.getElementById("wake-cap").addEventListener("click", () => sheetEditBound("wake"));
     document.getElementById("sleep-cap").addEventListener("click", () => sheetEditBound("sleep"));
+
+    function clearGapHover(gap) {
+      if (gap) {
+        gap.classList.remove("hover-start", "hover-end");
+        const cta = gap.querySelector(".cta");
+        if (cta) {
+          const isArmed = (state.armedFlexId && gap.matches("[data-kind='gap']")) ||
+                          (state.templateArmedFlex && gap.matches("[data-template-gap]"));
+          cta.textContent = isArmed ? "Place here" : "Place Flex";
+        }
+      } else {
+        document.querySelectorAll(".gap.hover-start, .gap.hover-end").forEach(clearGapHover);
+      }
+    }
+
+    document.getElementById("rail").addEventListener("mousemove", event => {
+      const gap = event.target.closest("[data-kind='gap'], [data-template-gap]");
+      if (!gap) {
+        clearGapHover();
+        return;
+      }
+      const isArmed = (state.armedFlexId && gap.matches("[data-kind='gap']")) ||
+                      (state.templateArmedFlex && gap.matches("[data-template-gap]"));
+      if (!isArmed) {
+        clearGapHover(gap);
+        return;
+      }
+      const rect = gap.getBoundingClientRect();
+      const isBottom = rect.height > 0 && (event.clientY - rect.top) >= (rect.height / 2);
+      const cta = gap.querySelector(".cta");
+      if (isBottom) {
+        gap.classList.remove("hover-start");
+        gap.classList.add("hover-end");
+        if (cta) cta.textContent = "Place at end";
+      } else {
+        gap.classList.remove("hover-end");
+        gap.classList.add("hover-start");
+        if (cta) cta.textContent = "Place at start";
+      }
+    });
+
+    document.getElementById("rail").addEventListener("mouseleave", () => {
+      clearGapHover();
+    });
+
+    document.getElementById("rail").addEventListener("mouseout", event => {
+      const gap = event.target.closest("[data-kind='gap'], [data-template-gap]");
+      if (gap && (!event.relatedTarget || !gap.contains(event.relatedTarget))) {
+        clearGapHover(gap);
+      }
+    });
+
     document.getElementById("rail").addEventListener("click", event => {
       if (!state.current) return;
       const gap = event.target.closest("[data-kind='gap']");
       if (gap) {
+        const rect = gap.getBoundingClientRect();
+        const isBottom = rect.height > 0 && (event.clientY - rect.top) >= (rect.height / 2);
         if (state.armedFlexId) {
-          placeFlexAt(state.armedFlexId, gap.dataset.start);
+          const armedFlex = (state.current.flexes || []).find(item => item.id === state.armedFlexId);
+          const duration = Number(armedFlex ? (armedFlex.duration_minutes != null ? armedFlex.duration_minutes : armedFlex.duration) : 0);
+          const wakeClock = state.current.bounds.wake;
+          const gapDuration = gap.dataset.duration != null
+            ? Number(gap.dataset.duration)
+            : (toWakeMin(gap.dataset.end, wakeClock) - toWakeMin(gap.dataset.start, wakeClock));
+          if (duration > gapDuration) {
+            const flexName = armedFlex ? armedFlex.name : "Flex";
+            showToast(`${flexName} (${fmtDur(duration)}) does not fit in this gap (${fmtDur(gapDuration)})`);
+            return;
+          }
+          if (isBottom) {
+            const targetMin = toMin(gap.dataset.end) - duration;
+            const computedStart = toClock(targetMin);
+            placeFlexAt(state.armedFlexId, computedStart);
+          } else {
+            placeFlexAt(state.armedFlexId, gap.dataset.start);
+          }
           return;
         }
-        sheetGapPlace(gap.dataset.start, gap.dataset.end);
+        sheetGapPlace(gap.dataset.start, gap.dataset.end, isBottom ? "end" : "start");
         return;
       }
       const block = event.target.closest("[data-kind]");
@@ -1447,10 +1642,11 @@ import { autofill, checklistItemsPayload, checklistPayload, clockLabel, clockVal
         await dropTodo(dropTodoId);
         return;
       }
-      const placeAt = event.target.dataset.placeAt;
+      const placeAtBtn = event.target.closest ? event.target.closest("[data-place-at]") : null;
+      const placeAt = placeAtBtn ? placeAtBtn.dataset.placeAt : event.target.dataset?.placeAt;
       if (placeAt) {
         event.preventDefault();
-        await placeFlexAt(placeAt, event.target.dataset.start);
+        await placeFlexAt(placeAt, (placeAtBtn || event.target).dataset.start);
         return;
       }
       const promoteChecklistId = event.target.dataset.promoteChecklist;
@@ -1465,7 +1661,35 @@ import { autofill, checklistItemsPayload, checklistPayload, clockLabel, clockVal
         const gap = event.target.closest("[data-template-gap]");
         if (gap) {
           if (state.templateArmedFlex) {
-            placeTemplateArmedFlex(gap.dataset.start);
+            const { source, index } = state.templateArmedFlex;
+            let duration = 0;
+            let flexName = "Flex";
+            if (source === "flex") {
+              const entry = state.templateDraft.flexes[index];
+              duration = Number(entry ? (entry.duration != null ? entry.duration : entry.duration_minutes) : 0);
+              flexName = entry ? (entry.name || (entry.activity ? ("Activity: " + entry.activity) : ("Flex " + (index + 1)))) : "Flex";
+            } else if (source === "daily") {
+              const entry = state.templateDraft.dailyActivities[index];
+              duration = Number(entry ? (entry.duration_minutes != null ? entry.duration_minutes : entry.duration) : 60);
+              flexName = entry ? entry.name : "Activity";
+            }
+            const wakeClock = state.templateDraft.bounds.wake;
+            const gapDuration = gap.dataset.duration != null
+              ? Number(gap.dataset.duration)
+              : (toWakeMin(gap.dataset.end, wakeClock) - toWakeMin(gap.dataset.start, wakeClock));
+            if (duration > gapDuration) {
+              showToast(`${flexName} (${fmtDur(duration)}) does not fit in this gap (${fmtDur(gapDuration)})`);
+              return;
+            }
+            const rect = gap.getBoundingClientRect();
+            const isBottom = rect.height > 0 && (event.clientY - rect.top) >= (rect.height / 2);
+            if (isBottom) {
+              const targetMin = toMin(gap.dataset.end) - duration;
+              const computedStart = toClock(targetMin);
+              placeTemplateArmedFlex(computedStart);
+            } else {
+              placeTemplateArmedFlex(gap.dataset.start);
+            }
           }
           return;
         }
@@ -1786,5 +2010,10 @@ import { autofill, checklistItemsPayload, checklistPayload, clockLabel, clockVal
     document.getElementById("template-no").addEventListener("click", () => {
       mutate("/api/template", { action: "decline" });
     });
+
+    const toastEl = document.getElementById("toast");
+    if (toastEl) {
+      toastEl.addEventListener("click", hideToast);
+    }
 
     loadSession();
