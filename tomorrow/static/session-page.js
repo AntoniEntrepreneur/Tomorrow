@@ -112,6 +112,10 @@ import { autofill, checklistItemsPayload, checklistPayload, clockLabel, clockVal
         return;
       }
       if (request !== state.latestSuggestRequest || !form.isConnected) return;
+      if (suggestion) {
+        if (suggestion.duration_minutes) form.dataset.suggestedDuration = suggestion.duration_minutes;
+        if (suggestion.start) form.dataset.suggestedStart = suggestion.start;
+      }
       applyActivitySuggestion(form, suggestion);
     }
 
@@ -301,8 +305,6 @@ import { autofill, checklistItemsPayload, checklistPayload, clockLabel, clockVal
           '<div class="ops">' +
           '<button type="button" data-edit-flex="' + esc(item.id) + '">Edit</button>' +
           '<button type="button" data-place="' + esc(item.id) + '">Place</button>' +
-          '<button type="button" data-change-duration="' + esc(item.id) + '">Change Duration</button>' +
-          '<button type="button" data-flex-to-todo="' + esc(item.id) + '">Make To-do</button>' +
           '<button type="button" data-drop="' + esc(item.id) + '">Drop</button>' +
           "</div></div>"
         ).join("") + "</div>";
@@ -350,8 +352,7 @@ import { autofill, checklistItemsPayload, checklistPayload, clockLabel, clockVal
           '<span class="name">' + esc(item.name) + "</span>" +
           (item.note ? '<div class="note">' + esc(item.note) + "</div>" : "") +
           '<div class="ops">' +
-          '<button type="button" data-todo-to-flex="' + esc(item.id) + '">Make Flex</button>' +
-          '<button type="button" data-todo-to-anchor="' + esc(item.id) + '">Make Anchor</button>' +
+          '<button type="button" data-edit-todo="' + esc(item.id) + '">Edit</button>' +
           '<button type="button" data-drop-todo="' + esc(item.id) + '">Drop</button>' +
           "</div></div>"
         ).join("") + "</div>";
@@ -649,41 +650,124 @@ import { autofill, checklistItemsPayload, checklistPayload, clockLabel, clockVal
       );
     }
 
-    function sheetEditTodo(item) {
+    function sheetEditActivity(item, currentKind) {
+      const kind = currentKind || (item.start ? "anchor" : (item.duration_minutes ? "flex" : "todo"));
+      const isAnchor = kind === "anchor";
+      const isFlex = kind === "flex";
+      const isTodo = kind === "todo";
+      const start = item.start || (isAnchor ? "09:00" : "");
+      const durationMin = item.duration_minutes || (isTodo ? "" : 30);
+      const note = item.note || "";
+
       openSheet(
-        "<h2>To-do · " + esc(item.name) + "</h2>" +
-        '<form id="edit-todo" data-id="' + esc(item.id) + '">' +
+        '<h2>Edit ' + (isAnchor ? "Anchor" : isFlex ? "Flex" : "To-do") + ' · ' + esc(item.name) + '</h2>' +
+        '<form id="edit-activity" data-id="' + esc(item.id) + '" data-source-kind="' + esc(kind) + '">' +
         '<label>Name <input name="name" required value="' + esc(item.name) + '"></label>' +
-        '<label>Note <textarea name="note" rows="3">' + esc(item.note || "") + '</textarea></label>' +
+        '<label>Type <select name="kind">' +
+        '<option value="anchor"' + (isAnchor ? ' selected' : '') + '>Anchor</option>' +
+        '<option value="flex"' + (isFlex ? ' selected' : '') + '>Flex</option>' +
+        '<option value="todo"' + (isTodo ? ' selected' : '') + '>To-do</option>' +
+        '</select></label>' +
+        durationFields(start, durationMin, "edit-start-label") +
+        '<label id="edit-note-label"' + (isTodo ? '' : ' hidden') + '>Note <textarea name="note" rows="3">' + esc(note) + '</textarea></label>' +
+        checklistField(item.checklist, item.checklist_items) +
         '<div class="actions"><button class="primary" type="submit">Update</button>' +
-        '<button type="button" class="ghost" data-todo-to-flex="' + esc(item.id) + '">Make Flex</button>' +
-        '<button type="button" class="ghost" data-todo-to-anchor="' + esc(item.id) + '">Make Anchor</button>' +
+        saveToLibraryButton(item, kind) +
         '<button type="button" class="ghost" data-close>Cancel</button>' +
-        '<button type="button" class="danger" data-drop-todo="' + esc(item.id) + '">Drop</button></div></form>'
+        '<button type="button" class="danger" data-drop-activity="' + esc(item.id) + '" data-remove="' + esc(item.id) + '">Drop</button></div></form>'
       );
+
+      const form = document.getElementById("edit-activity");
+      initDurationToggle(form);
+      const kindSelect = form.querySelector('[name="kind"]');
+      kindSelect.addEventListener("change", () => syncEditFields(form));
+      syncEditFields(form);
+
+      const touchedFields = [];
+      if (item.start) touchedFields.push("start");
+      if (item.duration_minutes) touchedFields.push("duration_minutes");
+      if (touchedFields.length) markTouched(form, touchedFields);
+      suggestFromName(form);
     }
 
-    function sheetTodoToFlex(item) {
-      openSheet(
-        "<h2>Make Flex · " + esc(item.name) + "</h2>" +
-        '<p class="hint">The note is discarded. Undo brings it back.</p>' +
-        '<form id="todo-to-flex" data-id="' + esc(item.id) + '">' +
-        '<label>Duration (min) <input name="duration_minutes" type="number" min="1" required value="30"></label>' +
-        '<div class="actions"><button class="primary" type="submit">Make Flex</button>' +
-        '<button type="button" class="ghost" data-close>Cancel</button></div></form>'
-      );
+    async function ensureTemplatePrefill(form) {
+      if (!form || !form.name) return;
+      try {
+        const suggestion = await fetchActivitySuggestion(form.name.value.trim());
+        if (!form.isConnected) return;
+        if (suggestion) {
+          if (suggestion.duration_minutes) form.dataset.suggestedDuration = suggestion.duration_minutes;
+          if (suggestion.start) form.dataset.suggestedStart = suggestion.start;
+          if (form.kind && (form.kind.value === "flex" || form.kind.value === "anchor")) {
+            if (!form.duration_minutes.value || (form.duration_minutes.value === "30" && !isTouched(form, "duration_minutes"))) {
+              if (suggestion.duration_minutes) form.duration_minutes.value = suggestion.duration_minutes;
+            }
+          }
+          if (form.kind && form.kind.value === "anchor") {
+            if (!form.start.value || (form.start.value === "09:00" && !isTouched(form, "start"))) {
+              if (suggestion.start) form.start.value = suggestion.start;
+            }
+          }
+        }
+      } catch (e) {}
     }
 
-    function sheetTodoToAnchor(item) {
-      openSheet(
-        "<h2>Make Anchor · " + esc(item.name) + "</h2>" +
-        '<p class="hint">The note is discarded. Undo brings it back.</p>' +
-        '<form id="todo-to-anchor" data-id="' + esc(item.id) + '">' +
-        durationFields("09:00", 30) +
-        '<div class="actions"><button class="primary" type="submit">Make Anchor</button>' +
-        '<button type="button" class="ghost" data-close>Cancel</button></div></form>'
-      );
-      initDurationToggle(document.getElementById("todo-to-anchor"));
+    function syncEditFields(form) {
+      const kind = form.kind.value;
+      const asFlex = kind === "flex";
+      const asTodo = kind === "todo";
+      const asAnchor = kind === "anchor";
+
+      const h2 = document.querySelector("#sheet h2");
+      if (h2 && form.name) {
+        h2.textContent = "Edit " + (asAnchor ? "Anchor" : asFlex ? "Flex" : "To-do") + " · " + form.name.value;
+      }
+
+      if (asFlex || asAnchor) {
+        if (!form.duration_minutes.value) {
+          form.duration_minutes.value = form.dataset.suggestedDuration || 30;
+        }
+      }
+      if (asAnchor) {
+        if (!form.start.value) {
+          form.start.value = form.dataset.suggestedStart || "09:00";
+        }
+      }
+
+      form.start.required = asAnchor;
+      const startLabel = document.getElementById("edit-start-label");
+      if (startLabel) startLabel.hidden = !asAnchor;
+
+      const endLabel = document.getElementById("end-label");
+      if (endLabel) endLabel.hidden = !asAnchor;
+      const endError = document.getElementById("end-error");
+      if (endError && !asAnchor) endError.hidden = true;
+
+      const durationRow = form.querySelector(".row");
+      if (durationRow) durationRow.hidden = asTodo;
+
+      form.duration_minutes.required = !asTodo && form.dataset.durationMode !== "end";
+      if (!asAnchor && form.dataset.durationMode === "end") {
+        setDurationMode(form, "duration");
+      }
+
+      if (form.checklist) form.checklist.closest("label").hidden = asTodo;
+      if (form.checklist_items) form.checklist_items.closest("label").hidden = asTodo;
+
+      const noteLabel = document.getElementById("edit-note-label");
+      if (noteLabel) noteLabel.hidden = !asTodo;
+
+      const saveBtn = form.querySelector('[data-promote-checklist]');
+      if (saveBtn) {
+        saveBtn.hidden = asTodo;
+        if (!asTodo) saveBtn.dataset.promoteChecklistKind = kind;
+      }
+
+      ensureTemplatePrefill(form);
+    }
+
+    function sheetEditTodo(item) {
+      sheetEditActivity(item, "todo");
     }
 
     function sheetPlace(item) {
@@ -698,17 +782,6 @@ import { autofill, checklistItemsPayload, checklistPayload, clockLabel, clockVal
         '<form id="place-flex" data-id="' + esc(item.id) + '">' +
         '<label>Start <input name="start" type="time" required></label>' +
         '<div class="actions"><button class="primary" type="submit">Place</button>' +
-        '<button type="button" class="ghost" data-close>Cancel</button></div></form>'
-      );
-    }
-
-    function sheetChangeDuration(item) {
-      openSheet(
-        "<h2>Change Duration · " + esc(item.name) + "</h2>" +
-        '<form id="change-duration-flex" data-id="' + esc(item.id) + '">' +
-        '<label>New duration (min) <input name="duration_minutes" type="number" min="1" required value="' +
-        esc(item.duration_minutes) + '"></label>' +
-        '<div class="actions"><button class="primary" type="submit">Change Duration</button>' +
         '<button type="button" class="ghost" data-close>Cancel</button></div></form>'
       );
     }
@@ -748,27 +821,7 @@ import { autofill, checklistItemsPayload, checklistPayload, clockLabel, clockVal
     }
 
     function sheetEditFlex(item) {
-      const placedHint = item.start
-        ? esc(item.start) + " · " + esc(fmtDur(item.duration_minutes))
-        : "Unplaced · " + esc(fmtDur(item.duration_minutes));
-      openSheet(
-        "<h2>Flex · " + esc(item.name) + "</h2>" +
-        '<p class="hint">' + placedHint + "</p>" +
-        '<form id="edit-flex" data-id="' + esc(item.id) + '">' +
-        '<label>Name <input name="name" required value="' + esc(item.name) + '"></label>' +
-        '<label>Duration (min) <input name="duration_minutes" type="number" min="1" required value="' +
-        esc(item.duration_minutes) + '"></label>' +
-        checklistField(item.checklist, item.checklist_items) +
-        '<div class="actions"><button class="primary" type="submit">Update</button>' +
-        '<button type="button" class="ghost" data-place="' + esc(item.id) + '">Place</button>' +
-        '<button type="button" class="ghost" data-change-duration="' + esc(item.id) + '">Change Duration</button>' +
-        '<button type="button" class="ghost" data-flex-to-todo="' + esc(item.id) + '">Make To-do</button>' +
-        saveToLibraryButton(item, "flex") +
-        '<button type="button" class="ghost" data-close>Cancel</button>' +
-        '<button type="button" class="danger" data-drop="' + esc(item.id) + '">Drop</button></div></form>'
-      );
-      markTouched(document.getElementById("edit-flex"), TIMING_FIELDS);
-      suggestFromName(document.getElementById("edit-flex"));
+      sheetEditActivity(item, "flex");
     }
 
     function sheetAddAnchor() {
@@ -784,18 +837,7 @@ import { autofill, checklistItemsPayload, checklistPayload, clockLabel, clockVal
     }
 
     function sheetEditAnchor(item) {
-      openSheet(
-        "<h2>Edit Anchor</h2><form id=\"edit-anchor\" data-id=\"" + esc(item.id) + "\">" +
-        formFields(item.name, item.start, item.duration_minutes) +
-        checklistField(item.checklist, item.checklist_items) +
-        '<div class="actions"><button class="primary" type="submit">Update</button>' +
-        saveToLibraryButton(item, "anchor") +
-        '<button type="button" class="ghost" data-close>Cancel</button>' +
-        '<button type="button" class="danger" data-remove="' + esc(item.id) + '">Remove</button></div></form>'
-      );
-      initDurationToggle(document.getElementById("edit-anchor"));
-      markTouched(document.getElementById("edit-anchor"), TIMING_FIELDS);
-      suggestFromName(document.getElementById("edit-anchor"));
+      sheetEditActivity(item, "anchor");
     }
 
     function templateEntryForm(kind, index, sourceKind) {
@@ -1256,10 +1298,6 @@ import { autofill, checklistItemsPayload, checklistPayload, clockLabel, clockVal
       await mutate("/api/place", { id: itemId, start: start });
     }
 
-    async function flexToTodo(itemId) {
-      await mutate("/api/convert", { kind: "flex-to-todo", id: itemId });
-    }
-
     async function promoteChecklist(itemId, itemKind) {
       const name = window.prompt("Save this checklist to the Library as:");
       if (name === null) return;
@@ -1485,24 +1523,11 @@ import { autofill, checklistItemsPayload, checklistPayload, clockLabel, clockVal
         if (item) sheetPlace(item);
         return;
       }
-      const changeDurationId = event.target.dataset.changeDuration;
-      if (changeDurationId) {
-        event.stopPropagation();
-        const item = findFlex(changeDurationId);
-        if (item) sheetChangeDuration(item);
-        return;
-      }
       const editId = event.target.dataset.editFlex;
       if (editId) {
         event.stopPropagation();
         const item = findFlex(editId);
         if (item) sheetEditFlex(item);
-        return;
-      }
-      const flexToTodoId = event.target.dataset.flexToTodo;
-      if (flexToTodoId) {
-        event.stopPropagation();
-        flexToTodo(flexToTodoId);
         return;
       }
       const chip = event.target.closest("[data-arm]");
@@ -1520,20 +1545,6 @@ import { autofill, checklistItemsPayload, checklistPayload, clockLabel, clockVal
       if (dropId) {
         event.stopPropagation();
         dropTodo(dropId);
-        return;
-      }
-      const toFlexId = event.target.dataset.todoToFlex;
-      if (toFlexId) {
-        event.stopPropagation();
-        const item = findTodo(toFlexId);
-        if (item) sheetTodoToFlex(item);
-        return;
-      }
-      const toAnchorId = event.target.dataset.todoToAnchor;
-      if (toAnchorId) {
-        event.stopPropagation();
-        const item = findTodo(toAnchorId);
-        if (item) sheetTodoToAnchor(item);
         return;
       }
       const chip = event.target.closest("[data-edit-todo]");
@@ -1599,6 +1610,14 @@ import { autofill, checklistItemsPayload, checklistPayload, clockLabel, clockVal
         }
         return;
       }
+      const dropActivityId = event.target.dataset.dropActivity;
+      if (dropActivityId) {
+        event.preventDefault();
+        const form = document.getElementById("edit-activity");
+        const kind = (form && form.kind && form.kind.value) || (form && form.dataset.sourceKind) || "anchor";
+        await mutate("/api/edit", { kind: kind, id: dropActivityId, remove: true });
+        return;
+      }
       const removeId = event.target.dataset.remove;
       if (removeId) {
         event.preventDefault();
@@ -1609,12 +1628,6 @@ import { autofill, checklistItemsPayload, checklistPayload, clockLabel, clockVal
       if (dropId) {
         event.preventDefault();
         await dropFlex(dropId);
-        return;
-      }
-      const flexToTodoId = event.target.dataset.flexToTodo;
-      if (flexToTodoId) {
-        event.preventDefault();
-        await flexToTodo(flexToTodoId);
         return;
       }
       const dropDraftId = event.target.dataset.dropDraft;
@@ -1629,39 +1642,11 @@ import { autofill, checklistItemsPayload, checklistPayload, clockLabel, clockVal
         await dropTodo(dropTodoId);
         return;
       }
-      const toFlexId = event.target.dataset.todoToFlex;
-      if (toFlexId) {
-        event.preventDefault();
-        const item = findTodo(toFlexId);
-        if (item) sheetTodoToFlex(item);
-        return;
-      }
-      const toAnchorId = event.target.dataset.todoToAnchor;
-      if (toAnchorId) {
-        event.preventDefault();
-        const item = findTodo(toAnchorId);
-        if (item) sheetTodoToAnchor(item);
-        return;
-      }
       const placeAtBtn = event.target.closest ? event.target.closest("[data-place-at]") : null;
       const placeAt = placeAtBtn ? placeAtBtn.dataset.placeAt : event.target.dataset?.placeAt;
       if (placeAt) {
         event.preventDefault();
         await placeFlexAt(placeAt, (placeAtBtn || event.target).dataset.start);
-        return;
-      }
-      const placeId = event.target.dataset.place;
-      if (placeId) {
-        event.preventDefault();
-        const item = findFlex(placeId);
-        if (item) sheetPlace(item);
-        return;
-      }
-      const changeDurationId = event.target.dataset.changeDuration;
-      if (changeDurationId) {
-        event.preventDefault();
-        const item = findFlex(changeDurationId);
-        if (item) sheetChangeDuration(item);
         return;
       }
       const promoteChecklistId = event.target.dataset.promoteChecklist;
@@ -1891,34 +1876,6 @@ import { autofill, checklistItemsPayload, checklistPayload, clockLabel, clockVal
         });
         return;
       }
-      if (form.id === "edit-todo") {
-        await mutate("/api/edit", {
-          kind: "todo",
-          id: form.dataset.id,
-          name: form.name.value,
-          note: form.note.value
-        });
-        return;
-      }
-      if (form.id === "todo-to-flex") {
-        await mutate("/api/convert", {
-          kind: "todo-to-flex",
-          id: form.dataset.id,
-          duration_minutes: Number(form.duration_minutes.value)
-        });
-        return;
-      }
-      if (form.id === "todo-to-anchor") {
-        const duration = resolveDurationMinutes(form);
-        if (duration === null) return;
-        await mutate("/api/convert", {
-          kind: "todo-to-anchor",
-          id: form.dataset.id,
-          start: clockValue(form.start),
-          duration_minutes: duration
-        });
-        return;
-      }
       if (form.id === "edit-draft") {
         await mutate("/api/edit", {
           kind: "draft",
@@ -1931,36 +1888,26 @@ import { autofill, checklistItemsPayload, checklistPayload, clockLabel, clockVal
         await placeFlexAt(form.dataset.id, clockValue(form.start));
         return;
       }
-      if (form.id === "change-duration-flex") {
-        await mutate("/api/change-duration", {
+      if (form.id === "edit-activity" || form.id === "edit-anchor" || form.id === "edit-flex" || form.id === "edit-todo") {
+        const kind = form.kind ? form.kind.value : (form.id === "edit-anchor" ? "anchor" : form.id === "edit-flex" ? "flex" : "todo");
+        const payload = {
+          kind: kind,
           id: form.dataset.id,
-          duration_minutes: Number(form.duration_minutes.value)
-        });
-        return;
-      }
-      if (form.id === "edit-anchor") {
-        const duration = resolveDurationMinutes(form);
-        if (duration === null) return;
-        await mutate("/api/edit", {
-          kind: "anchor",
-          id: form.dataset.id,
-          name: form.name.value,
-          start: clockValue(form.start),
-          duration_minutes: duration,
-          checklist: checklistPayload(form),
-          checklist_items: checklistItemsPayload(form)
-        });
-        return;
-      }
-      if (form.id === "edit-flex") {
-        await mutate("/api/edit", {
-          kind: "flex",
-          id: form.dataset.id,
-          name: form.name.value,
-          duration_minutes: Number(form.duration_minutes.value),
-          checklist: checklistPayload(form),
-          checklist_items: checklistItemsPayload(form)
-        });
+          name: form.name.value
+        };
+        if (kind === "todo") {
+          payload.note = form.note ? form.note.value : "";
+        } else {
+          const duration = resolveDurationMinutes(form);
+          if (duration === null) return;
+          payload.duration_minutes = duration;
+          if (kind === "anchor") {
+            payload.start = clockValue(form.start);
+          }
+          payload.checklist = checklistPayload(form);
+          payload.checklist_items = checklistItemsPayload(form);
+        }
+        await mutate("/api/edit", payload);
         return;
       }
       if (form.id === "edit-bounds") {

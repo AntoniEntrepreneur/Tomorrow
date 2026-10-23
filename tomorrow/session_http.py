@@ -33,13 +33,11 @@ from tomorrow.session import (
     apply_named_day_template,
     apply_template,
     change_flex_duration,
-    convert_flex_to_todo,
-    convert_todo_to_anchor,
-    convert_todo_to_flex,
     decline_template,
     drop_draft,
     drop_flex,
     drop_todo,
+    edit_activity,
     edit_anchor,
     edit_bounds,
     edit_draft,
@@ -321,33 +319,24 @@ class SessionHandler(BaseHTTPRequestHandler):
                     return
                 self._send_json(200, view)
                 return
-            if kind == "flex":
+            if kind in ("anchor", "flex", "todo"):
+                item_id = payload.get("id")
+                if not item_id:
+                    self._send_json(400, {"error": "Item ID is required"})
+                    return
                 duration = payload.get("duration_minutes")
                 try:
-                    view = edit_flex(
+                    view = edit_activity(
                         self.server.repo_root,
-                        item_id=payload["id"],
+                        item_id=item_id,
+                        kind=kind,
                         name=payload.get("name"),
-                        duration_minutes=int(duration) if duration is not None else None,
+                        start=payload.get("start"),
+                        duration_minutes=int(duration) if duration is not None and str(duration).strip() != "" else None,
                         checklist=_optional_checklist(payload),
                         checklist_items=_optional_checklist_items(payload),
-                        **self._view_args(),
-                    )
-                except KeyError as exc:
-                    self._send_json(400, {"error": f"Item not found: {exc.args[0] if exc.args else ''}"})
-                    return
-                except ValueError as exc:
-                    self._send_json(400, {"error": str(exc)})
-                    return
-                self._send_json(200, view)
-                return
-            if kind == "todo":
-                try:
-                    view = edit_todo(
-                        self.server.repo_root,
-                        item_id=payload["id"],
-                        name=payload.get("name"),
                         note=payload.get("note"),
+                        remove=bool(payload.get("remove")),
                         **self._view_args(),
                     )
                 except KeyError as exc:
@@ -358,29 +347,7 @@ class SessionHandler(BaseHTTPRequestHandler):
                     return
                 self._send_json(200, view)
                 return
-            if kind != "anchor":
-                self.send_error(404)
-                return
-            duration = payload.get("duration_minutes")
-            try:
-                view = edit_anchor(
-                    self.server.repo_root,
-                    item_id=payload["id"],
-                    name=payload.get("name"),
-                    start=payload.get("start"),
-                    duration_minutes=int(duration) if duration is not None else None,
-                    checklist=_optional_checklist(payload),
-                    checklist_items=_optional_checklist_items(payload),
-                    remove=bool(payload.get("remove")),
-                    **self._view_args(),
-                )
-            except KeyError as exc:
-                self._send_json(400, {"error": f"Item not found: {exc.args[0] if exc.args else ''}"})
-                return
-            except ValueError as exc:
-                self._send_json(400, {"error": str(exc)})
-                return
-            self._send_json(200, view)
+            self.send_error(404)
             return
         if path == "/api/place":
             payload = self._read_json()
@@ -481,42 +448,6 @@ class SessionHandler(BaseHTTPRequestHandler):
                     name=payload.get("name") or "",
                     **self._view_args(),
                 )
-            except KeyError as exc:
-                self._send_json(400, {"error": f"Item not found: {exc.args[0] if exc.args else ''}"})
-                return
-            except ValueError as exc:
-                self._send_json(400, {"error": str(exc)})
-                return
-            self._send_json(200, view)
-            return
-        if path == "/api/convert":
-            payload = self._read_json()
-            kind = payload.get("kind")
-            try:
-                if kind == "todo-to-flex":
-                    view = convert_todo_to_flex(
-                        self.server.repo_root,
-                        item_id=payload["id"],
-                        duration_minutes=int(payload["duration_minutes"]),
-                        **self._view_args(),
-                    )
-                elif kind == "todo-to-anchor":
-                    view = convert_todo_to_anchor(
-                        self.server.repo_root,
-                        item_id=payload["id"],
-                        start=payload["start"],
-                        duration_minutes=int(payload["duration_minutes"]),
-                        **self._view_args(),
-                    )
-                elif kind == "flex-to-todo":
-                    view = convert_flex_to_todo(
-                        self.server.repo_root,
-                        item_id=payload["id"],
-                        **self._view_args(),
-                    )
-                else:
-                    self.send_error(404)
-                    return
             except KeyError as exc:
                 self._send_json(400, {"error": f"Item not found: {exc.args[0] if exc.args else ''}"})
                 return
@@ -651,8 +582,10 @@ def bind_session_server(
     output_dir: Path,
     now: datetime | None = None,
     opener: Callable[[Request], object] = _default_opener,
+    host: str = SESSION_HOST,
+    port: int = SESSION_PORT,
 ) -> SessionHTTPServer:
-    server = SessionHTTPServer((SESSION_HOST, SESSION_PORT), SessionHandler)
+    server = SessionHTTPServer((host, port), SessionHandler)
     server.repo_root = repo_root
     server.output_dir = output_dir
     server.now = now
