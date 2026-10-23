@@ -3978,7 +3978,7 @@ def test_seed_icloud_items_seeds_overdue_draft_with_overdue_flag(
     assert view["drafts"][2]["overdue"] is False
 
 
-def test_dropped_overdue_draft_persists_across_session_refresh(
+def test_dropping_overdue_draft_persists_across_session_reload_and_refresh(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from tomorrow.icloud import ClassifiedIcloudItems, ImportedItem
@@ -3998,12 +3998,241 @@ def test_dropped_overdue_draft_persists_across_session_refresh(
     now = datetime(2026, 8, 10, 22, 0)
     document = load_session(tmp_path, output_dir=tmp_path / "Desktop", now=now)
     assert len(document["drafts"]) == 1
+    assert document["drafts"][0]["overdue"] is True
+    assert "draft|Overdue task|" in document["icloud_seen"]
     draft_id = document["drafts"][0]["id"]
 
     drop_draft(tmp_path, output_dir=tmp_path / "Desktop", item_id=draft_id, now=now)
 
+    # Across reload / restart: load_session reads from disk
+    reloaded = load_session(tmp_path, output_dir=tmp_path / "Desktop", now=now)
+    assert reloaded["drafts"] == []
+    assert "draft|Overdue task|" in reloaded["icloud_seen"]
+
+    # Refreshing icloud does not resurrect dropped overdue draft
     refreshed = refresh_icloud_items(tmp_path, output_dir=tmp_path / "Desktop", now=now)
     assert refreshed["drafts"] == []
+    assert "draft|Overdue task|" in refreshed["icloud_seen"]
+
+
+def test_resetting_session_restores_dropped_overdue_drafts(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from datetime import time
+    from tomorrow.icloud import ClassifiedIcloudItems, ImportedItem
+    from tomorrow.session import drop_draft, load_session, reset_session
+
+    _write_defaults(tmp_path)
+
+    def fake_import(data_dir, plan_date, *, existing_anchors):
+        return ClassifiedIcloudItems(
+            anchors=[
+                ImportedItem(name="Morning sync", start=time(9, 0), duration_minutes=30),
+            ],
+            drafts=[
+                ImportedItem(name="Overdue invoice", overdue=True, note="Invoice #42"),
+                ImportedItem(name="Buy milk", overdue=False),
+            ],
+        )
+
+    monkeypatch.setattr("tomorrow.session.try_import_icloud_items", fake_import)
+
+    now = datetime(2026, 8, 10, 22, 0)
+    document = load_session(tmp_path, output_dir=tmp_path / "Desktop", now=now)
+    assert len(document["drafts"]) == 2
+    assert document["drafts"][0]["name"] == "Overdue invoice"
+    assert document["drafts"][0]["overdue"] is True
+    assert document["drafts"][0]["note"] == "Invoice #42"
+
+    overdue_id = document["drafts"][0]["id"]
+    drop_draft(tmp_path, output_dir=tmp_path / "Desktop", item_id=overdue_id, now=now)
+
+    reloaded = load_session(tmp_path, output_dir=tmp_path / "Desktop", now=now)
+    assert len(reloaded["drafts"]) == 1
+    assert reloaded["drafts"][0]["name"] == "Buy milk"
+
+    reset = reset_session(tmp_path, output_dir=tmp_path / "Desktop", now=now)
+    assert len(reset["drafts"]) == 2
+    assert reset["drafts"][0]["name"] == "Overdue invoice"
+    assert reset["drafts"][0]["overdue"] is True
+    assert reset["drafts"][0]["note"] == "Invoice #42"
+    assert reset["drafts"][1]["name"] == "Buy milk"
+    assert reset["drafts"][1]["overdue"] is False
+    assert len(reset["anchors"]) == 1
+    assert reset["anchors"][0]["name"] == "Morning sync"
+
+    persisted = load_session(tmp_path, output_dir=tmp_path / "Desktop", now=now)
+    assert "draft|Overdue invoice|" in persisted["icloud_seen"]
+
+
+def test_overdue_reminders_reappear_on_subsequent_plan_date(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from tomorrow.icloud import ClassifiedIcloudItems, ImportedItem
+    from tomorrow.session import drop_draft, load_session
+
+    _write_defaults(tmp_path)
+
+    def fake_import(data_dir, plan_date, *, existing_anchors):
+        return ClassifiedIcloudItems(
+            drafts=[
+                ImportedItem(name="Uncompleted chore", overdue=True, note="Clean garage"),
+            ]
+        )
+
+    monkeypatch.setattr("tomorrow.session.try_import_icloud_items", fake_import)
+
+    # Day 1
+    now_day1 = datetime(2026, 8, 10, 22, 0)
+    doc_day1 = load_session(tmp_path, output_dir=tmp_path / "Desktop", now=now_day1)
+    assert len(doc_day1["drafts"]) == 1
+    assert doc_day1["drafts"][0]["name"] == "Uncompleted chore"
+    assert doc_day1["drafts"][0]["overdue"] is True
+
+    # Drop it on Day 1
+    chore_id = doc_day1["drafts"][0]["id"]
+    drop_draft(tmp_path, output_dir=tmp_path / "Desktop", item_id=chore_id, now=now_day1)
+    doc_day1_after = load_session(tmp_path, output_dir=tmp_path / "Desktop", now=now_day1)
+    assert doc_day1_after["drafts"] == []
+
+    # Day 2: New session initialized on a subsequent plan date
+    now_day2 = datetime(2026, 8, 11, 22, 0)
+    doc_day2 = load_session(tmp_path, output_dir=tmp_path / "Desktop", now=now_day2)
+    assert doc_day2["plan_date"] == "2026-08-12"
+    # Unfinished overdue reminder reappears fresh
+    assert len(doc_day2["drafts"]) == 1
+    assert doc_day2["drafts"][0]["name"] == "Uncompleted chore"
+    assert doc_day2["drafts"][0]["overdue"] is True
+    assert doc_day2["drafts"][0]["note"] == "Clean garage"
+
+
+def test_promoting_overdue_draft_to_anchor_flex_or_todo_produces_clean_items(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from tomorrow.icloud import ClassifiedIcloudItems, ImportedItem
+    from tomorrow.session import load_session, promote_draft, session_view
+
+    _write_defaults(tmp_path)
+
+    def fake_import(data_dir, plan_date, *, existing_anchors):
+        return ClassifiedIcloudItems(
+            drafts=[
+                ImportedItem(name="Dentist", overdue=True),
+                ImportedItem(name="Gym workout", overdue=True),
+                ImportedItem(name="Review PR", overdue=True, note="Check unit tests"),
+            ]
+        )
+
+    monkeypatch.setattr("tomorrow.session.try_import_icloud_items", fake_import)
+
+    now = datetime(2026, 8, 10, 22, 0)
+    document = load_session(tmp_path, output_dir=tmp_path / "Desktop", now=now)
+    assert len(document["drafts"]) == 3
+
+    id_anchor = document["drafts"][0]["id"]
+    id_flex = document["drafts"][1]["id"]
+    id_todo = document["drafts"][2]["id"]
+
+    # 1. Promote to Anchor
+    promote_draft(
+        tmp_path,
+        output_dir=tmp_path / "Desktop",
+        item_id=id_anchor,
+        kind="anchor",
+        start="10:00",
+        duration_minutes=45,
+        now=now,
+    )
+
+    # 2. Promote to Flex
+    promote_draft(
+        tmp_path,
+        output_dir=tmp_path / "Desktop",
+        item_id=id_flex,
+        kind="flex",
+        duration_minutes=60,
+        now=now,
+    )
+
+    # 3. Promote to To-do
+    promote_draft(
+        tmp_path,
+        output_dir=tmp_path / "Desktop",
+        item_id=id_todo,
+        kind="todo",
+        now=now,
+    )
+
+    view = session_view(tmp_path, output_dir=tmp_path / "Desktop", now=now)
+    assert view["drafts"] == []
+
+    # Anchor checks
+    assert len(view["anchors"]) == 1
+    anchor = view["anchors"][0]
+    assert anchor["name"] == "Dentist"
+    assert anchor["start"] == "10:00"
+    assert anchor["duration_minutes"] == 45
+    assert anchor["source"] == "icloud"
+    assert "overdue" not in anchor
+
+    # Flex checks
+    assert len(view["flexes"]) == 1
+    flex = view["flexes"][0]
+    assert flex["name"] == "Gym workout"
+    assert flex["duration_minutes"] == 60
+    assert flex["source"] == "icloud"
+    assert "overdue" not in flex
+
+    # To-do checks
+    assert len(view["todos"]) == 1
+    todo = view["todos"][0]
+    assert todo["name"] == "Review PR"
+    assert todo["note"] == "Check unit tests"
+    assert "overdue" not in todo
+
+    # Check backend session JSON directly on disk
+    persisted = load_session(tmp_path, output_dir=tmp_path / "Desktop", now=now)
+    assert "overdue" not in persisted["anchors"][0]
+    assert "overdue" not in persisted["flexes"][0]
+    assert "overdue" not in persisted["todos"][0]
+
+
+def test_overdue_draft_note_carries_over_cleanly_when_promoted_to_todo(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from tomorrow.icloud import ClassifiedIcloudItems, ImportedItem
+    from tomorrow.session import load_session, promote_draft
+
+    _write_defaults(tmp_path)
+
+    note_text = "Important details: call 555-1234 before noon\nRef: ABC-99"
+    monkeypatch.setattr(
+        "tomorrow.session.try_import_icloud_items",
+        lambda data_dir, plan_date, *, existing_anchors: ClassifiedIcloudItems(
+            drafts=[ImportedItem(name="Overdue billing inquiry", overdue=True, note=note_text)]
+        ),
+    )
+
+    now = datetime(2026, 8, 10, 22, 0)
+    document = load_session(tmp_path, output_dir=tmp_path / "Desktop", now=now)
+    draft = document["drafts"][0]
+    assert draft["name"] == "Overdue billing inquiry"
+    assert draft["note"] == note_text
+    assert draft["overdue"] is True
+
+    view = promote_draft(
+        tmp_path,
+        output_dir=tmp_path / "Desktop",
+        item_id=draft["id"],
+        kind="todo",
+        now=now,
+    )
+
+    assert len(view["todos"]) == 1
+    todo = view["todos"][0]
+    assert todo["name"] == "Overdue billing inquiry"
+    assert todo["note"] == note_text
+    assert "overdue" not in todo
 
 
 
