@@ -1,7 +1,7 @@
 from datetime import time, timedelta
 from pathlib import Path
 
-from tomorrow.activity_templates import (
+from tomorrow.library import (
     ActivityTemplate,
     load_activity_template_library,
     suggest_activity_template,

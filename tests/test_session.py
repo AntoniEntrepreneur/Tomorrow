@@ -17,7 +17,7 @@ from tomorrow.domain import (
     finalize_plan,
     parse_clock,
 )
-from tomorrow.activity_templates import activity_templates_dir
+from tomorrow.library import activity_templates_dir
 from tomorrow.defaults import DayBounds
 from tomorrow.library import save_activity_template, save_day_template
 from tomorrow.session import save_session, save_template_mode, template_mode_view
@@ -4944,7 +4944,7 @@ def test_apply_does_not_remove_a_hand_added_flex_with_matching_name(
 def test_promote_checklist_writes_a_new_library_checklist_from_an_anchor(
     tmp_path: Path,
 ) -> None:
-    from tomorrow.checklists import load_checklist_library
+    from tomorrow.library import load_checklist_library
 
     _write_defaults(tmp_path)
     added = add_anchor(
@@ -4982,7 +4982,7 @@ def test_promote_checklist_writes_a_new_library_checklist_from_an_anchor(
 
 
 def test_promote_checklist_from_a_flex_leaves_the_flex_literal(tmp_path: Path) -> None:
-    from tomorrow.checklists import load_checklist_library
+    from tomorrow.library import load_checklist_library
 
     _write_defaults(tmp_path)
     added = add_flex(

@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from tomorrow.checklists import Checklist, load_checklist_library, suggest_checklist
+from tomorrow.library import Checklist, load_checklist_library, suggest_checklist
 
 
 def test_load_checklist_library_reads_named_lists_from_data_dir(tmp_path: Path) -> None:
