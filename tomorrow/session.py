@@ -746,6 +746,22 @@ def place_flex(
     return _commit(repo_root, document, mutate, output_dir=output_dir, now=now, opener=opener)
 
 
+def unplace_flex(
+    repo_root: Path,
+    *,
+    item_id: str,
+    output_dir: Path,
+    now: datetime | None = None,
+    opener: Callable[[Request], object] = _default_opener,
+) -> dict:
+    document = load_session(repo_root, output_dir=output_dir, now=now)
+
+    def mutate(current: dict) -> None:
+        _require_flex(current, item_id)["start"] = None
+
+    return _commit(repo_root, document, mutate, output_dir=output_dir, now=now, opener=opener)
+
+
 def change_flex_duration(
     repo_root: Path,
     *,

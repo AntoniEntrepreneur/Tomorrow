@@ -387,3 +387,54 @@ def test_obsolete_conversion_routes_are_removed(tmp_path: Path) -> None:
             assert status == 404, f"Route {route} should return 404 Not Found"
     finally:
         _stop_server(server, thread)
+
+
+def test_unplace_route_and_undo_redo_over_http(tmp_path: Path) -> None:
+    _write_defaults(tmp_path)
+    now = datetime(2026, 8, 10, 22, 0)
+    view = add_flex(
+        tmp_path,
+        output_dir=_desktop_dir(tmp_path),
+        name="Reading",
+        duration_minutes=45,
+        now=now,
+    )
+    item_id = view["flexes"][0]["id"]
+    place_flex(
+        tmp_path,
+        output_dir=_desktop_dir(tmp_path),
+        item_id=item_id,
+        start="14:00",
+        now=now,
+    )
+
+    server, thread = _start_server(tmp_path, now=now)
+    try:
+        # Invalid / unknown ID returns 400 Bad Request
+        status, body = _http(
+            server, "POST", "/api/unplace", payload={"id": "nonexistent-id"}
+        )
+        assert status == 400
+        assert "error" in body
+
+        # Valid ID unplaces flex, returns 200 OK and updated session view
+        status, body = _http(server, "POST", "/api/unplace", payload={"id": item_id})
+        assert status == 200
+        unplaced = next(f for f in body["flexes"] if f["id"] == item_id)
+        assert unplaced["start"] is None
+        assert unplaced["name"] == "Reading"
+
+        # Undo over HTTP restores placed start time
+        status, body = _http(server, "POST", "/api/undo")
+        assert status == 200
+        restored = next(f for f in body["flexes"] if f["id"] == item_id)
+        assert restored["start"] == "14:00"
+
+        # Redo over HTTP clears start time again
+        status, body = _http(server, "POST", "/api/redo")
+        assert status == 200
+        redone = next(f for f in body["flexes"] if f["id"] == item_id)
+        assert redone["start"] is None
+    finally:
+        _stop_server(server, thread)
+

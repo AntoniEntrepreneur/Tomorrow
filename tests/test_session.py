@@ -47,6 +47,7 @@ from tomorrow.session import (
     load_session,
     suggest_activity,
     place_flex,
+    unplace_flex,
     promote_checklist,
     promote_draft,
     reset_session,
@@ -5443,3 +5444,73 @@ def test_overnight_bounds_repair_orders_after_midnight_and_is_one_undo_step(
     redone = redo_session(tmp_path, output_dir=tmp_path / "Desktop", now=now)
     assert redone["bounds"]["wake"] == "23:00"
     assert redone["bounds"]["sleep"] == "05:00"
+
+
+def test_unplace_flex_clears_start_and_preserves_attributes(tmp_path: Path) -> None:
+    _write_defaults(tmp_path)
+    now = datetime(2026, 8, 10, 22, 0)
+    flex_view = add_flex(
+        tmp_path,
+        output_dir=tmp_path / "Desktop",
+        name="Reading",
+        duration_minutes=45,
+        checklist_items=["chapter 1", "chapter 2"],
+        now=now,
+    )
+    flex_id = flex_view["flexes"][0]["id"]
+    placed = place_flex(
+        tmp_path, output_dir=tmp_path / "Desktop", item_id=flex_id, start="10:00", now=now
+    )
+    assert placed["flexes"][0]["start"] == "10:00"
+
+    unplaced = unplace_flex(
+        tmp_path, output_dir=tmp_path / "Desktop", item_id=flex_id, now=now
+    )
+    item = next(f for f in unplaced["flexes"] if f["id"] == flex_id)
+    assert item["start"] is None
+    assert item["name"] == "Reading"
+    assert item["duration_minutes"] == 45
+    assert item["checklist_items"] == ["chapter 1", "chapter 2"]
+
+    persisted = json.loads((tmp_path / "data" / "session.json").read_text(encoding="utf-8"))
+    persisted_item = next(f for f in persisted["flexes"] if f["id"] == flex_id)
+    assert persisted_item["start"] is None
+    assert persisted_item["name"] == "Reading"
+    assert persisted_item["duration_minutes"] == 45
+
+
+def test_unplace_flex_unknown_id_raises_key_error(tmp_path: Path) -> None:
+    _write_defaults(tmp_path)
+    now = datetime(2026, 8, 10, 22, 0)
+    with pytest.raises(KeyError):
+        unplace_flex(
+            tmp_path, output_dir=tmp_path / "Desktop", item_id="nonexistent-id", now=now
+        )
+
+
+def test_unplace_flex_undo_and_redo_roundtrip(tmp_path: Path) -> None:
+    _write_defaults(tmp_path)
+    now = datetime(2026, 8, 10, 22, 0)
+    flex_view = add_flex(
+        tmp_path,
+        output_dir=tmp_path / "Desktop",
+        name="Study",
+        duration_minutes=30,
+        now=now,
+    )
+    flex_id = flex_view["flexes"][0]["id"]
+    place_flex(
+        tmp_path, output_dir=tmp_path / "Desktop", item_id=flex_id, start="14:00", now=now
+    )
+
+    unplaced = unplace_flex(
+        tmp_path, output_dir=tmp_path / "Desktop", item_id=flex_id, now=now
+    )
+    assert unplaced["flexes"][0]["start"] is None
+
+    undone = undo_session(tmp_path, output_dir=tmp_path / "Desktop", now=now)
+    assert undone["flexes"][0]["start"] == "14:00"
+
+    redone = redo_session(tmp_path, output_dir=tmp_path / "Desktop", now=now)
+    assert redone["flexes"][0]["start"] is None
+
